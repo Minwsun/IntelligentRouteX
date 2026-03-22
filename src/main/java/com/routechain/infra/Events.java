@@ -52,6 +52,12 @@ public final class Events {
     public record AiInsight(String title, String description, String recommendation,
                             Instant timestamp) {}
 
+    // ── Timeline snapshot event ──────────────────────────────────────────
+    public record TimelineSnapshot(String formattedTime, double avgTraffic,
+                                    double weatherIntensity, double maxSurge,
+                                    int pendingOrders, int activeDrivers,
+                                    String roadDescription) {}
+
     // ── Metrics snapshot ────────────────────────────────────────────────
     public record MetricsSnapshot(double onTimePercent, double deadheadPercent,
                                    double netPerHour, double avgEtaMinutes,

@@ -35,7 +35,12 @@ public class SimulationEngine {
     private volatile WeatherProfile weatherProfile = WeatherProfile.CLEAR;
     private volatile double demandMultiplier = 1.0;
     private volatile int simulatedHour = 12;
+    private volatile int simulatedMinute = 0;
     private final Random rng = new Random(42);
+
+    // Timeline history buffer (last 1800 ticks = 30 simulated minutes)
+    private final Deque<TimelineDataPoint> timelineHistory = new ConcurrentLinkedDeque<>();
+    private static final int TIMELINE_HISTORY_MAX = 1800;
 
     // Metrics accumulators
     private volatile int totalDelivered = 0;
@@ -97,7 +102,14 @@ public class SimulationEngine {
     public List<Region> getRegions() { return Collections.unmodifiableList(regions); }
     public Map<String, Double> getCorridorSeverity() { return Collections.unmodifiableMap(corridorSeverity); }
     public int getSimulatedHour() { return simulatedHour; }
+    public int getSimulatedMinute() { return simulatedMinute; }
+    public String getSimulatedTimeFormatted() {
+        return String.format("%02d:%02d", simulatedHour, simulatedMinute);
+    }
     public long getTickCount() { return tickCounter.get(); }
+    public List<TimelineDataPoint> getTimelineHistory() {
+        return List.copyOf(timelineHistory);
+    }
     public int getTotalDelivered() { return totalDelivered; }
     public int getTotalCancelled() { return cancelledOrders.size(); }
 
@@ -113,7 +125,9 @@ public class SimulationEngine {
     private void tick() {
         try {
             long tick = tickCounter.incrementAndGet();
-            simulatedHour = (int) ((12 + tick / 60) % 24); // start at noon
+            long totalMinutes = 12 * 60 + tick; // start at noon, 1 tick = 1 simulated minute
+            simulatedHour = (int) ((totalMinutes / 60) % 24);
+            simulatedMinute = (int) (totalMinutes % 60);
 
             evolveWeather();
             evolveTraffic();
@@ -123,6 +137,7 @@ public class SimulationEngine {
             processDeliveries();
             detectSurges();
             computeMetrics();
+            recordTimelineSnapshot(tick);
 
             eventBus.publish(new SimulationTick(tick, Instant.now()));
         } catch (Exception e) {
@@ -492,6 +507,74 @@ public class SimulationEngine {
                 totalDelivered,
                 cancelledOrders.size()
         ));
+    }
+
+    // ── Timeline snapshot recorder ───────────────────────────────────────
+    private void recordTimelineSnapshot(long tick) {
+        // Average traffic severity across all corridors
+        double avgTraffic = corridorSeverity.values().stream()
+                .mapToDouble(Double::doubleValue).average().orElse(0);
+
+        // Weather intensity: average rain across regions
+        double avgWeather = regions.stream()
+                .mapToDouble(Region::getRainIntensity).average().orElse(0);
+
+        // Max surge score across regions
+        double maxSurge = 0;
+        for (Region region : regions) {
+            double surgeVal = switch (region.getSurgeSeverity()) {
+                case NORMAL -> 0.0;
+                case MEDIUM -> 0.4;
+                case HIGH -> 0.7;
+                case CRITICAL -> 1.0;
+            };
+            maxSurge = Math.max(maxSurge, surgeVal);
+        }
+
+        // Pending orders count
+        int pending = (int) activeOrders.stream()
+                .filter(o -> o.getStatus() == OrderStatus.PENDING_ASSIGNMENT
+                        || o.getStatus() == OrderStatus.CONFIRMED)
+                .count();
+
+        // Active drivers count
+        int activeDriverCount = (int) drivers.stream()
+                .filter(d -> d.getState() != DriverState.OFFLINE).count();
+
+        // Road description
+        String roadDesc = buildRoadDescription(avgTraffic, avgWeather, maxSurge);
+
+        TimelineDataPoint dp = new TimelineDataPoint(
+                tick, simulatedHour, simulatedMinute,
+                getSimulatedTimeFormatted(),
+                avgTraffic, avgWeather, maxSurge,
+                pending, activeDriverCount, roadDesc
+        );
+
+        timelineHistory.addLast(dp);
+        while (timelineHistory.size() > TIMELINE_HISTORY_MAX) {
+            timelineHistory.pollFirst();
+        }
+
+        // Publish event for UI consumption
+        eventBus.publish(new TimelineSnapshot(
+                dp.formattedTime(), dp.avgTrafficSeverity(),
+                dp.weatherIntensity(), dp.maxSurgeScore(),
+                dp.pendingOrders(), dp.activeDrivers(), dp.roadDescription()
+        ));
+    }
+
+    private String buildRoadDescription(double avgTraffic, double avgWeather, double maxSurge) {
+        StringBuilder sb = new StringBuilder();
+        if (avgTraffic > 0.7) sb.append("Severe congestion. ");
+        else if (avgTraffic > 0.4) sb.append("Moderate traffic. ");
+        else sb.append("Roads clear. ");
+
+        if (avgWeather > 0.6) sb.append("Heavy rain, slippery roads. ");
+        else if (avgWeather > 0.2) sb.append("Light rain. ");
+
+        if (maxSurge >= 0.7) sb.append("Order surge active. ");
+        return sb.toString().trim();
     }
 
     // ── Utilities ────────────────────────────────────────────────────────

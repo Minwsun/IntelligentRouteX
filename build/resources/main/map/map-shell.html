@@ -6,27 +6,11 @@
     <title>RouteChain AI Map</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { width: 100%; height: 100%; overflow: hidden; background: #0c0e10; }
-        #map { width: 100%; height: 100%; background: #0c0e10; }
-        #loading {
-            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-            display: flex; align-items: center; justify-content: center;
-            background: #0c0e10; z-index: 9999; color: #99f7ff;
-            font-family: 'Segoe UI', sans-serif; font-size: 14px;
-        }
-        #loading.hidden { display: none; }
-
-        /* Fix tile misalignment in JavaFX WebView */
-        .leaflet-tile-container { -webkit-transform-style: flat !important; transform-style: flat !important; }
-        .leaflet-tile { -webkit-backface-visibility: visible !important; backface-visibility: visible !important; }
-        .leaflet-fade-anim .leaflet-tile,
-        .leaflet-fade-anim .leaflet-popup { -webkit-transition: none !important; transition: none !important; }
-        .leaflet-zoom-anim .leaflet-zoom-animated { -webkit-transition: none !important; transition: none !important; }
-        .leaflet-pan-anim .leaflet-tile { -webkit-transition: none !important; transition: none !important; }
-
+        html, body { width: 100%; height: 100%; overflow: hidden; background: #1e2022; }
+        #map { width: 100%; height: 100%; background: #1e2022; }
+        /* NO CSS filter — Esri Dark Gray tiles are dark by design */
         .leaflet-control-attribution { display: none !important; }
         .leaflet-control-zoom {
             border: none !important; margin-right: 16px !important; margin-bottom: 80px !important;
@@ -34,22 +18,21 @@
         .leaflet-control-zoom a {
             background: rgba(29,32,34,0.85) !important; color: #99f7ff !important;
             border: 1px solid rgba(70,72,74,0.3) !important;
-            width: 32px !important; height: 32px !important; line-height: 32px !important; font-size: 16px !important;
+            width: 32px !important; height: 32px !important; line-height: 32px !important;
         }
         .leaflet-control-zoom a:hover { background: rgba(29,32,34,0.95) !important; }
-
         .driver-dot { border-radius: 50%; cursor: pointer; }
         .driver-idle {
             background: #00ffab;
-            box-shadow: 0 0 10px rgba(0,255,171,0.7), 0 0 20px rgba(0,255,171,0.3);
+            box-shadow: 0 0 6px rgba(0,255,171,0.6), 0 0 12px rgba(0,255,171,0.2);
         }
         .driver-busy {
             background: #99f7ff;
-            box-shadow: 0 0 10px rgba(153,247,255,0.7), 0 0 20px rgba(153,247,255,0.3);
+            box-shadow: 0 0 6px rgba(153,247,255,0.6), 0 0 12px rgba(153,247,255,0.2);
         }
         .order-dot {
-            border-radius: 50%; background: #ff716c;
-            box-shadow: 0 0 8px rgba(255,113,108,0.6);
+            border-radius: 50%; background: rgba(255,113,108,0.45);
+            box-shadow: 0 0 2px rgba(255,113,108,0.2);
         }
         .driver-tooltip {
             background: rgba(29,32,34,0.9) !important; border: 1px solid rgba(153,247,255,0.3) !important;
@@ -61,422 +44,304 @@
     </style>
 </head>
 <body>
-<div id="loading">⏳ Loading HCMC map tiles...</div>
 <div id="map"></div>
 <script>
 (function() {
     'use strict';
 
-    var SUBDOMAINS = 'abcd';
-    var TILE_URL_TPL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png';
-    var CENTER = [10.7769, 106.7009];
-    var INIT_ZOOM  = 13;
-    var MIN_ZOOM   = 12;
-    var MAX_ZOOM   = 15;
-    var HCMC_SW    = [10.65, 106.55];
-    var HCMC_NE    = [10.92, 106.85];
+    // ════════════════════════════════════════════════════════════════════
+    // 1. MAP INSTANCE — created ONCE, preferCanvas for performance
+    // ════════════════════════════════════════════════════════════════════
+    var map = L.map('map', {
+        center: [10.7769, 106.7009], zoom: 13,
+        minZoom: 11, maxZoom: 17,
+        preferCanvas: true,
+        zoomControl: true, attributionControl: false,
+        zoomAnimation: true, fadeAnimation: true,
+        markerZoomAnimation: true, inertia: true,
+        inertiaDeceleration: 3000, inertiaMaxSpeed: 1500,
+        zoomSnap: 0.5, zoomDelta: 1,
+        wheelPxPerZoomLevel: 120,
+        wheelDebounceTime: 80
+    });
+    map.setMaxBounds(L.latLngBounds([10.60, 106.50], [10.95, 106.90]));
 
-    // ── Tile preloader ──────────────────────────────────────────────────
-    function latLngToTile(lat, lng, zoom) {
-        var n = Math.pow(2, zoom);
-        var x = Math.floor((lng + 180) / 360 * n);
-        var latRad = lat * Math.PI / 180;
-        var y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
-        return { x: x, y: y };
-    }
+    // ── Esri Dark Gray Base (natively dark — NO CSS filter needed) ──
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 17, minZoom: 11,
+        keepBuffer: 3,
+        updateWhenZooming: false,
+        updateWhenIdle: false
+    }).addTo(map);
 
-    function buildTileUrl(x, y, z) {
-        var s = SUBDOMAINS[(x + y) % SUBDOMAINS.length];
-        return TILE_URL_TPL.replace('{s}', s).replace('{z}', z).replace('{x}', x).replace('{y}', y);
-    }
+    // ── Esri Dark Gray Reference (labels on top of base) ──
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 17, minZoom: 11,
+        keepBuffer: 3,
+        updateWhenZooming: false,
+        updateWhenIdle: false
+    }).addTo(map);
 
-    function preloadTiles(zoom, callback) {
-        var swTile = latLngToTile(HCMC_SW[0], HCMC_SW[1], zoom);
-        var neTile = latLngToTile(HCMC_NE[0], HCMC_NE[1], zoom);
-        var minX = Math.min(swTile.x, neTile.x);
-        var maxX = Math.max(swTile.x, neTile.x);
-        var minY = Math.min(swTile.y, neTile.y);
-        var maxY = Math.max(swTile.y, neTile.y);
+    // ════════════════════════════════════════════════════════════════════
+    // 2. PERSISTENT LAYER STATE — never cleared, only patched
+    // ════════════════════════════════════════════════════════════════════
+    var driverMarkers = {};       // id -> L.marker (persistent, only setLatLng)
+    var orderMarkers = {};        // id -> L.marker
+    var driverRouteLayers = {};   // driverId -> L.layerGroup
+    var driverRouteHashes = {};   // driverId -> hash
+    var trafficLayer = L.layerGroup().addTo(map);
+    var weatherLayer = L.layerGroup().addTo(map);
+    var roadNetLayer = L.layerGroup().addTo(map);
+    var routeParent = L.layerGroup().addTo(map);
+    var lastTrafficHash = '';
+    var lastWeatherHash = '';
 
-        var urls = [];
-        for (var x = minX; x <= maxX; x++) {
-            for (var y = minY; y <= maxY; y++) {
-                urls.push(buildTileUrl(x, y, zoom));
-            }
-        }
+    // Animation state
+    var driverPositions = {};     // id -> { cur:[lat,lng], tgt:[lat,lng], state, name }
+    var lastAnimTime = 0;
 
-        var total = urls.length;
-        var loaded = 0;
-        if (total === 0) { callback(); return; }
+    // ════════════════════════════════════════════════════════════════════
+    // 3. PUBLIC API — defined immediately so Java can call anytime
+    // ════════════════════════════════════════════════════════════════════
+    window.appMap = {
 
-        urls.forEach(function(url) {
-            var img = new Image();
-            img.onload = img.onerror = function() {
-                loaded++;
-                if (loaded >= total) callback();
-            };
-            img.crossOrigin = 'anonymous';
-            img.src = url;
-        });
-    }
+        /**
+         * Single entry point: apply a batch frame from Java.
+         * Only patches data that is present in the frame.
+         * NEVER rebuilds map/layers. Only moves markers and updates polylines.
+         */
+        applyFrame: function(frameJson) {
+            try {
+                var frame = (typeof frameJson === 'string') ? JSON.parse(frameJson) : frameJson;
 
-    // ── Preload zoom 12, 13, 14 then init map ──────────────────────────
-    var zoomsToPreload = [13, 12, 14];
-    var preloadIdx = 0;
+                // ── Drivers: update animation targets ──────────────────
+                if (frame.drivers && frame.drivers.features) {
+                    var activeIds = {};
+                    frame.drivers.features.forEach(function(f) {
+                        var id = f.properties.id;
+                        activeIds[id] = true;
+                        var lat = f.geometry.coordinates[1];
+                        var lng = f.geometry.coordinates[0];
+                        var state = f.properties.state;
+                        var name = f.properties.name || id;
 
-    function preloadNext() {
-        if (preloadIdx >= zoomsToPreload.length) {
-            initMap();
-            return;
-        }
-        preloadTiles(zoomsToPreload[preloadIdx], function() {
-            preloadIdx++;
-            preloadNext();
-        });
-    }
-
-    preloadNext();
-
-    // ── Map init (called after all tiles cached) ────────────────────────
-    function initMap() {
-        document.getElementById('loading').classList.add('hidden');
-
-        var map = L.map('map', {
-            center: CENTER,
-            zoom: INIT_ZOOM,
-            minZoom: MIN_ZOOM,
-            maxZoom: MAX_ZOOM,
-            zoomControl: true,
-            attributionControl: false,
-            zoomAnimation: false,
-            fadeAnimation: false,
-            markerZoomAnimation: false,
-            inertia: false,
-            zoomSnap: 1,
-            zoomDelta: 1
-        });
-
-        map.setMaxBounds(L.latLngBounds(HCMC_SW, HCMC_NE));
-
-        L.tileLayer(TILE_URL_TPL, {
-            subdomains: SUBDOMAINS,
-            maxZoom: MAX_ZOOM,
-            minZoom: MIN_ZOOM,
-            keepBuffer: 10,
-            updateWhenZooming: false,
-            updateWhenIdle: true,
-            tileSize: 256,
-            zoomOffset: -1
-        }).addTo(map);
-
-        // ── Data stores ─────────────────────────────────────────────────
-        var driverMarkers = {};
-        var orderMarkers = {};
-        var trafficLines = L.layerGroup().addTo(map);
-        var weatherZones = L.layerGroup().addTo(map);
-        var routeLines = L.layerGroup().addTo(map);
-        var roadNetwork = L.layerGroup().addTo(map);
-        var heatLayer = null;
-        var layerVisibility = {
-            traffic: true, weather: true, drivers: true, orderHeat: true, routes: true
-        };
-
-        // ── OSRM route cache ────────────────────────────────────────────
-        var routeCache = {};
-        var pendingRoutes = {};
-        var MAX_CONCURRENT = 3;
-        var activeRequests = 0;
-        var routeQueue = [];
-
-        function requestOSRM(driverId, fromLat, fromLng, toLat, toLng, phase) {
-            var destKey = Math.round(toLat * 500) + '_' + Math.round(toLng * 500) + '_' + phase;
-            if (routeCache[driverId] && routeCache[driverId].destKey === destKey) return;
-            if (pendingRoutes[driverId]) return;
-
-            routeQueue.push({
-                id: driverId, fromLat: fromLat, fromLng: fromLng,
-                toLat: toLat, toLng: toLng, phase: phase, destKey: destKey
-            });
-            processRouteQueue();
-        }
-
-        function processRouteQueue() {
-            while (routeQueue.length > 0 && activeRequests < MAX_CONCURRENT) {
-                var task = routeQueue.shift();
-                executeOSRM(task);
-            }
-        }
-
-        function executeOSRM(task) {
-            activeRequests++;
-            pendingRoutes[task.id] = true;
-
-            var url = 'https://router.project-osrm.org/route/v1/driving/' +
-                task.fromLng + ',' + task.fromLat + ';' +
-                task.toLng + ',' + task.toLat + '?overview=full&geometries=geojson';
-
-            var xhr = new XMLHttpRequest();
-            xhr.open('GET', url, true);
-            xhr.timeout = 5000;
-            xhr.onload = function() {
-                activeRequests--;
-                delete pendingRoutes[task.id];
-                try {
-                    var data = JSON.parse(xhr.responseText);
-                    if (data.routes && data.routes[0]) {
-                        routeCache[task.id] = {
-                            destKey: task.destKey,
-                            coords: data.routes[0].geometry.coordinates,
-                            phase: task.phase,
-                            distance: data.routes[0].distance,
-                            duration: data.routes[0].duration
-                        };
-                        renderRouteLayer();
-                    }
-                } catch(e) {
-                    fallbackRoute(task);
-                }
-                processRouteQueue();
-            };
-            xhr.onerror = xhr.ontimeout = function() {
-                activeRequests--;
-                delete pendingRoutes[task.id];
-                fallbackRoute(task);
-                processRouteQueue();
-            };
-            xhr.send();
-        }
-
-        function fallbackRoute(task) {
-            // Multi-point interpolation for a more natural-looking straight line
-            var coords = interpolatePoints(
-                [task.fromLng, task.fromLat],
-                [task.toLng, task.toLat], 8);
-            routeCache[task.id] = {
-                destKey: task.destKey, coords: coords,
-                phase: task.phase, distance: 0, duration: 0
-            };
-            renderRouteLayer();
-        }
-
-        function interpolatePoints(from, to, steps) {
-            var pts = [];
-            for (var i = 0; i <= steps; i++) {
-                var t = i / steps;
-                pts.push([from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]);
-            }
-            return pts;
-        }
-
-        function renderRouteLayer() {
-            routeLines.clearLayers();
-            if (!layerVisibility.routes) return;
-
-            Object.keys(routeCache).forEach(function(driverId) {
-                var route = routeCache[driverId];
-                var coords = route.coords.map(function(c) { return [c[1], c[0]]; });
-                if (coords.length < 2) return;
-
-                var isPickup = route.phase === 'pickup';
-                var color = isPickup ? '#FFBE6B' : '#00ffab';
-
-                // Glow
-                L.polyline(coords, { color: color, weight: 10, opacity: 0.12 }).addTo(routeLines);
-                // Main line
-                L.polyline(coords, {
-                    color: color, weight: 3.5, opacity: 0.85,
-                    dashArray: isPickup ? '10,6' : null,
-                    lineCap: 'round', lineJoin: 'round'
-                }).addTo(routeLines);
-
-                // Destination circle
-                var dest = coords[coords.length - 1];
-                L.circleMarker(dest, {
-                    radius: 6, color: '#fff', fillColor: color,
-                    fillOpacity: 1, weight: 2, opacity: 0.9
-                }).addTo(routeLines);
-            });
-        }
-
-        // ── Public API for Java MapBridge ────────────────────────────────
-        window.appMap = {
-
-            updateDriver: function(id, lat, lng, state, name) {
-                var isBusy = state !== 'ONLINE_IDLE';
-                var cssClass = 'driver-dot ' + (isBusy ? 'driver-busy' : 'driver-idle');
-                var size = isBusy ? 14 : 10;
-
-                if (driverMarkers[id]) {
-                    driverMarkers[id].setLatLng([lat, lng]);
-                    var el = driverMarkers[id]._icon;
-                    if (el) {
-                        el.className = 'leaflet-marker-icon ' + cssClass + ' leaflet-zoom-animated leaflet-interactive';
-                        el.style.width = size + 'px';
-                        el.style.height = size + 'px';
-                        el.style.marginLeft = (-size / 2) + 'px';
-                        el.style.marginTop = (-size / 2) + 'px';
-                    }
-                } else {
-                    var icon = L.divIcon({
-                        className: cssClass, iconSize: [size, size], iconAnchor: [size / 2, size / 2]
-                    });
-                    var marker = L.marker([lat, lng], { icon: icon, interactive: true });
-                    marker.bindTooltip(name || id, {
-                        className: 'driver-tooltip', direction: 'top', offset: [0, -8]
-                    });
-                    marker.on('click', function() {
-                        if (window.javaBridge) window.javaBridge.onDriverSelected(id);
-                    });
-                    marker.addTo(map);
-                    driverMarkers[id] = marker;
-                }
-            },
-
-            removeDriver: function(id) {
-                if (driverMarkers[id]) { map.removeLayer(driverMarkers[id]); delete driverMarkers[id]; }
-                delete routeCache[id];
-                renderRouteLayer();
-            },
-
-            addOrder: function(id, lat, lng) {
-                if (orderMarkers[id]) return;
-                var icon = L.divIcon({ className: 'order-dot', iconSize: [8, 8], iconAnchor: [4, 4] });
-                var marker = L.marker([lat, lng], { icon: icon, interactive: false });
-                marker.addTo(map);
-                orderMarkers[id] = marker;
-            },
-
-            removeOrder: function(id) {
-                if (orderMarkers[id]) { map.removeLayer(orderMarkers[id]); delete orderMarkers[id]; }
-            },
-
-            // Push a single driver route request → OSRM
-            requestRoute: function(driverId, fromLat, fromLng, toLat, toLng, phase) {
-                requestOSRM(driverId, fromLat, fromLng, toLat, toLng, phase);
-            },
-
-            // Remove route for a driver (when idle)
-            clearRoute: function(driverId) {
-                delete routeCache[driverId];
-                renderRouteLayer();
-            },
-
-            // ── Road network overlay (bright corridors) ─────────────────
-            setRoadNetwork: function(geojsonStr) {
-                try {
-                    roadNetwork.clearLayers();
-                    var data = JSON.parse(geojsonStr);
-                    if (!data.features) return;
-                    data.features.forEach(function(f) {
-                        var coords = f.geometry.coordinates.map(function(c) { return [c[1], c[0]]; });
-                        // Bright road line
-                        L.polyline(coords, {
-                            color: '#4a5568', weight: 2.5, opacity: 0.6
-                        }).addTo(roadNetwork);
-                        // Label glow
-                        L.polyline(coords, {
-                            color: '#718096', weight: 6, opacity: 0.08
-                        }).addTo(roadNetwork);
-                    });
-                } catch(e) { console.error('setRoadNetwork', e); }
-            },
-
-            setTraffic: function(geojsonStr) {
-                try {
-                    trafficLines.clearLayers();
-                    if (!layerVisibility.traffic) return;
-                    var data = JSON.parse(geojsonStr);
-                    if (!data.features) return;
-                    data.features.forEach(function(f) {
-                        var severity = f.properties.severity || 0;
-                        if (severity < 0.1) return;
-                        var coords = f.geometry.coordinates.map(function(c) { return [c[1], c[0]]; });
-                        var color = severity > 0.7 ? '#d7383b' : severity > 0.4 ? '#ff716c' : '#ff9966';
-                        L.polyline(coords, {
-                            color: color, weight: 3 + severity * 5, opacity: 0.5 + severity * 0.4
-                        }).addTo(trafficLines);
-                        L.polyline(coords, {
-                            color: color, weight: 12 + severity * 4, opacity: 0.1 * severity
-                        }).addTo(trafficLines);
-                    });
-                } catch(e) { console.error('setTraffic', e); }
-            },
-
-            setWeatherZones: function(geojsonStr) {
-                try {
-                    weatherZones.clearLayers();
-                    if (!layerVisibility.weather) return;
-                    var data = JSON.parse(geojsonStr);
-                    if (!data.features) return;
-                    data.features.forEach(function(f) {
-                        var intensity = f.properties.intensity || 0;
-                        if (intensity < 0.1) return;
-                        var coords = f.geometry.coordinates[0].map(function(c) { return [c[1], c[0]]; });
-                        L.polygon(coords, {
-                            fillColor: '#6ebbee', fillOpacity: intensity * 0.12,
-                            color: '#6ebbee', weight: 1, opacity: intensity * 0.35,
-                            dashArray: '6,4'
-                        }).addTo(weatherZones);
-                    });
-                } catch(e) { console.error('setWeatherZones', e); }
-            },
-
-            setRoutes: function(geojsonStr) {
-                /* kept for backward compat — use requestRoute instead */
-            },
-
-            setOrderHeat: function(geojsonStr) {
-                try {
-                    if (heatLayer) { map.removeLayer(heatLayer); heatLayer = null; }
-                    if (!layerVisibility.orderHeat) return;
-                    var data = JSON.parse(geojsonStr);
-                    if (!data.features || data.features.length === 0) return;
-                    var points = data.features.map(function(f) {
-                        return [f.geometry.coordinates[1], f.geometry.coordinates[0], 0.5];
-                    });
-                    heatLayer = L.heatLayer(points, {
-                        radius: 25, blur: 15, maxZoom: 17,
-                        gradient: {
-                            0.2: 'rgba(153,247,255,0.3)', 0.4: 'rgba(0,255,171,0.5)',
-                            0.6: 'rgba(255,190,107,0.6)', 0.8: 'rgba(255,113,108,0.7)',
-                            1.0: 'rgba(215,56,59,0.9)'
+                        if (driverPositions[id]) {
+                            // Just update target — animation loop interpolates
+                            driverPositions[id].tgt = [lat, lng];
+                            driverPositions[id].state = state;
+                            driverPositions[id].name = name;
+                        } else {
+                            // New driver: create marker + position state
+                            driverPositions[id] = {
+                                cur: [lat, lng], tgt: [lat, lng],
+                                state: state, name: name
+                            };
+                            var isBusy = state !== 'ONLINE_IDLE';
+                            var size = isBusy ? 12 : 8;
+                            var cssClass = 'driver-dot ' + (isBusy ? 'driver-busy' : 'driver-idle');
+                            var icon = L.divIcon({ className: cssClass, iconSize: [size, size], iconAnchor: [size/2, size/2] });
+                            var marker = L.marker([lat, lng], { icon: icon, interactive: true, zIndexOffset: 1000 });
+                            marker.bindTooltip(name, { className: 'driver-tooltip', direction: 'top', offset: [0, -8] });
+                            marker.on('click', (function(did) {
+                                return function() { if (window.javaBridge) window.javaBridge.onDriverSelected(did); };
+                            })(id));
+                            marker.addTo(map);
+                            driverMarkers[id] = marker;
                         }
-                    }).addTo(map);
-                } catch(e) { console.error('setOrderHeat', e); }
-            },
-
-            toggleLayer: function(layerName, visible) {
-                layerVisibility[layerName] = visible;
-                if (layerName === 'traffic') {
-                    if (visible) map.addLayer(trafficLines); else map.removeLayer(trafficLines);
-                }
-                if (layerName === 'weather') {
-                    if (visible) map.addLayer(weatherZones); else map.removeLayer(weatherZones);
-                }
-                if (layerName === 'routes') {
-                    if (visible) map.addLayer(routeLines); else map.removeLayer(routeLines);
-                }
-                if (layerName === 'orderHeat' && heatLayer) {
-                    if (visible) map.addLayer(heatLayer); else map.removeLayer(heatLayer);
-                }
-                if (layerName === 'drivers') {
-                    Object.keys(driverMarkers).forEach(function(id) {
-                        if (visible) driverMarkers[id].addTo(map); else map.removeLayer(driverMarkers[id]);
                     });
+                    // Remove drivers no longer in frame
+                    for (var id in driverPositions) {
+                        if (!activeIds[id]) {
+                            if (driverMarkers[id]) { map.removeLayer(driverMarkers[id]); delete driverMarkers[id]; }
+                            delete driverPositions[id];
+                        }
+                    }
                 }
-            },
 
-            centerMap: function(lat, lng, zoom) { map.setView([lat, lng], zoom || 13); },
-            focusDriver: function(id) {
-                if (driverMarkers[id]) map.setView(driverMarkers[id].getLatLng(), 15);
+                // ── Routes: per-driver differential update ─────────────
+                if (frame.routes && frame.routes.features) {
+                    var activeRouteIds = {};
+                    frame.routes.features.forEach(function(f) {
+                        if (f.geometry.type !== 'LineString') return;
+                        var did = f.properties.driverId;
+                        activeRouteIds[did] = true;
+                        var coords = f.geometry.coordinates.map(function(c) { return [c[1], c[0]]; });
+                        if (coords.length < 2) return;
+
+                        // Hash to detect changes
+                        var hash = coords.length + '_' + coords[0][0].toFixed(4) + '_' + coords[coords.length-1][0].toFixed(4);
+                        if (driverRouteHashes[did] === hash) return; // Unchanged
+                        driverRouteHashes[did] = hash;
+
+                        // Remove old route for this driver only
+                        if (driverRouteLayers[did]) {
+                            routeParent.removeLayer(driverRouteLayers[did]);
+                        }
+                        var group = L.layerGroup();
+                        var isPickup = f.properties.phase === 'pickup';
+                        var color = isPickup ? '#FFBE6B' : '#00ffab';
+                        // Glow
+                        L.polyline(coords, { color: color, weight: 8, opacity: 0.12 }).addTo(group);
+                        // Main line
+                        L.polyline(coords, {
+                            color: color, weight: 3, opacity: 0.85,
+                            dashArray: isPickup ? '8,5' : null,
+                            lineCap: 'round', lineJoin: 'round'
+                        }).addTo(group);
+                        // Destination dot
+                        var dest = coords[coords.length - 1];
+                        L.circleMarker(dest, {
+                            radius: 5, color: '#fff', fillColor: color,
+                            fillOpacity: 1, weight: 1.5, opacity: 0.8
+                        }).addTo(group);
+                        group.addTo(routeParent);
+                        driverRouteLayers[did] = group;
+                    });
+                    // Remove routes for drivers no longer active
+                    for (var did in driverRouteLayers) {
+                        if (!activeRouteIds[did]) {
+                            routeParent.removeLayer(driverRouteLayers[did]);
+                            delete driverRouteLayers[did];
+                            delete driverRouteHashes[did];
+                        }
+                    }
+                }
+
+                // ── Traffic: replace only if changed ───────────────────
+                if (frame.traffic && frame.traffic.features) {
+                    var th = frame.traffic.features.length + '_' + JSON.stringify(frame.traffic.features[0] || '').length;
+                    if (th !== lastTrafficHash) {
+                        lastTrafficHash = th;
+                        trafficLayer.clearLayers();
+                        frame.traffic.features.forEach(function(f) {
+                            var sev = f.properties.severity || 0;
+                            if (sev < 0.1) return;
+                            var coords = f.geometry.coordinates.map(function(c) { return [c[1], c[0]]; });
+                            var color = sev > 0.7 ? '#d7383b' : sev > 0.4 ? '#ff716c' : '#ff9966';
+                            L.polyline(coords, { color: color, weight: 3 + sev * 4, opacity: 0.4 + sev * 0.3 }).addTo(trafficLayer);
+                        });
+                    }
+                }
+
+                // ── Weather: replace only if changed ───────────────────
+                if (frame.weather && frame.weather.features) {
+                    var wh = frame.weather.features.length + '_' + JSON.stringify(frame.weather.features[0] || '').length;
+                    if (wh !== lastWeatherHash) {
+                        lastWeatherHash = wh;
+                        weatherLayer.clearLayers();
+                        frame.weather.features.forEach(function(f) {
+                            var intensity = f.properties.intensity || 0;
+                            if (intensity < 0.05) return;
+                            var coords = f.geometry.coordinates[0].map(function(c) { return [c[1], c[0]]; });
+                            L.polygon(coords, {
+                                fillColor: '#6ebbee', fillOpacity: intensity * 0.10,
+                                color: '#6ebbee', weight: 1, opacity: intensity * 0.25, dashArray: '6,4'
+                            }).addTo(weatherLayer);
+                        });
+                    }
+                }
+
+                // ── Orders: full replace (only every 15 ticks) ─────────
+                if (frame.orders && frame.orders.features) {
+                    var activeOids = {};
+                    frame.orders.features.forEach(function(f) {
+                        var oid = f.properties.id;
+                        activeOids[oid] = true;
+                        if (!orderMarkers[oid]) {
+                            var icon = L.divIcon({ className: 'order-dot', iconSize: [4, 4], iconAnchor: [2, 2] });
+                            orderMarkers[oid] = L.marker(
+                                [f.geometry.coordinates[1], f.geometry.coordinates[0]],
+                                { icon: icon, interactive: false, zIndexOffset: -1000 }
+                            ).addTo(map);
+                        }
+                    });
+                    for (var oid in orderMarkers) {
+                        if (!activeOids[oid]) {
+                            map.removeLayer(orderMarkers[oid]);
+                            delete orderMarkers[oid];
+                        }
+                    }
+                }
+
+                // ── Road network: one-time push ────────────────────────
+                if (frame.roadNetwork && frame.roadNetwork.features) {
+                    if (roadNetLayer.getLayers().length === 0) {
+                        frame.roadNetwork.features.forEach(function(f) {
+                            var coords = f.geometry.coordinates.map(function(c) { return [c[1], c[0]]; });
+                            L.polyline(coords, { color: '#4a5568', weight: 2, opacity: 0.4 }).addTo(roadNetLayer);
+                        });
+                    }
+                }
+
+            } catch(e) { console.error('applyFrame:', e); }
+        },
+
+        toggleLayer: function(layerName, visible) {
+            var layerMap = {
+                'traffic': trafficLayer, 'weather': weatherLayer,
+                'routes': routeParent
+            };
+            var layer = layerMap[layerName];
+            if (layer) { if (visible) map.addLayer(layer); else map.removeLayer(layer); }
+            if (layerName === 'drivers') {
+                for (var id in driverMarkers) {
+                    if (visible) driverMarkers[id].addTo(map); else map.removeLayer(driverMarkers[id]);
+                }
             }
-        };
+        },
 
-        // Notify Java bridge
-        setTimeout(function() {
-            if (window.javaBridge) window.javaBridge.onMapReady();
-        }, 300);
+        focusDriver: function(id) {
+            if (driverPositions[id]) map.setView(driverPositions[id].cur, 15);
+        },
+
+        centerMap: function(lat, lng, zoom) {
+            map.setView([lat, lng], zoom || 13);
+        }
+    };
+
+    // ════════════════════════════════════════════════════════════════════
+    // 4. DRIVER ANIMATION LOOP — smooth interpolation every frame
+    // ════════════════════════════════════════════════════════════════════
+    lastAnimTime = performance.now();
+    function animateDrivers(now) {
+        var dt = now - lastAnimTime;
+        lastAnimTime = now;
+
+        for (var id in driverPositions) {
+            var dp = driverPositions[id];
+            if (dp.cur[0] !== dp.tgt[0] || dp.cur[1] !== dp.tgt[1]) {
+                var t = Math.min(1.0, dt / 400);
+                dp.cur[0] += (dp.tgt[0] - dp.cur[0]) * t;
+                dp.cur[1] += (dp.tgt[1] - dp.cur[1]) * t;
+                if (Math.abs(dp.cur[0] - dp.tgt[0]) < 0.0000005 &&
+                    Math.abs(dp.cur[1] - dp.tgt[1]) < 0.0000005) {
+                    dp.cur[0] = dp.tgt[0]; dp.cur[1] = dp.tgt[1];
+                }
+            }
+            // Update Leaflet marker position (no recreate!)
+            var marker = driverMarkers[id];
+            if (marker) {
+                marker.setLatLng([dp.cur[0], dp.cur[1]]);
+                // Update icon style if state changed
+                var isBusy = dp.state !== 'ONLINE_IDLE';
+                var el = marker._icon;
+                if (el) {
+                    var newClass = 'driver-dot ' + (isBusy ? 'driver-busy' : 'driver-idle');
+                    var size = isBusy ? 12 : 8;
+                    if (el.className.indexOf(newClass) === -1) {
+                        el.className = 'leaflet-marker-icon ' + newClass + ' leaflet-zoom-animated leaflet-interactive';
+                        el.style.width = size + 'px'; el.style.height = size + 'px';
+                        el.style.marginLeft = (-size/2) + 'px'; el.style.marginTop = (-size/2) + 'px';
+                    }
+                }
+            }
+        }
+        requestAnimationFrame(animateDrivers);
     }
+    requestAnimationFrame(animateDrivers);
+
+    // Notify Java
+    setTimeout(function() { if (window.javaBridge) window.javaBridge.onMapReady(); }, 500);
 })();
 </script>
 </body>

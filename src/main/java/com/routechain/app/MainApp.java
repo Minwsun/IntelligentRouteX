@@ -6,6 +6,7 @@ import com.routechain.infra.EventBus;
 import com.routechain.infra.Events;
 import com.routechain.infra.MapBridge;
 import com.routechain.simulation.SimulationEngine;
+import com.routechain.simulation.TimelineDataPoint;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.property.*;
@@ -67,6 +68,16 @@ public class MainApp extends Application {
     private Label weatherValueLabel;
     private Label demandValueLabel;
     private Label trafficValueLabel;
+
+    // ── Timeline state ──────────────────────────────────────────────────
+    private final int TIMELINE_SLOTS = 7;
+    private final Label[] timelineTimeLabels = new Label[TIMELINE_SLOTS];
+    private final HBox[] timelineIndicatorBoxes = new HBox[TIMELINE_SLOTS];
+    private final StackPane[] timelineDots = new StackPane[TIMELINE_SLOTS];
+    private final Tooltip[] timelineTooltips = new Tooltip[TIMELINE_SLOTS];
+    private Slider timelineSlider;
+    private Label timelineRoadDescLabel;
+    private volatile int timelineViewOffset = 0; // minutes back from latest
 
     @Override
     public void start(Stage stage) {
@@ -696,24 +707,32 @@ public class MainApp extends Application {
     }
 
     private HBox createTimelineRail() {
+        // ── Time markers rail ────────────────────────────────────────────
         HBox rail = new HBox();
         rail.getStyleClass().add("glass-card-compact");
         rail.setAlignment(Pos.CENTER);
-        rail.setSpacing(16);
-        rail.setPadding(new Insets(12, 24, 12, 24));
+        rail.setSpacing(8);
+        rail.setPadding(new Insets(10, 20, 10, 20));
         rail.setStyle("-fx-background-radius: 999; -fx-border-radius: 999;");
-        rail.setMaxWidth(600);
+        rail.setMaxWidth(720);
 
-        String[] times = {"12:00", "12:05", "12:10", "12:15", "12:20"};
-        for (int i = 0; i < times.length; i++) {
+        int centerIndex = TIMELINE_SLOTS / 2; // index 3 for 7 slots
+        for (int i = 0; i < TIMELINE_SLOTS; i++) {
             VBox marker = new VBox(4);
             marker.setAlignment(Pos.CENTER);
-            Label timeLabel = new Label(times[i]);
-            timeLabel.setStyle("-fx-font-family: 'Space Grotesk'; -fx-font-size: 9; "
-                    + "-fx-font-weight: 700; -fx-text-fill: " + (i == 2 ? "#99f7ff" : "#aaabad") + ";");
+            marker.setPrefWidth(70);
+            marker.setCursor(javafx.scene.Cursor.HAND);
 
+            // Time label
+            Label timeLabel = new Label("--:--");
+            boolean isCenter = (i == centerIndex);
+            timeLabel.setStyle("-fx-font-family: 'Space Grotesk'; -fx-font-size: 10; "
+                    + "-fx-font-weight: 700; -fx-text-fill: " + (isCenter ? "#99f7ff" : "#aaabad") + ";");
+            timelineTimeLabels[i] = timeLabel;
+
+            // Dot (current position indicator)
             StackPane dot = new StackPane();
-            if (i == 2) {
+            if (isCenter) {
                 dot.setMinSize(8, 8);
                 dot.setMaxSize(8, 8);
                 dot.setStyle("-fx-background-color: #99f7ff; -fx-background-radius: 999; "
@@ -723,16 +742,52 @@ public class MainApp extends Application {
                 dot.setMaxSize(4, 12);
                 dot.setStyle("-fx-background-color: #46484a;");
             }
-            marker.getChildren().addAll(timeLabel, dot);
+            timelineDots[i] = dot;
+
+            // Event indicator row (Rain, Jam, Surge, Delay dots)
+            HBox indicators = new HBox(3);
+            indicators.setAlignment(Pos.CENTER);
+            indicators.setMinHeight(8);
+            timelineIndicatorBoxes[i] = indicators;
+
+            marker.getChildren().addAll(timeLabel, dot, indicators);
+
+            // Tooltip
+            Tooltip tip = new Tooltip("No data");
+            tip.setStyle("-fx-font-family: 'Space Grotesk'; -fx-font-size: 11; "
+                    + "-fx-background-color: rgba(20,22,24,0.95); -fx-text-fill: #eeeef0; "
+                    + "-fx-background-radius: 8; -fx-padding: 10;");
+            tip.setShowDelay(javafx.util.Duration.millis(200));
+            Tooltip.install(marker, tip);
+            timelineTooltips[i] = tip;
+
             rail.getChildren().add(marker);
 
-            if (i < times.length - 1) {
+            if (i < TIMELINE_SLOTS - 1) {
                 Region gap = new Region();
                 HBox.setHgrow(gap, Priority.ALWAYS);
                 rail.getChildren().add(gap);
             }
         }
 
+        // ── Scrollable slider ────────────────────────────────────────────
+        timelineSlider = new Slider(0, 30, 0);
+        timelineSlider.setBlockIncrement(1);
+        timelineSlider.setMajorTickUnit(5);
+        timelineSlider.setMinorTickCount(4);
+        timelineSlider.setMaxWidth(680);
+        timelineSlider.setStyle("-fx-control-inner-background: #232629;");
+        timelineSlider.valueProperty().addListener((obs, old, val) -> {
+            timelineViewOffset = val.intValue();
+            refreshTimelineFromHistory();
+        });
+
+        // ── Road description label ──────────────────────────────────────
+        timelineRoadDescLabel = new Label("Roads clear.");
+        timelineRoadDescLabel.setStyle("-fx-font-family: 'Space Grotesk'; -fx-font-size: 9; "
+                + "-fx-text-fill: #787a7c; -fx-font-weight: 500;");
+
+        // ── Legend ────────────────────────────────────────────────────────
         HBox legend = new HBox(16);
         legend.setAlignment(Pos.CENTER);
         legend.getChildren().addAll(
@@ -742,13 +797,116 @@ public class MainApp extends Application {
                 createLegendDot("Delay", "#FFBE6B")
         );
 
-        VBox combined = new VBox(8, rail, legend);
+        VBox combined = new VBox(6, rail, timelineSlider, timelineRoadDescLabel, legend);
         combined.setAlignment(Pos.CENTER);
 
         HBox wrapper = new HBox(combined);
         wrapper.setAlignment(Pos.CENTER);
         HBox.setHgrow(combined, Priority.ALWAYS);
         return wrapper;
+    }
+
+    /**
+     * Refresh timeline UI from SimulationEngine history buffer.
+     * Called on each TimelineSnapshot event and when slider changes.
+     */
+    private void refreshTimelineFromHistory() {
+        List<TimelineDataPoint> history = simEngine.getTimelineHistory();
+        if (history.isEmpty()) return;
+
+        int centerIndex = TIMELINE_SLOTS / 2;
+        int latestIndex = history.size() - 1;
+        int viewIndex = Math.max(0, latestIndex - timelineViewOffset);
+
+        for (int slot = 0; slot < TIMELINE_SLOTS; slot++) {
+            int offsetFromCenter = slot - centerIndex;
+            int histIdx = viewIndex + (offsetFromCenter * 5); // 5 ticks apart
+
+            if (histIdx >= 0 && histIdx < history.size()) {
+                TimelineDataPoint dp = history.get(histIdx);
+                timelineTimeLabels[slot].setText(dp.formattedTime());
+
+                // Update indicator dots
+                updateTimelineIndicators(slot, dp);
+
+                // Update tooltip
+                String tooltipText = String.format(
+                        "⏰ %s\n"
+                                + "🚦 Traffic: %.0f%%\n"
+                                + "🌧 Weather: %.0f%% intensity\n"
+                                + "📈 Surge: %s\n"
+                                + "📦 Pending: %d orders\n"
+                                + "🏍 Drivers: %d active\n"
+                                + "🛣 %s",
+                        dp.formattedTime(),
+                        dp.avgTrafficSeverity() * 100,
+                        dp.weatherIntensity() * 100,
+                        dp.maxSurgeScore() >= 0.7 ? "HIGH" : (dp.maxSurgeScore() >= 0.4 ? "MEDIUM" : "NORMAL"),
+                        dp.pendingOrders(),
+                        dp.activeDrivers(),
+                        dp.roadDescription()
+                );
+                timelineTooltips[slot].setText(tooltipText);
+            } else {
+                timelineTimeLabels[slot].setText("--:--");
+                timelineIndicatorBoxes[slot].getChildren().clear();
+                timelineTooltips[slot].setText("No data");
+            }
+
+            // Highlight center slot
+            boolean isCenter = (slot == centerIndex);
+            timelineTimeLabels[slot].setStyle(
+                    "-fx-font-family: 'Space Grotesk'; -fx-font-size: 10; -fx-font-weight: 700; "
+                            + "-fx-text-fill: " + (isCenter ? "#99f7ff" : "#aaabad") + ";");
+            if (isCenter) {
+                timelineDots[slot].setMinSize(8, 8);
+                timelineDots[slot].setMaxSize(8, 8);
+                timelineDots[slot].setStyle("-fx-background-color: #99f7ff; -fx-background-radius: 999; "
+                        + "-fx-effect: dropshadow(gaussian, rgba(153,247,255,0.4), 8, 0.3, 0, 0);");
+            } else {
+                timelineDots[slot].setMinSize(4, 12);
+                timelineDots[slot].setMaxSize(4, 12);
+                timelineDots[slot].setStyle("-fx-background-color: #46484a;");
+            }
+        }
+
+        // Update road description from center slot
+        if (viewIndex >= 0 && viewIndex < history.size()) {
+            timelineRoadDescLabel.setText("🛣 " + history.get(viewIndex).roadDescription());
+        }
+    }
+
+    /**
+     * Update event indicator dots for a timeline slot based on data thresholds.
+     */
+    private void updateTimelineIndicators(int slot, TimelineDataPoint dp) {
+        HBox box = timelineIndicatorBoxes[slot];
+        box.getChildren().clear();
+
+        // Rain indicator: weather intensity > 0.3
+        if (dp.weatherIntensity() > 0.3) {
+            box.getChildren().add(createMiniDot("#6ebbee"));
+        }
+        // Jam indicator: traffic severity > 0.5
+        if (dp.avgTrafficSeverity() > 0.5) {
+            box.getChildren().add(createMiniDot("#ff716c"));
+        }
+        // Surge indicator: surge score > 0.4
+        if (dp.maxSurgeScore() > 0.4) {
+            box.getChildren().add(createMiniDot("#00ffab"));
+        }
+        // Delay indicator: pending orders > 3
+        if (dp.pendingOrders() > 3) {
+            box.getChildren().add(createMiniDot("#FFBE6B"));
+        }
+    }
+
+    private StackPane createMiniDot(String color) {
+        StackPane dot = new StackPane();
+        dot.setMinSize(5, 5);
+        dot.setMaxSize(5, 5);
+        dot.setStyle("-fx-background-color: " + color + "; -fx-background-radius: 999;");
+        return dot;
     }
 
     private HBox createLegendDot(String label, String color) {
@@ -864,6 +1022,21 @@ public class MainApp extends Application {
             Platform.runLater(() -> {
                 alertMessages.add(0, e.title() + " — " + e.description());
                 if (alertMessages.size() > 20) alertMessages.remove(alertMessages.size() - 1);
+            });
+        });
+
+        // Timeline snapshot → refresh timeline UI
+        eventBus.subscribe(Events.TimelineSnapshot.class, e -> {
+            Platform.runLater(() -> {
+                // Auto-refresh when viewing live (slider at 0)
+                if (timelineViewOffset == 0) {
+                    refreshTimelineFromHistory();
+                }
+                // Update slider max to match history size
+                long historySize = simEngine.getTimelineHistory().size();
+                if (historySize > 30) {
+                    timelineSlider.setMax(historySize - 1);
+                }
             });
         });
     }
