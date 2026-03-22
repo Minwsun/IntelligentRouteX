@@ -97,7 +97,6 @@ public class MainApp extends Application {
         leftStack.setPrefWidth(320);
         leftStack.getChildren().addAll(
                 createModeCard(),
-                createAiInsightCard(),
                 createCollapsibleControlsCard()
         );
 
@@ -117,6 +116,8 @@ public class MainApp extends Application {
         rightStack.getChildren().addAll(
                 createKpiBar(),
                 createCountersCard(),
+                createAiInsightCard(),
+                createScenarioCard(),
                 createDriverFocusCard()
         );
 
@@ -244,7 +245,7 @@ public class MainApp extends Application {
         Label icon = new Label("⚙");
         icon.setStyle("-fx-font-size: 16; -fx-text-fill: #99f7ff;");
 
-        Label title = new Label(" SYSTEM CONTROLS");
+        Label title = new Label(" MAP LAYERS");
         title.getStyleClass().add("text-title");
         title.setPadding(new Insets(0, 0, 0, 8));
 
@@ -259,13 +260,9 @@ public class MainApp extends Application {
         VBox contentContainer = new VBox(16);
         contentContainer.setPadding(new Insets(0, 16, 16, 16));
 
-        VBox scenarioBox = createScenarioBox();
         VBox layerBox = createLayerBox();
 
-        Separator sep = new Separator();
-        sep.setStyle("-fx-background-color: rgba(70,72,74,0.3); -fx-max-height: 1;");
-
-        contentContainer.getChildren().addAll(scenarioBox, sep, layerBox);
+        contentContainer.getChildren().addAll(layerBox);
         contentContainer.setVisible(false);
         contentContainer.setManaged(false);
 
@@ -354,8 +351,9 @@ public class MainApp extends Application {
         return card;
     }
 
-    private VBox createScenarioBox() {
+    private VBox createScenarioCard() {
         VBox card = new VBox(16);
+        card.getStyleClass().add("glass-card");
 
         // Title
         HBox titleRow = new HBox();
