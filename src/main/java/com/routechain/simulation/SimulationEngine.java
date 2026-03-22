@@ -50,6 +50,10 @@ public class SimulationEngine {
     private volatile double totalEarnings = 0;
     private volatile long totalAssignmentLatencyMs = 0;
     private volatile int totalAssignments = 0;
+    private volatile int totalBundled = 0;
+
+    // AI dispatch engines
+    private final ReDispatchEngine reDispatchEngine = new ReDispatchEngine();
 
     public SimulationEngine() {
         this.regions = new ArrayList<>(HcmcCityData.createRegions());
@@ -98,6 +102,8 @@ public class SimulationEngine {
         totalEarnings = 0;
         totalAssignmentLatencyMs = 0;
         totalAssignments = 0;
+        totalBundled = 0;
+        reDispatchEngine.reset();
         eventBus.publish(new SimulationReset(Instant.now()));
     }
 
@@ -141,6 +147,7 @@ public class SimulationEngine {
             generateOrders();
             moveDrivers();
             trackDriverProductivity();
+            checkReDispatch();
             dispatchPendingOrders();
             processDeliveries();
             detectSurges();
@@ -304,52 +311,90 @@ public class SimulationEngine {
         }
     }
 
-    // ── Simple dispatch (nearest viable driver) ─────────────────────────
+    // ── AI-scored dispatch pipeline ──────────────────────────────────────
     private void dispatchPendingOrders() {
         List<Order> pending = activeOrders.stream()
                 .filter(o -> o.getStatus() == OrderStatus.CONFIRMED
                         || o.getStatus() == OrderStatus.PENDING_ASSIGNMENT)
                 .toList();
 
+        if (pending.isEmpty()) return;
+
+        // Mark as pending
         for (Order order : pending) {
             order.setStatus(OrderStatus.PENDING_ASSIGNMENT);
+        }
 
-            // Find nearest available driver
-            Driver best = null;
-            double bestDist = Double.MAX_VALUE;
-            for (Driver driver : drivers) {
-                if (!driver.isAvailable()) continue;
-                double dist = driver.getCurrentLocation().distanceTo(order.getPickupPoint());
-                if (dist < bestDist) {
-                    bestDist = dist;
-                    best = driver;
-                }
+        List<Driver> available = drivers.stream()
+                .filter(Driver::isAvailable)
+                .toList();
+
+        if (available.isEmpty()) return;
+
+        // Step 1: Try bundling
+        BundleEngine bundleEngine = new BundleEngine(trafficIntensity, weatherProfile);
+        List<BundleEngine.BundleCandidate> bundles = bundleEngine.findBundleCandidates(new ArrayList<>(pending));
+
+        // Apply bundles: tag orders with bundleId
+        for (BundleEngine.BundleCandidate bundle : bundles) {
+            for (Order o : bundle.getOrders()) {
+                o.setBundle(bundle.getBundleId());
             }
+            totalBundled += bundle.getSize();
+        }
 
-            if (best != null) {
-                // Assign + transition to pickup
-                order.assignDriver(best.getId());
-                order.markPickupStarted();
-                best.setState(DriverState.PICKUP_EN_ROUTE);
-                best.addOrder(order.getId());
-                best.setTargetLocation(order.getPickupPoint());
+        // Step 2: Score all driver-order candidates
+        DispatchScorer scorer = new DispatchScorer(
+                Collections.unmodifiableList(regions), trafficIntensity, weatherProfile);
 
-                double deadheadKm = bestDist / 1000.0;
-                totalDeadheadKm += deadheadKm;
-                best.addDeadheadDistance(deadheadKm);
+        List<CandidateAssignment> scoredCandidates = scorer.generateAndScore(
+                new ArrayList<>(pending), new ArrayList<>(available));
 
-                double confidence = Math.max(0.5, 1.0 - bestDist / 5000.0);
-                double eta = bestDist / (25 * 1000.0 / 3600.0) / 60.0; // minutes
-                totalAssignmentLatencyMs += order.getAssignmentLatencyMs();
-                totalAssignments++;
+        // Step 3: Select best non-conflicting assignments
+        List<CandidateAssignment> selected = scorer.selectBestAssignments(scoredCandidates);
 
-                eventBus.publish(new DispatchDecision(
-                        order.getId(), best.getId(), confidence,
-                        eta, deadheadKm, confidence));
-                eventBus.publish(new OrderAssigned(order.getId(), best.getId()));
-                eventBus.publish(new DriverStateChanged(best.getId(),
-                        DriverState.ONLINE_IDLE, DriverState.PICKUP_EN_ROUTE));
-            }
+        // Step 4: Execute assignments
+        for (CandidateAssignment c : selected) {
+            Order order = c.getOrder();
+            Driver best = c.getDriver();
+
+            order.assignDriver(best.getId());
+            order.markPickupStarted();
+            order.setDecisionTraceId("DT-" + tickCounter.get() + "-" + order.getId());
+            best.setState(DriverState.PICKUP_EN_ROUTE);
+            best.addOrder(order.getId());
+            best.setTargetLocation(order.getPickupPoint());
+
+            double deadheadKm = c.getDistanceToPickupKm();
+            totalDeadheadKm += deadheadKm;
+            best.addDeadheadDistance(deadheadKm);
+
+            totalAssignmentLatencyMs += order.getAssignmentLatencyMs();
+            totalAssignments++;
+
+            // Update driver prediction fields
+            best.setContinuationValueCurrentZone(c.getContinuationValue());
+            best.setOverloadRisk(c.getOverloadRisk());
+
+            eventBus.publish(new DispatchDecision(
+                    order.getId(), best.getId(), c.getTotalScore(),
+                    c.getEstimatedPickupMinutes(), deadheadKm, c.getConfidence()));
+            eventBus.publish(new OrderAssigned(order.getId(), best.getId()));
+            eventBus.publish(new DriverStateChanged(best.getId(),
+                    DriverState.ONLINE_IDLE, DriverState.PICKUP_EN_ROUTE));
+        }
+    }
+
+    // ── Re-dispatch check ────────────────────────────────────────────────
+    private void checkReDispatch() {
+        // Run re-dispatch every 5 ticks to avoid overhead
+        if (tickCounter.get() % 5 != 0) return;
+
+        List<Order> toReplan = reDispatchEngine.evaluateReDispatchCandidates(
+                activeOrders, drivers, trafficIntensity, weatherProfile);
+
+        for (Order order : toReplan) {
+            reDispatchEngine.executeReDispatch(order, drivers);
         }
     }
 
