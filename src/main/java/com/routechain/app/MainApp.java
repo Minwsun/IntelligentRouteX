@@ -16,8 +16,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
-import javafx.scene.web.WebEngine;
-import javafx.scene.web.WebView;
+import com.routechain.infra.NativeMapPane;
 import javafx.stage.Stage;
 
 import java.time.*;
@@ -75,18 +74,14 @@ public class MainApp extends Application {
         root.getStyleClass().add("app-shell");
 
         // ── Map (base layer) ────────────────────────────────────────────
-        WebView webView = new WebView();
-        webView.getStyleClass().add("map-container");
-        WebEngine webEngine = webView.getEngine();
-        webEngine.setJavaScriptEnabled(true);
-        webEngine.load(getClass().getResource("/map/map-shell.html").toExternalForm());
+        NativeMapPane nativeMap = new NativeMapPane();
+        nativeMap.getStyleClass().add("map-container");
 
-        mapBridge = new MapBridge(webEngine);
+        mapBridge = new MapBridge(nativeMap);
         mapBridge.attach();
-        mapBridge.callback.setOnDriverSelected(this::onDriverSelected);
-        mapBridge.callback.setOnMapReady(() -> {
-            System.out.println("[App] Map ready");
-            mapBridge.pushRoadNetwork();
+        mapBridge.setOnDriverSelected(this::onDriverSelected);
+        mapBridge.setOnMapReady(() -> {
+            System.out.println("[App] Map ready — road network will push on first tick");
         });
 
         // ── Header ──────────────────────────────────────────────────────
@@ -155,7 +150,7 @@ public class MainApp extends Application {
         floatingLayer.setBottom(bottomBar);
         floatingLayer.setPickOnBounds(false);
 
-        root.getChildren().addAll(webView, floatingLayer);
+        root.getChildren().addAll(nativeMap, floatingLayer);
 
         // ── Scene & Stage ───────────────────────────────────────────────
         Scene scene = new Scene(root, 1600, 960);
@@ -792,40 +787,19 @@ public class MainApp extends Application {
     // ═══════════════════════════════════════════════════════════════════
 
     private void subscribeToEvents() {
-        // Driver location updates → map
-        eventBus.subscribe(Events.DriverLocationUpdated.class, e -> {
-            Driver driver = simEngine.getDrivers().stream()
-                    .filter(d -> d.getId().equals(e.driverId())).findFirst().orElse(null);
-            if (driver != null && mapBridge != null) {
-                mapBridge.updateDriver(driver);
-            }
-        });
+        // ── No individual per-event map calls ──────────────────────────
+        // All map data is pushed in a single batched frame per tick.
+        // Individual events (OrderCreated, etc.) no longer need to send
+        // JS commands — the tick handler collects ALL state and flushes once.
 
-        // Order created → map marker
-        eventBus.subscribe(Events.OrderCreated.class, e -> {
-            if (mapBridge != null) mapBridge.addOrder(e.order());
-        });
-
-        // Order delivered/cancelled → remove marker
-        eventBus.subscribe(Events.OrderDelivered.class, e -> {
-            if (mapBridge != null) mapBridge.removeOrder(e.orderId());
-        });
-        eventBus.subscribe(Events.OrderCancelled.class, e -> {
-            if (mapBridge != null) mapBridge.removeOrder(e.orderId());
-        });
-
-        // Simulation tick → push traffic, weather, heatmap, routes to map
+        // Simulation tick → batch ALL map updates into a single frame
         eventBus.subscribe(Events.SimulationTick.class, e -> {
             if (mapBridge == null) return;
 
-            // Push traffic, weather, heatmap every 15 ticks (reduce flicker)
-            if (e.tickNumber() % 15 == 0) {
-                mapBridge.updateTraffic(simEngine.getCorridorSeverity());
-                mapBridge.updateWeatherZones(simEngine.getRegions());
-                mapBridge.updateOrderHeat(simEngine.getActiveOrders());
-            }
+            // ── EVERY tick: driver positions (animation in JS handles smoothing) ──
+            mapBridge.setDriverPositions(simEngine.getDrivers());
 
-            // Push driver routes every 3 ticks (OSRM road-following routes)
+            // ── Every 3 ticks: request OSRM routes + build route GeoJSON ──
             if (e.tickNumber() % 3 == 0) {
                 for (Driver d : simEngine.getDrivers()) {
                     if (d.getTargetLocation() != null) {
@@ -840,9 +814,25 @@ public class MainApp extends Application {
                         mapBridge.clearDriverRoute(d.getId());
                     }
                 }
-                // Push all cached routes (OSRM results) to the map
-                mapBridge.pushCachedRoutes();
+                mapBridge.buildAndSetRouteData();
             }
+
+            // ── Every 15 ticks: traffic, weather, orders overlays ──
+            if (e.tickNumber() % 15 == 0) {
+                mapBridge.setTrafficData(simEngine.getCorridorSeverity());
+                mapBridge.setWeatherData(simEngine.getRegions());
+                mapBridge.setOrderData(simEngine.getActiveOrders());
+            }
+
+            // ── Road network: push once on first tick ──
+            if (e.tickNumber() == 1) {
+                mapBridge.setRoadNetworkData();
+            }
+
+            // ════════════════════════════════════════════════════════
+            // FLUSH: ONE single JS command with ALL accumulated data
+            // ════════════════════════════════════════════════════════
+            mapBridge.flushFrame();
         });
 
         // Metrics snapshot → KPI UI
