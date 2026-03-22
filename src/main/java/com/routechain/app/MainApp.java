@@ -111,8 +111,8 @@ public class MainApp extends Application {
 
         // ── Right floating cards ────────────────────────────────────────
         VBox rightStack = new VBox(16);
-        rightStack.setMaxWidth(300);
-        rightStack.setPrefWidth(300);
+        rightStack.setMaxWidth(340);
+        rightStack.setPrefWidth(340);
         rightStack.getChildren().addAll(
                 createKpiBar(),
                 createCountersCard(),
@@ -499,11 +499,11 @@ public class MainApp extends Application {
 
         VBox netHrBox = new VBox(4);
         netHrBox.setAlignment(Pos.CENTER);
-        netHrBox.setPadding(new Insets(0, 16, 0, 16));
+        netHrBox.setPadding(new Insets(0, 12, 0, 12));
         Label netLabel = new Label("NET/HR");
         netLabel.getStyleClass().add("label-eyebrow");
         Label netVal = new Label();
-        netVal.getStyleClass().add("metric-value-large");
+        netVal.getStyleClass().add("metric-value-medium");
         netVal.textProperty().bind(netPerHour.asString("%.0fk"));
         netHrBox.getChildren().addAll(netLabel, netVal);
 
@@ -556,7 +556,8 @@ public class MainApp extends Application {
     private VBox createKpiItem(String label, DoubleProperty value, String unit, String colorClass) {
         VBox box = new VBox(4);
         box.setAlignment(Pos.CENTER);
-        box.setPadding(new Insets(0, 16, 0, 16));
+        box.setPadding(new Insets(0, 12, 0, 12));
+        HBox.setHgrow(box, Priority.ALWAYS);
         Label lbl = new Label(label);
         lbl.getStyleClass().add("label-eyebrow");
         Label val = new Label();

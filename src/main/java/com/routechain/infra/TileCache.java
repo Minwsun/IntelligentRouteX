@@ -28,7 +28,7 @@ public class TileCache {
     private static final String TILE_URL_TEMPLATE =
             "https://basemaps.cartocdn.com/dark_all/%d/%d/%d@2x.png";
 
-    private static final int MAX_CACHE_SIZE = 512;
+    private static final int MAX_CACHE_SIZE = 1024;
     private static final int TILE_SIZE = 256;
 
     private final HttpClient httpClient;
@@ -48,7 +48,7 @@ public class TileCache {
     public TileCache() {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(15))
-                .executor(Executors.newFixedThreadPool(3))
+                .executor(Executors.newFixedThreadPool(8))
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
 
@@ -61,7 +61,7 @@ public class TileCache {
         };
 
         this.inFlight = new ConcurrentHashMap<>();
-        this.downloadPool = Executors.newFixedThreadPool(3, r -> {
+        this.downloadPool = Executors.newFixedThreadPool(8, r -> {
             Thread t = new Thread(r, "tile-download");
             t.setDaemon(true);
             return t;
@@ -124,6 +124,47 @@ public class TileCache {
             return cache.containsKey(key);
         }
     }
+
+    /**
+     * Get a placeholder tile from a parent zoom level.
+     * Used during zoom transitions to avoid blank gaps while real tiles download.
+     * Returns null if no parent tile is cached.
+     *
+     * @return PlaceholderResult with the parent image and source coordinates for
+     *         drawing only the relevant sub-region of the parent tile.
+     */
+    public PlaceholderResult getPlaceholderTile(int tileX, int tileY, int zoom) {
+        // Walk up parent zoom levels (max 3 levels for quality)
+        for (int dz = 1; dz <= 3; dz++) {
+            int parentZ = zoom - dz;
+            if (parentZ < 0) break;
+            int shift = dz;
+            int parentX = tileX >> shift;
+            int parentY = tileY >> shift;
+            String parentKey = parentZ + "/" + parentX + "/" + parentY;
+            Image parentImg;
+            synchronized (cache) {
+                parentImg = cache.get(parentKey);
+            }
+            if (parentImg != null) {
+                // Calculate which sub-region of the parent tile to use
+                int divisions = 1 << shift; // 2, 4, 8
+                int subX = tileX % divisions;
+                int subY = tileY % divisions;
+                double subSize = TILE_SIZE / (double) divisions;
+                double srcX = subX * subSize;
+                double srcY = subY * subSize;
+                return new PlaceholderResult(parentImg, srcX, srcY, subSize);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Result of placeholder lookup — contains the parent tile image
+     * and the sub-region coordinates to draw from it.
+     */
+    public record PlaceholderResult(Image image, double srcX, double srcY, double srcSize) {}
 
     /**
      * Download a single tile and return as Image.

@@ -294,17 +294,33 @@ public class NativeMapPane extends Pane {
         int maxTX = Math.min(numTiles - 1, (int) Math.floor(vpRight / TILE_SIZE));
         int maxTY = Math.min(numTiles - 1, (int) Math.floor(vpBottom / TILE_SIZE));
 
-        // Draw visible tiles
+        // Draw visible tiles — use placeholder from parent zoom if tile not cached
         for (int tx = minTX; tx <= maxTX; tx++) {
             for (int ty = minTY; ty <= maxTY; ty++) {
+                double px = (tx * TILE_SIZE - vpLeft) * scale;
+                double py = (ty * TILE_SIZE - vpTop) * scale;
+                double sz = TILE_SIZE * scale;
+
                 Image tile = tileCache.getTile(tx, ty, z);
                 if (tile != null) {
-                    double px = (tx * TILE_SIZE - vpLeft) * scale;
-                    double py = (ty * TILE_SIZE - vpTop) * scale;
-                    double sz = TILE_SIZE * scale;
                     gc.drawImage(tile, px, py, sz, sz);
+                } else {
+                    // Placeholder: draw scaled sub-region from a parent zoom tile
+                    TileCache.PlaceholderResult ph = tileCache.getPlaceholderTile(tx, ty, z);
+                    if (ph != null) {
+                        gc.drawImage(ph.image(),
+                                ph.srcX(), ph.srcY(), ph.srcSize(), ph.srcSize(),
+                                px, py, sz, sz);
+                    }
                 }
             }
+        }
+
+        // Preload ±1 zoom for smoother future transitions
+        if (z > 0) {
+            int pMinX = minTX >> 1, pMinY = minTY >> 1;
+            int pMaxX = maxTX >> 1, pMaxY = maxTY >> 1;
+            tileCache.preload(pMinX, pMinY, pMaxX, pMaxY, z - 1);
         }
     }
 
