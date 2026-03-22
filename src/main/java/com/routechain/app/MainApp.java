@@ -80,6 +80,8 @@ public class MainApp extends Application {
         mapBridge = new MapBridge(nativeMap);
         mapBridge.attach();
         mapBridge.setOnDriverSelected(this::onDriverSelected);
+        mapBridge.setDriverLookup(id -> simEngine.getDrivers().stream()
+                .filter(d -> d.getId().equals(id)).findFirst().orElse(null));
         mapBridge.setOnMapReady(() -> {
             System.out.println("[App] Map ready — road network will push on first tick");
         });

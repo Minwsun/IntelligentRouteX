@@ -24,6 +24,8 @@ public class Driver {
     private volatile GeoPoint targetLocation;
     private volatile double speedKmh;
     private volatile double heading;
+    private final List<GeoPoint> routeWaypoints = new ArrayList<>();
+    private volatile int currentWaypointIndex = 0;
 
     public Driver(String id, String name, GeoPoint initialLocation,
                   String regionId, VehicleType vehicleType) {
@@ -72,6 +74,62 @@ public class Driver {
     public void addEarning(double amount) { this.netEarningToday += amount; }
     public void setUtilizationScore(double score) { this.utilizationScore = score; }
     public void setActiveBundleId(String bundleId) { this.activeBundleId = bundleId; }
+
+    /**
+     * Set route waypoints from OSRM. Driver follows these sequentially.
+     * Coordinates are [lng, lat] pairs — converted to GeoPoint.
+     */
+    public void setRouteWaypoints(List<double[]> coordinates) {
+        synchronized (routeWaypoints) {
+            routeWaypoints.clear();
+            if (coordinates != null) {
+                for (double[] c : coordinates) {
+                    routeWaypoints.add(new GeoPoint(c[1], c[0])); // OSRM: [lng, lat]
+                }
+            }
+            currentWaypointIndex = 0;
+        }
+    }
+
+    /**
+     * Get the current waypoint to move toward.
+     * Returns null if no waypoints or all consumed.
+     */
+    public GeoPoint getCurrentWaypoint() {
+        synchronized (routeWaypoints) {
+            if (currentWaypointIndex < routeWaypoints.size()) {
+                return routeWaypoints.get(currentWaypointIndex);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Advance to the next waypoint. Called when driver arrives near current waypoint.
+     */
+    public void advanceWaypoint() {
+        synchronized (routeWaypoints) {
+            if (currentWaypointIndex < routeWaypoints.size()) {
+                currentWaypointIndex++;
+            }
+        }
+    }
+
+    /**
+     * Check if driver has route waypoints to follow.
+     */
+    public boolean hasRouteWaypoints() {
+        synchronized (routeWaypoints) {
+            return currentWaypointIndex < routeWaypoints.size();
+        }
+    }
+
+    public void clearRouteWaypoints() {
+        synchronized (routeWaypoints) {
+            routeWaypoints.clear();
+            currentWaypointIndex = 0;
+        }
+    }
 
     public boolean isAvailable() {
         return state == DriverState.ONLINE_IDLE && activeOrderIds.isEmpty();

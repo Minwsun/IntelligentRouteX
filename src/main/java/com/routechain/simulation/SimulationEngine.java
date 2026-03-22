@@ -246,18 +246,33 @@ public class SimulationEngine {
                     driver.setSpeedKmh(5 + rng.nextDouble() * 10);
                 }
             } else {
-                // Move towards target
+                // Calculate speed based on traffic + weather
                 double speedMs = (20 + rng.nextDouble() * 20) * (1.0 - trafficIntensity * 0.6);
                 if (weatherProfile == WeatherProfile.HEAVY_RAIN) speedMs *= 0.7;
                 if (weatherProfile == WeatherProfile.STORM) speedMs *= 0.4;
 
-                GeoPoint newLoc = driver.getCurrentLocation().moveTowards(target, speedMs);
+                // Determine movement target: follow waypoints if available,
+                // otherwise fall back to straight-line toward final target
+                GeoPoint moveTarget;
+                if (driver.hasRouteWaypoints()) {
+                    moveTarget = driver.getCurrentWaypoint();
+                } else {
+                    moveTarget = target;
+                }
+
+                GeoPoint newLoc = driver.getCurrentLocation().moveTowards(moveTarget, speedMs);
                 driver.setCurrentLocation(newLoc);
                 driver.setSpeedKmh(speedMs * 3.6);
 
-                // Check if arrived
+                // Check if arrived at current waypoint → advance
+                if (driver.hasRouteWaypoints() && newLoc.distanceTo(moveTarget) < 30) {
+                    driver.advanceWaypoint();
+                }
+
+                // Check if arrived at final destination
                 if (newLoc.distanceTo(target) < 30) {
                     driver.setTargetLocation(null);
+                    driver.clearRouteWaypoints();
                 }
             }
 

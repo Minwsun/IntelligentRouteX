@@ -52,6 +52,9 @@ public class MapBridge {
     private volatile String lastRoutesHash = "";
     private volatile boolean routesDirty = false;
 
+    // Driver lookup for pushing route waypoints to simulation
+    private volatile java.util.function.Function<String, Driver> driverLookup;
+
     private record CachedRoute(String destKey, List<double[]> coordinates, String phase) {}
     private record OsrmRequest(String driverId, String destKey, String phase,
                                 double fromLat, double fromLng, double toLat, double toLng) {}
@@ -86,6 +89,13 @@ public class MapBridge {
 
     public void setOnMapReady(Runnable callback) {
         mapPane.setOnMapReady(callback);
+    }
+
+    /**
+     * Set driver lookup function for pushing OSRM waypoints to drivers.
+     */
+    public void setDriverLookup(java.util.function.Function<String, Driver> lookup) {
+        this.driverLookup = lookup;
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -295,6 +305,14 @@ public class MapBridge {
                 }
                 if (coordinates.size() >= 2) {
                     routeCache.put(driverId, new CachedRoute(destKey, coordinates, phase));
+                    // Push waypoints to driver for road-following movement
+                    var lookup = driverLookup;
+                    if (lookup != null) {
+                        Driver driver = lookup.apply(driverId);
+                        if (driver != null) {
+                            driver.setRouteWaypoints(coordinates);
+                        }
+                    }
                     return true;
                 }
             }
