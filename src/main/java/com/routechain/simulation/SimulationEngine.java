@@ -54,7 +54,8 @@ public class SimulationEngine {
     private volatile int surgeEventsCounter = 0;
     private volatile int shortageEventsCounter = 0;
 
-    // AI dispatch engines
+    // AI dispatch agent (7-layer orchestrator)
+    private final DispatchAgent dispatchAgent;
     private final ReDispatchEngine reDispatchEngine = new ReDispatchEngine();
 
     public SimulationEngine() {
@@ -64,6 +65,7 @@ public class SimulationEngine {
         for (var c : corridors) {
             corridorSeverity.put(c.id(), 0.0);
         }
+        this.dispatchAgent = new DispatchAgent(regions);
     }
 
     // ── Lifecycle ───────────────────────────────────────────────────────
@@ -109,6 +111,7 @@ public class SimulationEngine {
         totalBundled = 0;
         surgeEventsCounter = 0;
         shortageEventsCounter = 0;
+        dispatchAgent.reset();
         reDispatchEngine.reset();
         eventBus.publish(new SimulationReset(Instant.now()));
     }
@@ -317,7 +320,7 @@ public class SimulationEngine {
         }
     }
 
-    // ── AI-scored dispatch pipeline ──────────────────────────────────────
+    // ── AI 7-layer dispatch pipeline ─────────────────────────────────────
     private void dispatchPendingOrders() {
         List<Order> pending = activeOrders.stream()
                 .filter(o -> o.getStatus() == OrderStatus.CONFIRMED
@@ -337,55 +340,52 @@ public class SimulationEngine {
 
         if (available.isEmpty()) return;
 
-        // Step 1: Try bundling
-        BundleEngine bundleEngine = new BundleEngine(trafficIntensity, weatherProfile);
-        List<BundleEngine.BundleCandidate> bundles = bundleEngine.findBundleCandidates(new ArrayList<>(pending));
+        // Run full 7-layer dispatch
+        DispatchAgent.DispatchResult result = dispatchAgent.dispatch(
+                new ArrayList<>(pending), new ArrayList<>(available),
+                drivers, activeOrders, simulatedHour,
+                trafficIntensity, weatherProfile);
 
-        // Apply bundles: tag orders with bundleId
-        for (BundleEngine.BundleCandidate bundle : bundles) {
-            for (Order o : bundle.getOrders()) {
-                o.setBundle(bundle.getBundleId());
+        // Execute selected plans
+        for (DispatchPlan plan : result.plans()) {
+            Driver best = plan.getDriver();
+
+            for (Order order : plan.getOrders()) {
+                order.assignDriver(best.getId());
+                order.markPickupStarted();
+                order.setDecisionTraceId(plan.getTraceId());
+                order.setBundle(plan.getBundle().bundleId());
+                order.setPredictedLateRisk(plan.getLateRisk());
+                order.setPredictedBundleFit(plan.getBundleEfficiency());
+
+                best.addOrder(order.getId());
+
+                totalAssignmentLatencyMs += order.getAssignmentLatencyMs();
+                totalAssignments++;
             }
-            totalBundled += bundle.getSize();
-        }
 
-        // Step 2: Score all driver-order candidates
-        DispatchScorer scorer = new DispatchScorer(
-                Collections.unmodifiableList(regions), trafficIntensity, weatherProfile);
-
-        List<CandidateAssignment> scoredCandidates = scorer.generateAndScore(
-                new ArrayList<>(pending), new ArrayList<>(available));
-
-        // Step 3: Select best non-conflicting assignments
-        List<CandidateAssignment> selected = scorer.selectBestAssignments(scoredCandidates);
-
-        // Step 4: Execute assignments
-        for (CandidateAssignment c : selected) {
-            Order order = c.getOrder();
-            Driver best = c.getDriver();
-
-            order.assignDriver(best.getId());
-            order.markPickupStarted();
-            order.setDecisionTraceId("DT-" + tickCounter.get() + "-" + order.getId());
             best.setState(DriverState.PICKUP_EN_ROUTE);
-            best.addOrder(order.getId());
-            best.setTargetLocation(order.getPickupPoint());
+            best.setTargetLocation(plan.getOrders().get(0).getPickupPoint());
+            best.setActiveBundleId(plan.getBundle().bundleId());
 
-            double deadheadKm = c.getDistanceToPickupKm();
+            double deadheadKm = plan.getPredictedDeadheadKm();
             totalDeadheadKm += deadheadKm;
             best.addDeadheadDistance(deadheadKm);
+            best.setContinuationValueCurrentZone(plan.getEndZoneOpportunity());
+            best.setOverloadRisk(plan.getCancellationRisk());
 
-            totalAssignmentLatencyMs += order.getAssignmentLatencyMs();
-            totalAssignments++;
-
-            // Update driver prediction fields
-            best.setContinuationValueCurrentZone(c.getContinuationValue());
-            best.setOverloadRisk(c.getOverloadRisk());
+            if (plan.getBundleSize() > 1) {
+                totalBundled += plan.getBundleSize();
+            }
 
             eventBus.publish(new DispatchDecision(
-                    order.getId(), best.getId(), c.getTotalScore(),
-                    c.getEstimatedPickupMinutes(), deadheadKm, c.getConfidence()));
-            eventBus.publish(new OrderAssigned(order.getId(), best.getId()));
+                    plan.getOrders().get(0).getId(), best.getId(),
+                    plan.getTotalScore(), plan.getPredictedTotalMinutes(),
+                    deadheadKm, plan.getConfidence()));
+
+            for (Order order : plan.getOrders()) {
+                eventBus.publish(new OrderAssigned(order.getId(), best.getId()));
+            }
             eventBus.publish(new DriverStateChanged(best.getId(),
                     DriverState.ONLINE_IDLE, DriverState.PICKUP_EN_ROUTE));
         }
