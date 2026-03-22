@@ -48,6 +48,8 @@ public class SimulationEngine {
     private volatile int totalLateDelivered = 0;
     private volatile double totalDeadheadKm = 0;
     private volatile double totalEarnings = 0;
+    private volatile long totalAssignmentLatencyMs = 0;
+    private volatile int totalAssignments = 0;
 
     public SimulationEngine() {
         this.regions = new ArrayList<>(HcmcCityData.createRegions());
@@ -94,6 +96,8 @@ public class SimulationEngine {
         totalLateDelivered = 0;
         totalDeadheadKm = 0;
         totalEarnings = 0;
+        totalAssignmentLatencyMs = 0;
+        totalAssignments = 0;
         eventBus.publish(new SimulationReset(Instant.now()));
     }
 
@@ -136,6 +140,7 @@ public class SimulationEngine {
             evolveTraffic();
             generateOrders();
             moveDrivers();
+            trackDriverProductivity();
             dispatchPendingOrders();
             processDeliveries();
             detectSurges();
@@ -322,18 +327,21 @@ public class SimulationEngine {
             }
 
             if (best != null) {
-                // Assign
+                // Assign + transition to pickup
                 order.assignDriver(best.getId());
-                order.setStatus(OrderStatus.PICKUP_EN_ROUTE);
+                order.markPickupStarted();
                 best.setState(DriverState.PICKUP_EN_ROUTE);
                 best.addOrder(order.getId());
                 best.setTargetLocation(order.getPickupPoint());
 
                 double deadheadKm = bestDist / 1000.0;
                 totalDeadheadKm += deadheadKm;
+                best.addDeadheadDistance(deadheadKm);
 
                 double confidence = Math.max(0.5, 1.0 - bestDist / 5000.0);
                 double eta = bestDist / (25 * 1000.0 / 3600.0) / 60.0; // minutes
+                totalAssignmentLatencyMs += order.getAssignmentLatencyMs();
+                totalAssignments++;
 
                 eventBus.publish(new DispatchDecision(
                         order.getId(), best.getId(), confidence,
@@ -359,21 +367,23 @@ public class SimulationEngine {
                 case PICKUP_EN_ROUTE -> {
                     if (driver.getTargetLocation() == null) {
                         // Arrived at pickup
-                        order.setStatus(OrderStatus.PICKED_UP);
+                        order.markPickedUp();
                         driver.setState(DriverState.DELIVERING);
                         driver.setTargetLocation(order.getDropoffPoint());
                         eventBus.publish(new OrderPickedUp(order.getId()));
                     }
                 }
                 case PICKED_UP, DROPOFF_EN_ROUTE -> {
-                    order.setStatus(OrderStatus.DROPOFF_EN_ROUTE);
+                    order.markDropoffStarted();
                     if (driver.getTargetLocation() == null) {
                         // Arrived at dropoff
                         order.markDelivered();
                         driver.setState(DriverState.ONLINE_IDLE);
                         driver.removeOrder(order.getId());
                         driver.addEarning(order.getQuotedFee());
+                        driver.incrementCompletedOrders();
                         totalDelivered++;
+                        if (order.isLate()) totalLateDelivered++;
                         totalEarnings += order.getQuotedFee();
                         completedOrders.add(order);
                         eventBus.publish(new OrderDelivered(order.getId()));
@@ -393,7 +403,7 @@ public class SimulationEngine {
                 order.setCancellationRisk(risk);
 
                 if (rng.nextDouble() < risk * 0.01) { // very small chance per tick
-                    order.setStatus(OrderStatus.CANCELLED);
+                    order.markCancelled("customer_cancelled");
                     cancelledOrders.add(order);
                     if (driver.getActiveOrderIds().contains(order.getId())) {
                         driver.removeOrder(order.getId());
@@ -486,6 +496,13 @@ public class SimulationEngine {
         return sb.toString().trim();
     }
 
+    // ── Driver productivity tracking ─────────────────────────────────────
+    private void trackDriverProductivity() {
+        for (Driver driver : drivers) {
+            driver.tickProductivity();
+        }
+    }
+
     // ── Metrics computation ─────────────────────────────────────────────
     private void computeMetrics() {
         int active = activeOrders.size();
@@ -500,11 +517,21 @@ public class SimulationEngine {
 
         double netPerHour = totalEarnings / Math.max(1, tickCounter.get() / 3600.0);
 
+        // Avg assignment latency in seconds
+        double avgAssignLatency = totalAssignments > 0
+                ? (double) totalAssignmentLatencyMs / totalAssignments / 1000.0 : 0;
+
+        // Avg driver utilization
+        double avgUtilization = drivers.stream()
+                .filter(d -> d.getState() != DriverState.OFFLINE)
+                .mapToDouble(Driver::getComputedUtilization)
+                .average().orElse(0);
+
         eventBus.publish(new MetricsSnapshot(
                 Math.round(onTime * 10) / 10.0,
                 Math.round(deadheadPct * 10) / 10.0,
                 Math.round(netPerHour),
-                0, // avgEta placeholder
+                avgAssignLatency,
                 active,
                 activeDriverCount,
                 totalDelivered,

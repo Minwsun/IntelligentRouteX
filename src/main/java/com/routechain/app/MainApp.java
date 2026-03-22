@@ -374,16 +374,29 @@ public class MainApp extends Application {
         Label pLabel = new Label("SIMULATION PRESETS");
         pLabel.getStyleClass().add("label-eyebrow");
 
-        HBox presetBtns = new HBox(6);
-        String[] presets = {"LOW", "MEDIUM", "HIGH", "EXTREME"};
-        for (String p : presets) {
+        HBox presetRow1 = new HBox(4);
+        HBox presetRow2 = new HBox(4);
+        String[] presetsRow1 = {"NORMAL", "RUSH", "RAIN", "SPIKE"};
+        String[] presetsRow2 = {"SHORTAGE", "DELAY", "SPAM", "REPLAY"};
+        for (String p : presetsRow1) {
             Button btn = new Button(p);
             btn.getStyleClass().add("secondary-button-small");
-            btn.setPrefWidth(70);
+            btn.setPrefWidth(65);
+            btn.setStyle("-fx-font-size: 9px; -fx-background-color: #232629; -fx-text-fill: #aaabad; "
+                    + "-fx-background-radius: 6; -fx-padding: 4 6; -fx-cursor: hand;");
             btn.setOnAction(e -> applyScenarioPreset(p));
-            presetBtns.getChildren().add(btn);
+            presetRow1.getChildren().add(btn);
         }
-        presetBox.getChildren().addAll(pLabel, presetBtns);
+        for (String p : presetsRow2) {
+            Button btn = new Button(p);
+            btn.getStyleClass().add("secondary-button-small");
+            btn.setPrefWidth(65);
+            btn.setStyle("-fx-font-size: 9px; -fx-background-color: #232629; -fx-text-fill: #aaabad; "
+                    + "-fx-background-radius: 6; -fx-padding: 4 6; -fx-cursor: hand;");
+            btn.setOnAction(e -> applyScenarioPreset(p));
+            presetRow2.getChildren().add(btn);
+        }
+        presetBox.getChildren().addAll(pLabel, presetRow1, presetRow2);
 
         // ── Traffic intensity slider ────────────────────────────────────
         VBox trafficBox = new VBox(6);
@@ -501,29 +514,53 @@ public class MainApp extends Application {
     private void applyScenarioPreset(String p) {
         simEngine.reset();
         switch (p) {
-            case "LOW" -> {
-                simEngine.setInitialDriverCount(1);
-                trafficSlider.setValue(0.1);
-                demandSlider.setValue(0.5);
+            case "NORMAL" -> {  // Scenario 1: Normal Flow
+                simEngine.setInitialDriverCount(35);
+                trafficSlider.setValue(0.3);
+                demandSlider.setValue(1.0);
                 updateWeatherUI(WeatherProfile.CLEAR);
             }
-            case "MEDIUM" -> {
+            case "RUSH" -> {    // Scenario 2: Rush Hour
+                simEngine.setInitialDriverCount(50);
+                trafficSlider.setValue(0.75);
+                demandSlider.setValue(1.5);
+                updateWeatherUI(WeatherProfile.CLEAR);
+            }
+            case "RAIN" -> {    // Scenario 3: Heavy Rain
+                simEngine.setInitialDriverCount(40);
+                trafficSlider.setValue(0.6);
+                demandSlider.setValue(1.7);
+                updateWeatherUI(WeatherProfile.HEAVY_RAIN);
+            }
+            case "SPIKE" -> {   // Scenario 4: Demand Spike
+                simEngine.setInitialDriverCount(30);
+                trafficSlider.setValue(0.4);
+                demandSlider.setValue(3.5);
+                updateWeatherUI(WeatherProfile.CLEAR);
+            }
+            case "SHORTAGE" -> { // Scenario 5: Driver Shortage
+                simEngine.setInitialDriverCount(8);
+                trafficSlider.setValue(0.5);
+                demandSlider.setValue(2.0);
+                updateWeatherUI(WeatherProfile.LIGHT_RAIN);
+            }
+            case "DELAY" -> {   // Scenario 6: Pickup Delay Cluster
+                simEngine.setInitialDriverCount(40);
+                trafficSlider.setValue(0.55);
+                demandSlider.setValue(1.3);
+                updateWeatherUI(WeatherProfile.LIGHT_RAIN);
+            }
+            case "SPAM" -> {    // Scenario 7: Spam Orders
+                simEngine.setInitialDriverCount(25);
+                trafficSlider.setValue(0.35);
+                demandSlider.setValue(4.0);
+                updateWeatherUI(WeatherProfile.CLEAR);
+            }
+            case "REPLAY" -> {  // Scenario 8: Replay Compare (baseline)
                 simEngine.setInitialDriverCount(35);
                 trafficSlider.setValue(0.4);
                 demandSlider.setValue(1.0);
                 updateWeatherUI(WeatherProfile.CLEAR);
-            }
-            case "HIGH" -> {
-                simEngine.setInitialDriverCount(100);
-                trafficSlider.setValue(0.7);
-                demandSlider.setValue(2.2);
-                updateWeatherUI(WeatherProfile.LIGHT_RAIN);
-            }
-            case "EXTREME" -> {
-                simEngine.setInitialDriverCount(250);
-                trafficSlider.setValue(0.95);
-                demandSlider.setValue(3.8);
-                updateWeatherUI(WeatherProfile.STORM);
             }
         }
         // Auto-start simulation in the new mode
