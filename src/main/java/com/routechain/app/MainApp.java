@@ -68,6 +68,10 @@ public class MainApp extends Application {
     private Label demandValueLabel;
     private Label trafficValueLabel;
 
+    private Slider trafficSlider;
+    private Slider demandSlider;
+    private HBox weatherBtnBox;
+
 
     @Override
     public void start(Stage stage) {
@@ -365,6 +369,22 @@ public class MainApp extends Application {
         version.getStyleClass().add("label-eyebrow");
         titleRow.getChildren().addAll(title, spacer, version);
 
+        // ── Preset Levels ───────────────────────────────────────────────
+        VBox presetBox = new VBox(6);
+        Label pLabel = new Label("SIMULATION PRESETS");
+        pLabel.getStyleClass().add("label-eyebrow");
+
+        HBox presetBtns = new HBox(6);
+        String[] presets = {"LOW", "MEDIUM", "HIGH", "EXTREME"};
+        for (String p : presets) {
+            Button btn = new Button(p);
+            btn.getStyleClass().add("secondary-button-small");
+            btn.setPrefWidth(70);
+            btn.setOnAction(e -> applyScenarioPreset(p));
+            presetBtns.getChildren().add(btn);
+        }
+        presetBox.getChildren().addAll(pLabel, presetBtns);
+
         // ── Traffic intensity slider ────────────────────────────────────
         VBox trafficBox = new VBox(6);
         HBox trafficLabelRow = new HBox();
@@ -377,7 +397,7 @@ public class MainApp extends Application {
         trafficValueLabel.getStyleClass().add("metric-delta-negative");
         trafficLabelRow.getChildren().addAll(tLabel, sp1, trafficValueLabel);
 
-        Slider trafficSlider = new Slider(0, 1, 0.42);
+        trafficSlider = new Slider(0, 1, 0.42);
         trafficSlider.setStyle("-fx-control-inner-background: #232629;");
         trafficSlider.valueProperty().addListener((obs, old, val) -> {
             double v = val.doubleValue();
@@ -399,7 +419,7 @@ public class MainApp extends Application {
         weatherValueLabel = new Label("☀ Clear");
         weatherValueLabel.setStyle("-fx-text-fill: #99f7ff; -fx-font-size: 13px; -fx-font-weight: 500;");
 
-        HBox weatherBtns = new HBox(6);
+        weatherBtnBox = new HBox(6);
         String[][] weatherOptions = {
                 {"☀", "CLEAR"}, {"🌦", "LIGHT_RAIN"}, {"🌧", "HEAVY_RAIN"}, {"⛈", "STORM"}
         };
@@ -407,34 +427,13 @@ public class MainApp extends Application {
             Button btn = new Button(opt[0]);
             btn.setStyle("-fx-background-color: #232629; -fx-text-fill: #aaabad; "
                     + "-fx-background-radius: 8; -fx-padding: 6 12; -fx-cursor: hand; -fx-font-size: 14;");
-            btn.setOnAction(e -> {
-                WeatherProfile wp = WeatherProfile.valueOf(opt[1]);
-                simEngine.setWeatherProfile(wp);
-                String label = switch (wp) {
-                    case CLEAR -> "☀ Clear";
-                    case LIGHT_RAIN -> "🌦 Light Rain";
-                    case HEAVY_RAIN -> "🌧 Heavy Rain";
-                    case STORM -> "⛈ Storm";
-                };
-                weatherValueLabel.setText(label);
-                // Highlight selected
-                for (var child : weatherBtns.getChildren()) {
-                    ((Button) child).setStyle("-fx-background-color: #232629; -fx-text-fill: #aaabad; "
-                            + "-fx-background-radius: 8; -fx-padding: 6 12; -fx-cursor: hand; -fx-font-size: 14;");
-                }
-                btn.setStyle("-fx-background-color: rgba(153,247,255,0.2); -fx-text-fill: #99f7ff; "
-                        + "-fx-background-radius: 8; -fx-padding: 6 12; -fx-cursor: hand; -fx-font-size: 14; "
-                        + "-fx-border-color: rgba(153,247,255,0.3); -fx-border-radius: 8;");
-            });
-            weatherBtns.getChildren().add(btn);
+            btn.setOnAction(e -> updateWeatherUI(WeatherProfile.valueOf(opt[1])));
+            weatherBtnBox.getChildren().add(btn);
         }
         // Init first button as selected
-        ((Button) weatherBtns.getChildren().get(0)).setStyle(
-                "-fx-background-color: rgba(153,247,255,0.2); -fx-text-fill: #99f7ff; "
-                        + "-fx-background-radius: 8; -fx-padding: 6 12; -fx-cursor: hand; -fx-font-size: 14; "
-                        + "-fx-border-color: rgba(153,247,255,0.3); -fx-border-radius: 8;");
+        highlightWeatherBtn(0);
 
-        weatherBox.getChildren().addAll(wLabel, weatherValueLabel, weatherBtns);
+        weatherBox.getChildren().addAll(wLabel, weatherValueLabel, weatherBtnBox);
 
         // ── Demand multiplier slider ────────────────────────────────────
         VBox demandBox = new VBox(6);
@@ -448,7 +447,7 @@ public class MainApp extends Application {
         demandValueLabel.setStyle("-fx-text-fill: #00ffab; -fx-font-size: 11px; -fx-font-weight: 600;");
         demandLabelRow.getChildren().addAll(dLabel, sp2, demandValueLabel);
 
-        Slider demandSlider = new Slider(0.2, 3.0, 1.0);
+        demandSlider = new Slider(0.2, 4.0, 1.0);
         demandSlider.setStyle("-fx-control-inner-background: #232629;");
         demandSlider.valueProperty().addListener((obs, old, val) -> {
             double v = val.doubleValue();
@@ -456,7 +455,7 @@ public class MainApp extends Application {
             String text;
             if (v < 0.6) text = String.format("×%.1f Low", v);
             else if (v < 1.4) text = String.format("×%.1f Normal", v);
-            else if (v < 2.0) text = String.format("×%.1f Elevated", v);
+            else if (v < 2.5) text = String.format("×%.1f Elevated", v);
             else text = String.format("×%.1f Extreme", v);
             demandValueLabel.setText(text);
         });
@@ -468,8 +467,68 @@ public class MainApp extends Application {
         runBtn.setMaxWidth(Double.MAX_VALUE);
         runBtn.setOnAction(e -> toggleSimulation(runBtn));
 
-        card.getChildren().addAll(titleRow, trafficBox, weatherBox, demandBox, runBtn);
+        card.getChildren().addAll(titleRow, presetBox, new Separator(), trafficBox, weatherBox, demandBox, runBtn);
         return card;
+    }
+
+    private void updateWeatherUI(WeatherProfile wp) {
+        simEngine.setWeatherProfile(wp);
+        String label = switch (wp) {
+            case CLEAR -> "☀ Clear";
+            case LIGHT_RAIN -> "🌦 Light Rain";
+            case HEAVY_RAIN -> "🌧 Heavy Rain";
+            case STORM -> "⛈ Storm";
+        };
+        weatherValueLabel.setText(label);
+        int index = wp.ordinal();
+        highlightWeatherBtn(index);
+    }
+
+    private void highlightWeatherBtn(int index) {
+        for (int i = 0; i < weatherBtnBox.getChildren().size(); i++) {
+            Button b = (Button) weatherBtnBox.getChildren().get(i);
+            if (i == index) {
+                b.setStyle("-fx-background-color: rgba(153,247,255,0.2); -fx-text-fill: #99f7ff; "
+                        + "-fx-background-radius: 8; -fx-padding: 6 12; -fx-cursor: hand; -fx-font-size: 14; "
+                        + "-fx-border-color: rgba(153,247,255,0.3); -fx-border-radius: 8;");
+            } else {
+                b.setStyle("-fx-background-color: #232629; -fx-text-fill: #aaabad; "
+                        + "-fx-background-radius: 8; -fx-padding: 6 12; -fx-cursor: hand; -fx-font-size: 14;");
+            }
+        }
+    }
+
+    private void applyScenarioPreset(String p) {
+        simEngine.reset();
+        switch (p) {
+            case "LOW" -> {
+                simEngine.setInitialDriverCount(1);
+                trafficSlider.setValue(0.1);
+                demandSlider.setValue(0.5);
+                updateWeatherUI(WeatherProfile.CLEAR);
+            }
+            case "MEDIUM" -> {
+                simEngine.setInitialDriverCount(35);
+                trafficSlider.setValue(0.4);
+                demandSlider.setValue(1.0);
+                updateWeatherUI(WeatherProfile.CLEAR);
+            }
+            case "HIGH" -> {
+                simEngine.setInitialDriverCount(100);
+                trafficSlider.setValue(0.7);
+                demandSlider.setValue(2.2);
+                updateWeatherUI(WeatherProfile.LIGHT_RAIN);
+            }
+            case "EXTREME" -> {
+                simEngine.setInitialDriverCount(250);
+                trafficSlider.setValue(0.95);
+                demandSlider.setValue(3.8);
+                updateWeatherUI(WeatherProfile.STORM);
+            }
+        }
+        // Auto-start simulation in the new mode
+        simEngine.start();
+        simStatusText.set("RUNNING");
     }
 
     private VBox createKpiBar() {

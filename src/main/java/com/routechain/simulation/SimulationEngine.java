@@ -36,6 +36,7 @@ public class SimulationEngine {
     private volatile double demandMultiplier = 1.0;
     private volatile int simulatedHour = 12;
     private volatile int simulatedMinute = 0;
+    private volatile int initialDriverCount = 30;
     private final Random rng = new Random(42);
 
     // Timeline history buffer (last 1800 ticks = 30 simulated minutes)
@@ -61,7 +62,7 @@ public class SimulationEngine {
     public void start() {
         if (lifecycle == SimulationLifecycle.RUNNING) return;
 
-        initializeDrivers(30);
+        initializeDrivers(initialDriverCount);
         lifecycle = SimulationLifecycle.RUNNING;
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "sim-engine");
@@ -117,9 +118,11 @@ public class SimulationEngine {
     public void setTrafficIntensity(double v) { this.trafficIntensity = Math.max(0, Math.min(1, v)); }
     public void setWeatherProfile(WeatherProfile wp) { this.weatherProfile = wp; }
     public void setDemandMultiplier(double dm) { this.demandMultiplier = dm; }
+    public void setInitialDriverCount(int count) { this.initialDriverCount = count; }
     public double getTrafficIntensity() { return trafficIntensity; }
     public WeatherProfile getWeatherProfile() { return weatherProfile; }
     public double getDemandMultiplier() { return demandMultiplier; }
+    public int getInitialDriverCount() { return initialDriverCount; }
 
     // ── Core tick ───────────────────────────────────────────────────────
     private void tick() {
