@@ -418,7 +418,8 @@ public class NativeMapPane extends Pane {
         for (RouteData route : routes.values()) {
             if (route.coordinates == null || route.coordinates.size() < 2) continue;
             boolean isPickup = "pickup".equals(route.phase);
-            Color color = isPickup ? Color.web("#FFBE6B") : Color.web("#00ffab");
+            // Pickup: Blue, Delivery: Yellow
+            Color color = isPickup ? Color.web("#00a8ff") : Color.web("#f1c40f");
 
             // Glow
             gc.setStroke(color.deriveColor(0, 1, 1, 0.12));
@@ -448,23 +449,23 @@ public class NativeMapPane extends Pane {
             gc.stroke();
             gc.setLineDashes(null);
 
-            // Destination dot
+            // Destination dot (White)
             double[] last = route.coordinates.get(route.coordinates.size() - 1);
             Point2D destPt = geoToScreen(last[1], last[0]);
-            gc.setFill(color);
-            gc.setStroke(Color.WHITE);
+            gc.setFill(Color.WHITE);
+            gc.setStroke(color); // Subtle stroke matching route color
             gc.setLineWidth(1.5);
-            gc.fillOval(destPt.getX() - 5, destPt.getY() - 5, 10, 10);
-            gc.strokeOval(destPt.getX() - 5, destPt.getY() - 5, 10, 10);
+            gc.fillOval(destPt.getX() - 4, destPt.getY() - 4, 8, 8);
+            gc.strokeOval(destPt.getX() - 4, destPt.getY() - 4, 8, 8);
         }
     }
 
     private void drawOrders(GraphicsContext gc) {
         synchronized (orderPoints) {
-            gc.setFill(Color.rgb(255, 113, 108, 0.45));
+            gc.setFill(Color.RED);
             for (OrderPoint op : orderPoints) {
                 Point2D pt = geoToScreen(op.lat, op.lng);
-                gc.fillOval(pt.getX() - 2, pt.getY() - 2, 4, 4);
+                gc.fillOval(pt.getX() - 3, pt.getY() - 3, 6, 6); // slightly larger red dot
             }
         }
     }
@@ -472,23 +473,44 @@ public class NativeMapPane extends Pane {
     private void drawDrivers(GraphicsContext gc) {
         for (DriverState ds : drivers.values()) {
             Point2D pt = geoToScreen(ds.curLat, ds.curLng);
-            boolean isBusy = !"ONLINE_IDLE".equals(ds.state);
-            Color color = isBusy ? Color.web("#99f7ff") : Color.web("#00ffab");
-            double size = isBusy ? 12 : 8;
+            Color color;
+            double size;
+            
+            // Map state to colors
+            if ("ONLINE_IDLE".equals(ds.state)) {
+                color = Color.web("#00ffab"); // Green
+                size = 8;
+            } else if ("PICKUP_EN_ROUTE".equals(ds.state)) {
+                color = Color.web("#00a8ff"); // Blue
+                size = 12;
+            } else if ("DELIVERING".equals(ds.state)) {
+                color = Color.web("#f1c40f"); // Yellow
+                size = 12;
+            } else {
+                color = Color.GRAY;
+                size = 8;
+            }
 
-            // Glow
+            // Triangle coordinates (pointing UP)
+            double[] xPoints = {pt.getX(), pt.getX() - size * 0.866, pt.getX() + size * 0.866};
+            double[] yPoints = {pt.getY() - size, pt.getY() + size * 0.5, pt.getY() + size * 0.5};
+
+            // Glow Triangle
             gc.setFill(color.deriveColor(0, 1, 1, 0.25));
-            gc.fillOval(pt.getX() - size, pt.getY() - size, size * 2, size * 2);
+            double glowSize = size + 4;
+            double[] gxPoints = {pt.getX(), pt.getX() - glowSize * 0.866, pt.getX() + glowSize * 0.866};
+            double[] gyPoints = {pt.getY() - glowSize, pt.getY() + glowSize * 0.5, pt.getY() + glowSize * 0.5};
+            gc.fillPolygon(gxPoints, gyPoints, 3);
 
-            // Dot
+            // Core Triangle
             gc.setFill(color);
-            gc.fillOval(pt.getX() - size / 2, pt.getY() - size / 2, size, size);
+            gc.fillPolygon(xPoints, yPoints, 3);
 
             // Name label (only at higher zoom)
             if (zoom >= 14) {
                 gc.setFill(Color.web("#99f7ff", 0.8));
                 gc.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 9));
-                gc.fillText(ds.name != null ? ds.name : ds.id, pt.getX() + size, pt.getY() - 4);
+                gc.fillText(ds.name != null ? ds.name : ds.id, pt.getX() + size + 2, pt.getY() - size);
             }
         }
     }
