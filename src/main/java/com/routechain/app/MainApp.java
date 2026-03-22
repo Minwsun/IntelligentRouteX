@@ -91,9 +91,6 @@ public class MainApp extends Application {
         // ── Header ──────────────────────────────────────────────────────
         HBox header = createHeader();
 
-        // ── Side Nav ────────────────────────────────────────────────────
-        VBox sideNav = createSideNav();
-
         // ── Left floating cards (scrollable) ────────────────────────────
         VBox leftStack = new VBox(16);
         leftStack.setMaxWidth(320);
@@ -101,7 +98,7 @@ public class MainApp extends Application {
         leftStack.getChildren().addAll(
                 createModeCard(),
                 createAiInsightCard(),
-                createScenarioCard()
+                createCollapsibleControlsCard()
         );
 
         ScrollPane leftScroll = new ScrollPane(leftStack);
@@ -120,12 +117,11 @@ public class MainApp extends Application {
         rightStack.getChildren().addAll(
                 createKpiBar(),
                 createCountersCard(),
-                createLayerControlCard(),
                 createDriverFocusCard()
         );
 
         // ── Floating layout ─────────────────────────────────────────────
-        HBox leftColumn = new HBox(12, sideNav, leftScroll);
+        HBox leftColumn = new HBox(12, leftScroll);
         leftColumn.setAlignment(Pos.TOP_LEFT);
         leftColumn.setPickOnBounds(false);
         leftColumn.setPadding(new Insets(80, 0, 24, 16));
@@ -236,52 +232,52 @@ public class MainApp extends Application {
         return header;
     }
 
-    private VBox createSideNav() {
-        VBox nav = new VBox(8);
-        nav.getStyleClass().add("side-nav");
-        nav.setAlignment(Pos.TOP_CENTER);
+    private VBox createCollapsibleControlsCard() {
+        VBox card = new VBox(0);
+        card.getStyleClass().add("glass-card");
 
-        Label dashIcon = new Label("📊");
-        dashIcon.setStyle("-fx-font-size: 22; -fx-text-fill: #99f7ff;");
-        VBox.setMargin(dashIcon, new Insets(0, 0, 16, 0));
-        nav.getChildren().add(dashIcon);
+        HBox header = new HBox();
+        header.setAlignment(Pos.CENTER_LEFT);
+        header.setPadding(new Insets(14, 16, 14, 16));
+        header.setCursor(javafx.scene.Cursor.HAND);
 
-        String[][] items = {
-                {"🚚", "Fleet", "true"},
-                {"📈", "Forecast", "false"},
-                {"🧪", "Scenarios", "false"},
-                {"📊", "Stats", "false"}
-        };
+        Label icon = new Label("⚙");
+        icon.setStyle("-fx-font-size: 16; -fx-text-fill: #99f7ff;");
 
-        for (String[] item : items) {
-            VBox btn = new VBox(4);
-            btn.setAlignment(Pos.CENTER);
-            btn.setPadding(new Insets(8));
-            Label icon = new Label(item[0]);
-            icon.setStyle("-fx-font-size: 18;");
-            Label label = new Label(item[1]);
-            if (item[2].equals("true")) {
-                btn.getStyleClass().add("side-nav-button-active");
-                label.getStyleClass().add("side-nav-label-active");
-            } else {
-                btn.getStyleClass().add("side-nav-button");
-                label.getStyleClass().add("side-nav-label");
-            }
-            btn.getChildren().addAll(icon, label);
-            nav.getChildren().add(btn);
-        }
+        Label title = new Label(" SYSTEM CONTROLS");
+        title.getStyleClass().add("text-title");
+        title.setPadding(new Insets(0, 0, 0, 8));
 
         Region spacer = new Region();
-        VBox.setVgrow(spacer, Priority.ALWAYS);
-        nav.getChildren().add(spacer);
+        HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Label helpIcon = new Label("❓");
-        helpIcon.setStyle("-fx-font-size: 16; -fx-text-fill: #535557; -fx-cursor: hand;");
-        Label logoutIcon = new Label("🚪");
-        logoutIcon.setStyle("-fx-font-size: 16; -fx-text-fill: #535557; -fx-cursor: hand;");
-        nav.getChildren().addAll(helpIcon, logoutIcon);
+        Label toggleIcon = new Label("▼");
+        toggleIcon.setStyle("-fx-text-fill: #aaabad; -fx-font-size: 12px;");
 
-        return nav;
+        header.getChildren().addAll(icon, title, spacer, toggleIcon);
+
+        VBox contentContainer = new VBox(16);
+        contentContainer.setPadding(new Insets(0, 16, 16, 16));
+
+        VBox scenarioBox = createScenarioBox();
+        VBox layerBox = createLayerBox();
+
+        Separator sep = new Separator();
+        sep.setStyle("-fx-background-color: rgba(70,72,74,0.3); -fx-max-height: 1;");
+
+        contentContainer.getChildren().addAll(scenarioBox, sep, layerBox);
+        contentContainer.setVisible(false);
+        contentContainer.setManaged(false);
+
+        header.setOnMouseClicked(e -> {
+            boolean isExpanded = contentContainer.isVisible();
+            contentContainer.setVisible(!isExpanded);
+            contentContainer.setManaged(!isExpanded);
+            toggleIcon.setText(isExpanded ? "▼" : "▲");
+        });
+
+        card.getChildren().addAll(header, contentContainer);
+        return card;
     }
 
     private VBox createModeCard() {
@@ -358,9 +354,8 @@ public class MainApp extends Application {
         return card;
     }
 
-    private VBox createScenarioCard() {
+    private VBox createScenarioBox() {
         VBox card = new VBox(16);
-        card.getStyleClass().add("glass-card");
 
         // Title
         HBox titleRow = new HBox();
@@ -570,9 +565,8 @@ public class MainApp extends Application {
         return sep;
     }
 
-    private VBox createLayerControlCard() {
+    private VBox createLayerBox() {
         VBox card = new VBox(10);
-        card.getStyleClass().add("glass-card-compact");
 
         Label title = new Label("VIEW LAYERS");
         title.getStyleClass().add("label-eyebrow");
