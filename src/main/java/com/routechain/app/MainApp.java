@@ -22,7 +22,6 @@ import javafx.stage.Stage;
 
 import java.time.*;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
 import java.util.concurrent.*;
 
 /**
@@ -97,7 +96,10 @@ public class MainApp extends Application {
         leftStack.setPrefWidth(320);
         leftStack.getChildren().addAll(
                 createModeCard(),
-                createCollapsibleControlsCard()
+                createKpiBar(),
+                createCountersCard(),
+                createCollapsibleControlsCard(),
+                createDriverFocusCard()
         );
 
         ScrollPane leftScroll = new ScrollPane(leftStack);
@@ -114,11 +116,8 @@ public class MainApp extends Application {
         rightStack.setMaxWidth(340);
         rightStack.setPrefWidth(340);
         rightStack.getChildren().addAll(
-                createKpiBar(),
-                createCountersCard(),
                 createAiInsightCard(),
-                createScenarioCard(),
-                createDriverFocusCard()
+                createScenarioCard()
         );
 
         // ── Floating layout ─────────────────────────────────────────────
