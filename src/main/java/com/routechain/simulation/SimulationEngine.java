@@ -4,6 +4,7 @@ import com.routechain.domain.*;
 import com.routechain.domain.Enums.*;
 import com.routechain.infra.EventBus;
 import com.routechain.infra.Events.*;
+import com.routechain.ai.OmegaDispatchAgent;
 
 import java.time.Instant;
 import java.util.*;
@@ -54,8 +55,8 @@ public class SimulationEngine {
     private volatile int surgeEventsCounter = 0;
     private volatile int shortageEventsCounter = 0;
 
-    // AI dispatch agent (7-layer orchestrator)
-    private final DispatchAgent dispatchAgent;
+    // AI dispatch agent (Omega — learned multi-agent brain)
+    private final OmegaDispatchAgent omegaAgent;
     private final ReDispatchEngine reDispatchEngine = new ReDispatchEngine();
 
     public SimulationEngine() {
@@ -65,7 +66,7 @@ public class SimulationEngine {
         for (var c : corridors) {
             corridorSeverity.put(c.id(), 0.0);
         }
-        this.dispatchAgent = new DispatchAgent(regions);
+        this.omegaAgent = new OmegaDispatchAgent(regions);
     }
 
     // ── Lifecycle ───────────────────────────────────────────────────────
@@ -111,7 +112,7 @@ public class SimulationEngine {
         totalBundled = 0;
         surgeEventsCounter = 0;
         shortageEventsCounter = 0;
-        dispatchAgent.reset();
+        omegaAgent.reset();
         reDispatchEngine.reset();
         eventBus.publish(new SimulationReset(Instant.now()));
     }
@@ -159,6 +160,13 @@ public class SimulationEngine {
             checkReDispatch();
             dispatchPendingOrders();
             processDeliveries();
+            omegaAgent.onTick(tick, driverId -> {
+                return drivers.stream()
+                        .filter(d -> d.getId().equals(driverId))
+                        .findFirst()
+                        .map(Driver::getAvgEarningPerHour)
+                        .orElse(0.0);
+            });
             detectSurges();
             computeMetrics();
             recordTimelineSnapshot(tick);
@@ -320,7 +328,7 @@ public class SimulationEngine {
         }
     }
 
-    // ── AI 7-layer dispatch pipeline ─────────────────────────────────────
+    // ── RouteChain Omega dispatch pipeline ──────────────────────────────
     private void dispatchPendingOrders() {
         List<Order> pending = activeOrders.stream()
                 .filter(o -> o.getStatus() == OrderStatus.CONFIRMED
@@ -340,8 +348,8 @@ public class SimulationEngine {
 
         if (available.isEmpty()) return;
 
-        // Run full 7-layer dispatch
-        DispatchAgent.DispatchResult result = dispatchAgent.dispatch(
+        // Run Omega dispatch pipeline
+        OmegaDispatchAgent.DispatchResult result = omegaAgent.dispatch(
                 new ArrayList<>(pending), new ArrayList<>(available),
                 drivers, activeOrders, simulatedHour,
                 trafficIntensity, weatherProfile);
@@ -440,6 +448,15 @@ public class SimulationEngine {
                         eventBus.publish(new OrderDelivered(order.getId()));
                         eventBus.publish(new DriverStateChanged(driver.getId(),
                                 DriverState.DELIVERING, DriverState.ONLINE_IDLE));
+
+                        // Omega learning callback
+                        double distKm = order.getPickupPoint().distanceTo(
+                                order.getDropoffPoint()) / 1000.0;
+                        double etaActual = distKm / Math.max(6, driver.getSpeedKmh()) * 60;
+                        omegaAgent.onOrderDelivered(order, driver,
+                                etaActual, order.isLate(), order.getQuotedFee(),
+                                trafficIntensity, weatherProfile, simulatedHour,
+                                tickCounter.get());
                     }
                 }
                 default -> {}
@@ -462,6 +479,10 @@ public class SimulationEngine {
                         driver.setTargetLocation(null);
                     }
                     eventBus.publish(new OrderCancelled(order.getId(), "customer_cancelled"));
+
+                    // Omega learning callback
+                    omegaAgent.onOrderCancelled(order, trafficIntensity,
+                            weatherProfile, simulatedHour);
                 }
             }
         }
