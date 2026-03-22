@@ -1,0 +1,493 @@
+package com.routechain.simulation;
+
+import com.routechain.domain.*;
+import com.routechain.domain.Enums.*;
+import com.routechain.infra.EventBus;
+import com.routechain.infra.Events.*;
+
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
+
+/**
+ * Core simulation engine — orchestrates all generators and dispatches
+ * on a configurable tick loop. All events are published to EventBus.
+ */
+public class SimulationEngine {
+    private final EventBus eventBus = EventBus.getInstance();
+    private final List<Region> regions;
+    private final List<Driver> drivers = new CopyOnWriteArrayList<>();
+    private final List<Order> activeOrders = new CopyOnWriteArrayList<>();
+    private final List<Order> completedOrders = new CopyOnWriteArrayList<>();
+    private final List<Order> cancelledOrders = new CopyOnWriteArrayList<>();
+    private final Map<String, Double> corridorSeverity = new ConcurrentHashMap<>();
+    private final List<HcmcCityData.TrafficCorridor> corridors;
+    private final List<GeoPoint> pickupPoints;
+
+    private final AtomicLong tickCounter = new AtomicLong(0);
+    private final AtomicLong orderIdSeq = new AtomicLong(0);
+    private ScheduledExecutorService scheduler;
+    private volatile SimulationLifecycle lifecycle = SimulationLifecycle.IDLE;
+
+    // Scenario parameters
+    private volatile double trafficIntensity = 0.3;
+    private volatile WeatherProfile weatherProfile = WeatherProfile.CLEAR;
+    private volatile double demandMultiplier = 1.0;
+    private volatile int simulatedHour = 12;
+    private final Random rng = new Random(42);
+
+    // Metrics accumulators
+    private volatile int totalDelivered = 0;
+    private volatile int totalLateDelivered = 0;
+    private volatile double totalDeadheadKm = 0;
+    private volatile double totalEarnings = 0;
+
+    public SimulationEngine() {
+        this.regions = new ArrayList<>(HcmcCityData.createRegions());
+        this.corridors = HcmcCityData.createCorridors();
+        this.pickupPoints = HcmcCityData.createPickupPoints();
+        for (var c : corridors) {
+            corridorSeverity.put(c.id(), 0.0);
+        }
+    }
+
+    // ── Lifecycle ───────────────────────────────────────────────────────
+    public void start() {
+        if (lifecycle == SimulationLifecycle.RUNNING) return;
+
+        initializeDrivers(30);
+        lifecycle = SimulationLifecycle.RUNNING;
+        scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "sim-engine");
+            t.setDaemon(true);
+            return t;
+        });
+        scheduler.scheduleAtFixedRate(this::tick, 0, 1000, TimeUnit.MILLISECONDS);
+        eventBus.publish(new SimulationStarted(Instant.now()));
+    }
+
+    public void stop() {
+        lifecycle = SimulationLifecycle.IDLE;
+        if (scheduler != null) {
+            scheduler.shutdownNow();
+            scheduler = null;
+        }
+        eventBus.publish(new SimulationStopped(Instant.now()));
+    }
+
+    public void reset() {
+        stop();
+        drivers.clear();
+        activeOrders.clear();
+        completedOrders.clear();
+        cancelledOrders.clear();
+        tickCounter.set(0);
+        orderIdSeq.set(0);
+        totalDelivered = 0;
+        totalLateDelivered = 0;
+        totalDeadheadKm = 0;
+        totalEarnings = 0;
+        eventBus.publish(new SimulationReset(Instant.now()));
+    }
+
+    public SimulationLifecycle getLifecycle() { return lifecycle; }
+    public List<Driver> getDrivers() { return Collections.unmodifiableList(drivers); }
+    public List<Order> getActiveOrders() { return Collections.unmodifiableList(activeOrders); }
+    public List<Region> getRegions() { return Collections.unmodifiableList(regions); }
+    public Map<String, Double> getCorridorSeverity() { return Collections.unmodifiableMap(corridorSeverity); }
+    public int getSimulatedHour() { return simulatedHour; }
+    public long getTickCount() { return tickCounter.get(); }
+    public int getTotalDelivered() { return totalDelivered; }
+    public int getTotalCancelled() { return cancelledOrders.size(); }
+
+    // ── Scenario config ─────────────────────────────────────────────────
+    public void setTrafficIntensity(double v) { this.trafficIntensity = Math.max(0, Math.min(1, v)); }
+    public void setWeatherProfile(WeatherProfile wp) { this.weatherProfile = wp; }
+    public void setDemandMultiplier(double dm) { this.demandMultiplier = dm; }
+    public double getTrafficIntensity() { return trafficIntensity; }
+    public WeatherProfile getWeatherProfile() { return weatherProfile; }
+    public double getDemandMultiplier() { return demandMultiplier; }
+
+    // ── Core tick ───────────────────────────────────────────────────────
+    private void tick() {
+        try {
+            long tick = tickCounter.incrementAndGet();
+            simulatedHour = (int) ((12 + tick / 60) % 24); // start at noon
+
+            evolveWeather();
+            evolveTraffic();
+            generateOrders();
+            moveDrivers();
+            dispatchPendingOrders();
+            processDeliveries();
+            detectSurges();
+            computeMetrics();
+
+            eventBus.publish(new SimulationTick(tick, Instant.now()));
+        } catch (Exception e) {
+            System.err.println("[SimEngine] Tick error: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    // ── Initialization ──────────────────────────────────────────────────
+    private void initializeDrivers(int count) {
+        String[] names = HcmcCityData.driverNames();
+        for (int i = 0; i < count && i < names.length; i++) {
+            Region region = regions.get(rng.nextInt(regions.size()));
+            GeoPoint location = randomPointInRegion(region);
+            VehicleType vt = rng.nextDouble() > 0.3 ? VehicleType.MOTORBIKE : VehicleType.CAR;
+            Driver d = new Driver("D" + (i + 1), names[i], location, region.getId(), vt);
+            drivers.add(d);
+            eventBus.publish(new DriverOnline(d.getId()));
+        }
+    }
+
+    // ── Weather evolution ───────────────────────────────────────────────
+    private void evolveWeather() {
+        double weatherIntensity = switch (weatherProfile) {
+            case CLEAR -> 0.0;
+            case LIGHT_RAIN -> 0.3;
+            case HEAVY_RAIN -> 0.7;
+            case STORM -> 0.95;
+        };
+
+        for (Region region : regions) {
+            // Add per-region variation
+            double variation = (rng.nextGaussian() * 0.1);
+            double intensity = Math.max(0, Math.min(1, weatherIntensity + variation));
+            region.setRainIntensity(intensity);
+            eventBus.publish(new WeatherChanged(region.getId(), weatherProfile, intensity));
+        }
+    }
+
+    // ── Traffic evolution ────────────────────────────────────────────────
+    private void evolveTraffic() {
+        double hourFactor = HcmcCityData.hourlyMultiplier(simulatedHour) / 2.0;
+        double weatherFactor = weatherProfile == WeatherProfile.HEAVY_RAIN ? 0.3
+                : weatherProfile == WeatherProfile.STORM ? 0.5 : 0.0;
+
+        for (var corridor : corridors) {
+            double baseSeverity = trafficIntensity * hourFactor;
+            double noise = rng.nextGaussian() * 0.08;
+            double severity = Math.max(0, Math.min(1,
+                    baseSeverity + weatherFactor + noise));
+            corridorSeverity.put(corridor.id(), severity);
+
+            eventBus.publish(new TrafficSegmentUpdated(
+                    corridor.id(), corridor.from(), corridor.to(), severity));
+        }
+
+        for (Region region : regions) {
+            double avgSeverity = corridorSeverity.values().stream()
+                    .mapToDouble(Double::doubleValue).average().orElse(0);
+            region.setCongestionScore(Math.min(1, avgSeverity + rng.nextGaussian() * 0.05));
+            eventBus.publish(new TrafficUpdated(region.getId(), region.getCongestionScore()));
+        }
+    }
+
+    // ── Order generation (Poisson-like) ─────────────────────────────────
+    private void generateOrders() {
+        Map<String, Double> baseRates = HcmcCityData.baseDemandRates();
+        double hourMult = HcmcCityData.hourlyMultiplier(simulatedHour);
+        double weatherMult = switch (weatherProfile) {
+            case CLEAR -> 1.0;
+            case LIGHT_RAIN -> 1.3;
+            case HEAVY_RAIN -> 1.7;
+            case STORM -> 0.6; // fewer orders in storm
+        };
+
+        for (Region region : regions) {
+            double rate = baseRates.getOrDefault(region.getId(), 0.1)
+                    * hourMult * weatherMult * demandMultiplier;
+
+            // Poisson approximation
+            if (rng.nextDouble() < rate) {
+                Order order = createRandomOrder(region);
+                activeOrders.add(order);
+                region.setCurrentDemandPressure(region.getCurrentDemandPressure() + 1);
+                eventBus.publish(new OrderCreated(order));
+            }
+        }
+    }
+
+    private Order createRandomOrder(Region region) {
+        long seq = orderIdSeq.incrementAndGet();
+        GeoPoint pickup = randomPointInRegion(region);
+        Region dropoffRegion = regions.get(rng.nextInt(regions.size()));
+        GeoPoint dropoff = randomPointInRegion(dropoffRegion);
+
+        double dist = pickup.distanceTo(dropoff);
+        double fee = 12000 + dist * 5; // VND
+        int eta = (int) (dist / 500 * (1 + trafficIntensity)); // rough ETA
+
+        return new Order("ORD-" + seq, "CUS-" + (rng.nextInt(1000) + 1),
+                region.getId(), pickup, dropoff, dropoffRegion.getId(),
+                fee, Math.max(5, eta));
+    }
+
+    // ── Driver movement ─────────────────────────────────────────────────
+    private void moveDrivers() {
+        for (Driver driver : drivers) {
+            if (driver.getState() == DriverState.OFFLINE) continue;
+
+            GeoPoint target = driver.getTargetLocation();
+            if (target == null) {
+                // Idle drivers wander slightly
+                if (driver.getState() == DriverState.ONLINE_IDLE) {
+                    double dx = (rng.nextGaussian() * 0.0004);
+                    double dy = (rng.nextGaussian() * 0.0004);
+                    GeoPoint newLoc = new GeoPoint(
+                            driver.getCurrentLocation().lat() + dx,
+                            driver.getCurrentLocation().lng() + dy
+                    );
+                    driver.setCurrentLocation(newLoc);
+                    driver.setSpeedKmh(5 + rng.nextDouble() * 10);
+                }
+            } else {
+                // Move towards target
+                double speedMs = (20 + rng.nextDouble() * 20) * (1.0 - trafficIntensity * 0.6);
+                if (weatherProfile == WeatherProfile.HEAVY_RAIN) speedMs *= 0.7;
+                if (weatherProfile == WeatherProfile.STORM) speedMs *= 0.4;
+
+                GeoPoint newLoc = driver.getCurrentLocation().moveTowards(target, speedMs);
+                driver.setCurrentLocation(newLoc);
+                driver.setSpeedKmh(speedMs * 3.6);
+
+                // Check if arrived
+                if (newLoc.distanceTo(target) < 30) {
+                    driver.setTargetLocation(null);
+                }
+            }
+
+            eventBus.publish(new DriverLocationUpdated(
+                    driver.getId(), driver.getCurrentLocation(), driver.getSpeedKmh()));
+        }
+    }
+
+    // ── Simple dispatch (nearest viable driver) ─────────────────────────
+    private void dispatchPendingOrders() {
+        List<Order> pending = activeOrders.stream()
+                .filter(o -> o.getStatus() == OrderStatus.CONFIRMED
+                        || o.getStatus() == OrderStatus.PENDING_ASSIGNMENT)
+                .toList();
+
+        for (Order order : pending) {
+            order.setStatus(OrderStatus.PENDING_ASSIGNMENT);
+
+            // Find nearest available driver
+            Driver best = null;
+            double bestDist = Double.MAX_VALUE;
+            for (Driver driver : drivers) {
+                if (!driver.isAvailable()) continue;
+                double dist = driver.getCurrentLocation().distanceTo(order.getPickupPoint());
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = driver;
+                }
+            }
+
+            if (best != null) {
+                // Assign
+                order.assignDriver(best.getId());
+                order.setStatus(OrderStatus.PICKUP_EN_ROUTE);
+                best.setState(DriverState.PICKUP_EN_ROUTE);
+                best.addOrder(order.getId());
+                best.setTargetLocation(order.getPickupPoint());
+
+                double deadheadKm = bestDist / 1000.0;
+                totalDeadheadKm += deadheadKm;
+
+                double confidence = Math.max(0.5, 1.0 - bestDist / 5000.0);
+                double eta = bestDist / (25 * 1000.0 / 3600.0) / 60.0; // minutes
+
+                eventBus.publish(new DispatchDecision(
+                        order.getId(), best.getId(), confidence,
+                        eta, deadheadKm, confidence));
+                eventBus.publish(new OrderAssigned(order.getId(), best.getId()));
+                eventBus.publish(new DriverStateChanged(best.getId(),
+                        DriverState.ONLINE_IDLE, DriverState.PICKUP_EN_ROUTE));
+            }
+        }
+    }
+
+    // ── Process deliveries (state transitions) ──────────────────────────
+    private void processDeliveries() {
+        for (Order order : activeOrders) {
+            if (order.getAssignedDriverId() == null) continue;
+
+            Driver driver = drivers.stream()
+                    .filter(d -> d.getId().equals(order.getAssignedDriverId()))
+                    .findFirst().orElse(null);
+            if (driver == null) continue;
+
+            switch (order.getStatus()) {
+                case PICKUP_EN_ROUTE -> {
+                    if (driver.getTargetLocation() == null) {
+                        // Arrived at pickup
+                        order.setStatus(OrderStatus.PICKED_UP);
+                        driver.setState(DriverState.DELIVERING);
+                        driver.setTargetLocation(order.getDropoffPoint());
+                        eventBus.publish(new OrderPickedUp(order.getId()));
+                    }
+                }
+                case PICKED_UP, DROPOFF_EN_ROUTE -> {
+                    order.setStatus(OrderStatus.DROPOFF_EN_ROUTE);
+                    if (driver.getTargetLocation() == null) {
+                        // Arrived at dropoff
+                        order.markDelivered();
+                        driver.setState(DriverState.ONLINE_IDLE);
+                        driver.removeOrder(order.getId());
+                        driver.addEarning(order.getQuotedFee());
+                        totalDelivered++;
+                        totalEarnings += order.getQuotedFee();
+                        completedOrders.add(order);
+                        eventBus.publish(new OrderDelivered(order.getId()));
+                        eventBus.publish(new DriverStateChanged(driver.getId(),
+                                DriverState.DELIVERING, DriverState.ONLINE_IDLE));
+                    }
+                }
+                default -> {}
+            }
+
+            // Random cancellation risk
+            if (order.getStatus() != OrderStatus.DELIVERED
+                    && order.getStatus() != OrderStatus.CANCELLED) {
+                double risk = trafficIntensity * 0.1
+                        + (weatherProfile == WeatherProfile.HEAVY_RAIN ? 0.08 : 0)
+                        + (weatherProfile == WeatherProfile.STORM ? 0.15 : 0);
+                order.setCancellationRisk(risk);
+
+                if (rng.nextDouble() < risk * 0.01) { // very small chance per tick
+                    order.setStatus(OrderStatus.CANCELLED);
+                    cancelledOrders.add(order);
+                    if (driver.getActiveOrderIds().contains(order.getId())) {
+                        driver.removeOrder(order.getId());
+                        driver.setState(DriverState.ONLINE_IDLE);
+                        driver.setTargetLocation(null);
+                    }
+                    eventBus.publish(new OrderCancelled(order.getId(), "customer_cancelled"));
+                }
+            }
+        }
+
+        // Clean up delivered/cancelled from active list
+        activeOrders.removeIf(o -> o.getStatus() == OrderStatus.DELIVERED
+                || o.getStatus() == OrderStatus.CANCELLED
+                || o.getStatus() == OrderStatus.FAILED);
+    }
+
+    // ── Surge detection ─────────────────────────────────────────────────
+    private void detectSurges() {
+        for (Region region : regions) {
+            long pendingInRegion = activeOrders.stream()
+                    .filter(o -> o.getPickupRegionId().equals(region.getId()))
+                    .filter(o -> o.getStatus() == OrderStatus.PENDING_ASSIGNMENT
+                            || o.getStatus() == OrderStatus.CONFIRMED)
+                    .count();
+
+            long driversInRegion = drivers.stream()
+                    .filter(d -> d.getState() == DriverState.ONLINE_IDLE)
+                    .filter(d -> region.contains(d.getCurrentLocation()))
+                    .count();
+
+            region.setCurrentDriverSupply(driversInRegion);
+            double shortage = region.getShortageRatio();
+
+            double surgeScore = 0.30 * Math.min(1, pendingInRegion / 5.0)
+                    + 0.20 * shortage
+                    + 0.15 * region.getCongestionScore()
+                    + 0.15 * region.getRainIntensity()
+                    + 0.10 * trafficIntensity
+                    + 0.10 * (demandMultiplier - 1.0);
+
+            surgeScore = Math.max(0, Math.min(1, surgeScore));
+
+            SurgeSeverity severity;
+            if (surgeScore >= 0.75) severity = SurgeSeverity.CRITICAL;
+            else if (surgeScore >= 0.55) severity = SurgeSeverity.HIGH;
+            else if (surgeScore >= 0.35) severity = SurgeSeverity.MEDIUM;
+            else severity = SurgeSeverity.NORMAL;
+
+            SurgeSeverity old = region.getSurgeSeverity();
+            region.setSurgeSeverity(severity);
+
+            if (severity != SurgeSeverity.NORMAL && severity != old) {
+                String cause = buildSurgeCause(pendingInRegion, shortage, region);
+                eventBus.publish(new SurgeDetected(region.getId(), surgeScore, severity, cause));
+                eventBus.publish(new AlertRaised(
+                        "SURGE-" + region.getId() + "-" + tickCounter.get(),
+                        AlertType.SURGE,
+                        severity + " surge in " + region.getName(),
+                        cause,
+                        severity,
+                        region.getId(),
+                        Instant.now()
+                ));
+
+                // AI insight
+                if (severity == SurgeSeverity.HIGH || severity == SurgeSeverity.CRITICAL) {
+                    int reroute = (int) (driversInRegion * 0.3 + 2);
+                    eventBus.publish(new AiInsight(
+                            "Surge Prediction",
+                            region.getName() + " surges detected. Rerouting " + reroute + " drivers.",
+                            "Deadhead -" + (int)(surgeScore * 20) + "%",
+                            Instant.now()
+                    ));
+                }
+            }
+
+            if (shortage > 0.5) {
+                eventBus.publish(new DriverShortageDetected(region.getId(), shortage));
+            }
+        }
+    }
+
+    private String buildSurgeCause(long pending, double shortage, Region region) {
+        StringBuilder sb = new StringBuilder();
+        if (pending > 3) sb.append("High order backlog (").append(pending).append("). ");
+        if (shortage > 0.5) sb.append("Driver shortage (").append((int)(shortage*100)).append("%). ");
+        if (region.getRainIntensity() > 0.5) sb.append("Heavy rain. ");
+        if (region.getCongestionScore() > 0.6) sb.append("Traffic congestion. ");
+        return sb.toString().trim();
+    }
+
+    // ── Metrics computation ─────────────────────────────────────────────
+    private void computeMetrics() {
+        int active = activeOrders.size();
+        int activeDriverCount = (int) drivers.stream()
+                .filter(d -> d.getState() != DriverState.OFFLINE).count();
+
+        double onTime = totalDelivered > 0
+                ? (double)(totalDelivered - totalLateDelivered) / totalDelivered * 100 : 100;
+
+        double deadheadPct = totalDeadheadKm > 0 && totalDelivered > 0
+                ? Math.min(40, totalDeadheadKm / (totalDelivered * 2) * 100) : 0;
+
+        double netPerHour = totalEarnings / Math.max(1, tickCounter.get() / 3600.0);
+
+        eventBus.publish(new MetricsSnapshot(
+                Math.round(onTime * 10) / 10.0,
+                Math.round(deadheadPct * 10) / 10.0,
+                Math.round(netPerHour),
+                0, // avgEta placeholder
+                active,
+                activeDriverCount,
+                totalDelivered,
+                cancelledOrders.size()
+        ));
+    }
+
+    // ── Utilities ────────────────────────────────────────────────────────
+    private GeoPoint randomPointInRegion(Region region) {
+        double angle = rng.nextDouble() * 2 * Math.PI;
+        double dist = rng.nextDouble() * region.getRadiusMeters();
+        double dLat = dist * Math.cos(angle) / 111320.0;
+        double dLng = dist * Math.sin(angle) / (111320.0 * Math.cos(Math.toRadians(region.getCenter().lat())));
+        return new GeoPoint(
+                region.getCenter().lat() + dLat,
+                region.getCenter().lng() + dLng
+        );
+    }
+}

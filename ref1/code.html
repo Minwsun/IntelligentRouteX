@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>UrbanTwin Intelligence - Scenario Editor</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&amp;family=Space+Grotesk:wght@700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "surface-container-lowest": "#000000",
+                        "surface-container-high": "#1d2022",
+                        "on-tertiary": "#004a6c",
+                        "primary-fixed-dim": "#00e2ee",
+                        "tertiary-fixed": "#7cc9fd",
+                        "surface-container-low": "#111416",
+                        "primary-dim": "#00e2ee",
+                        "secondary-container": "#006c46",
+                        "on-surface-variant": "#aaabad",
+                        "on-secondary-fixed": "#00472d",
+                        "error-dim": "#d7383b",
+                        "inverse-surface": "#f9f9fc",
+                        "background": "#0c0e10",
+                        "primary-container": "#00f1fe",
+                        "surface-bright": "#292c2f",
+                        "surface": "#0c0e10",
+                        "tertiary-dim": "#6ebbee",
+                        "on-surface": "#eeeef0",
+                        "error": "#ff716c",
+                        "surface-dim": "#0c0e10",
+                        "on-primary-fixed-variant": "#006065",
+                        "secondary": "#00ffab",
+                        "surface-variant": "#232629",
+                        "surface-tint": "#99f7ff",
+                        "on-secondary": "#005c3b",
+                        "on-error-container": "#ffa8a3",
+                        "on-secondary-fixed-variant": "#006742",
+                        "primary-fixed": "#00f1fe",
+                        "secondary-fixed-dim": "#00efa0",
+                        "on-tertiary-container": "#00415e",
+                        "secondary-fixed": "#00ffab",
+                        "on-primary-container": "#00555a",
+                        "primary": "#99f7ff",
+                        "surface-container": "#171a1c",
+                        "on-tertiary-fixed": "#002b40",
+                        "on-tertiary-fixed-variant": "#004a6b",
+                        "on-error": "#490006",
+                        "tertiary-fixed-dim": "#6ebbee",
+                        "error-container": "#9f0519",
+                        "tertiary": "#9dd5ff",
+                        "on-primary": "#005f64",
+                        "secondary-dim": "#00efa0",
+                        "on-background": "#eeeef0",
+                        "inverse-on-surface": "#535557",
+                        "surface-container-highest": "#232629",
+                        "outline-variant": "#46484a",
+                        "inverse-primary": "#006a70",
+                        "outline": "#747578",
+                        "on-primary-fixed": "#004145",
+                        "on-secondary-container": "#e1ffea",
+                        "tertiary-container": "#7cc9fd"
+                    },
+                    fontFamily: {
+                        "headline": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Space Grotesk"]
+                    },
+                    borderRadius: {"DEFAULT": "1rem", "lg": "2rem", "xl": "3rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-panel {
+            backdrop-filter: blur(20px);
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .map-canvas {
+            background-color: #0c0e10;
+            background-image: 
+                radial-gradient(circle at 2px 2px, rgba(153, 247, 255, 0.05) 1px, transparent 0);
+            background-size: 40px 40px;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body overflow-hidden selection:bg-primary/30">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full px-6 py-4 z-[100] bg-[#0c0e10]/80 backdrop-blur-xl shadow-2xl shadow-black/40 flex justify-between items-center max-w-[1920px] mx-auto">
+<div class="flex items-center gap-8">
+<div class="text-xl font-medium tracking-[0.2em] uppercase text-[#99f7ff] font-headline">UrbanTwin Intelligence</div>
+<nav class="hidden md:flex items-center gap-6">
+<a class="text-gray-400 hover:text-white transition-colors font-label text-[0.75rem] uppercase tracking-wider" href="#">Dashboard</a>
+<a class="text-[#99f7ff] border-b-2 border-[#99f7ff] pb-1 font-label text-[0.75rem] uppercase tracking-wider" href="#">Scenario Editor</a>
+<a class="text-gray-400 hover:text-white transition-colors font-label text-[0.75rem] uppercase tracking-wider" href="#">Infrastructure</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="bg-white/5 rounded-full px-4 py-2 flex items-center gap-3 border border-outline-variant/10">
+<span class="material-symbols-outlined text-primary text-sm">search</span>
+<input class="bg-transparent border-none focus:ring-0 text-sm text-on-surface-variant w-48 font-light" placeholder="Search coordinates..." type="text"/>
+</div>
+<button class="p-2 hover:bg-white/5 transition-all duration-300 rounded-full active:scale-95">
+<span class="material-symbols-outlined text-on-surface-variant">notifications</span>
+</button>
+<button class="p-2 hover:bg-white/5 transition-all duration-300 rounded-full active:scale-95">
+<span class="material-symbols-outlined text-on-surface-variant">settings</span>
+</button>
+<div class="w-10 h-10 rounded-full bg-surface-container-high border border-outline-variant/20 overflow-hidden">
+<img alt="User profile avatar" class="w-full h-full object-cover" data-alt="Sophisticated professional user profile avatar headshot" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBgG2XajcOuD1ZaRYfoNjrWPpSh3zfIMDfobqssbccbevWAdQqQLlE8alTyo1rDdAUF9QZGtj_ag4u3Lv5RfvSZYTkuwFKuy-X-7eFFWbvj3q005fdusF_KVNKGl9F5J5ElUXeYnl41dZdz-Rz8APpbdFks927b7GCOY__0XgfXGX0ymwqOFQTeG3kVFjNtg8LgvtWwSzU6IKwdsfZDC6lyvtW7MUNp4M1pzFOkzEws7PpqvzC5sVUAMIdNB8GXKSMoIhNsDutAPcb6"/>
+</div>
+</div>
+</header>
+<!-- SideNavBar -->
+<aside class="fixed left-6 top-24 bottom-6 w-20 z-50 flex flex-col items-center bg-[#111416]/90 backdrop-blur-2xl rounded-[2rem] py-8 shadow-[0_24px_48px_rgba(0,0,0,0.4)]">
+<div class="mb-10 text-center">
+<div class="text-[#99f7ff] font-bold text-xs font-label">v4.2</div>
+<div class="text-[0.6rem] text-gray-500 uppercase tracking-tighter">Kinetic</div>
+</div>
+<div class="flex flex-col gap-8 flex-1">
+<button class="text-gray-500 hover:text-[#99f7ff] p-3 hover:bg-white/5 rounded-2xl transition-all hover:translate-x-1" title="Map View">
+<span class="material-symbols-outlined" data-icon="map">map</span>
+</button>
+<button class="bg-[#99f7ff]/10 text-[#99f7ff] rounded-2xl p-3 transition-all hover:translate-x-1" title="Scenario Editor">
+<span class="material-symbols-outlined" data-icon="edit_road">edit_road</span>
+</button>
+<button class="text-gray-500 hover:text-[#99f7ff] p-3 hover:bg-white/5 rounded-2xl transition-all hover:translate-x-1" title="Analytics">
+<span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+</button>
+<button class="text-gray-500 hover:text-[#99f7ff] p-3 hover:bg-white/5 rounded-2xl transition-all hover:translate-x-1" title="Fleet Status">
+<span class="material-symbols-outlined" data-icon="local_shipping">local_shipping</span>
+</button>
+<button class="text-gray-500 hover:text-[#99f7ff] p-3 hover:bg-white/5 rounded-2xl transition-all hover:translate-x-1" title="Weather Control">
+<span class="material-symbols-outlined" data-icon="cloud">cloud</span>
+</button>
+</div>
+<button class="mt-auto p-3 text-primary-container hover:bg-primary/10 rounded-2xl transition-all">
+<span class="material-symbols-outlined">bolt</span>
+</button>
+</aside>
+<!-- Main Map Canvas -->
+<main class="fixed inset-0 pt-24 pl-32 pr-6 pb-6 map-canvas overflow-hidden">
+<!-- Digital Twin Map Mockup -->
+<div class="relative w-full h-full rounded-xl overflow-hidden border border-white/5 bg-[#0c0e10]">
+<img class="w-full h-full object-cover opacity-40 mix-blend-luminosity" data-alt="Dark stylized aerial 3D city map with glowing neon infrastructure lines" data-location="San Francisco" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBNTTAeTP46Cjqf0L639YAf_ia0CHCcLyVYgacMtk4iVhhZ7DsnUmkw54azeN2BRPmXbgXNhUbFXKY0iubGDCEO51IkbuuS4DYuGJ_bFBj0qa1I5t-1sbj8X3RxJabvkYe2Xc1tmJVGtU9cRGsSjD-AD_wZOZMhLgVhBAe1c-7evdNj-XPqKG_hmfSQ9DdEC8HvAs7NpIpKZlj2s1cdVmkxOlqqg1zLuR6COeyqboemw_-nS92ksM-jfykasy3ytF4dxOT_bkc4XMEo"/>
+<!-- Traffic Jam Indicators (Coral/Error-Dim) -->
+<div class="absolute top-1/2 left-1/3 w-64 h-2 bg-error-dim/60 blur-md rounded-full rotate-[15deg] shadow-[0_0_20px_rgba(215,56,59,0.5)]"></div>
+<div class="absolute top-[45%] left-[30%] w-48 h-1 bg-error-dim/80 blur-sm rounded-full rotate-[15deg]"></div>
+<!-- Rain Zone Active Tool (Glass Blue) -->
+<div class="absolute top-[40%] right-[35%] w-80 h-80 rounded-full border-2 border-primary-container/40 bg-primary-container/10 backdrop-blur-sm shadow-[0_0_60px_rgba(153,247,255,0.2)] flex items-center justify-center">
+<div class="w-full h-full rounded-full animate-pulse flex items-center justify-center">
+<div class="text-primary-container font-label text-[0.6rem] uppercase tracking-widest bg-background/80 px-3 py-1 rounded-full border border-primary/20">Active Rain Zone</div>
+</div>
+<!-- Resizing Handles -->
+<div class="absolute -top-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-white rounded-full shadow-lg cursor-ns-resize"></div>
+<div class="absolute top-1/2 -right-1 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg cursor-ew-resize"></div>
+</div>
+<!-- Kinetic Route Lines -->
+<div class="absolute inset-0 pointer-events-none">
+<svg class="w-full h-full opacity-30">
+<path d="M100,500 Q400,450 600,600 T1200,550" fill="none" stroke="#99f7ff" stroke-dasharray="10 5" stroke-width="3"></path>
+<path d="M200,200 Q500,300 800,150 T1400,400" fill="none" stroke="#00ffab" stroke-width="4"></path>
+</svg>
+</div>
+</div>
+<!-- Scenario Editor Card (Expanded Bottom Left) -->
+<div class="absolute bottom-10 left-36 w-[420px] glass-panel rounded-lg border border-white/10 p-6 flex flex-col gap-6 shadow-[0_24px_48px_rgba(0,0,0,0.4)]">
+<div class="flex justify-between items-start">
+<div>
+<h2 class="text-on-surface text-lg font-headline font-medium">Scenario / Edit Tools</h2>
+<p class="text-on-surface-variant text-xs font-label uppercase tracking-wider mt-1">v4.2 Kinetic Active Session</p>
+</div>
+<button class="text-on-surface-variant hover:text-white transition-colors">
+<span class="material-symbols-outlined">expand_more</span>
+</button>
+</div>
+<div class="space-y-6">
+<!-- Control Groups -->
+<div class="space-y-4">
+<div class="flex items-center justify-between">
+<label class="font-label text-[0.7rem] uppercase tracking-widest text-on-surface-variant">Traffic Intensity</label>
+<span class="text-error font-headline text-sm font-semibold">+42% Peak</span>
+</div>
+<div class="relative w-full h-1 bg-surface-container-highest rounded-full overflow-hidden">
+<div class="absolute left-0 top-0 h-full w-[72%] bg-gradient-to-r from-primary to-error shadow-[0_0_8px_rgba(255,113,108,0.5)]"></div>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div class="bg-surface-container-low/50 p-3 rounded-lg border border-white/5">
+<label class="block font-label text-[0.6rem] uppercase tracking-widest text-on-surface-variant mb-2">Weather Profile</label>
+<div class="flex items-center gap-2 text-primary">
+<span class="material-symbols-outlined text-sm" data-icon="cloudy_snowing">cloudy_snowing</span>
+<span class="text-sm font-medium">Heavy Rain</span>
+</div>
+</div>
+<div class="bg-surface-container-low/50 p-3 rounded-lg border border-white/5">
+<label class="block font-label text-[0.6rem] uppercase tracking-widest text-on-surface-variant mb-2">Demand Load</label>
+<div class="flex items-center gap-2 text-secondary">
+<span class="material-symbols-outlined text-sm" data-icon="trending_up">trending_up</span>
+<span class="text-sm font-medium">Elevated</span>
+</div>
+</div>
+</div>
+<div class="pt-2">
+<button class="w-full py-4 bg-gradient-to-r from-primary to-primary-container text-on-primary-fixed font-label text-[0.75rem] font-bold uppercase tracking-[0.2em] rounded-md shadow-[0_8px_24px_rgba(153,247,255,0.2)] hover:shadow-[0_8px_32px_rgba(153,247,255,0.4)] transition-all active:scale-[0.98]">
+                        Run Simulation
+                    </button>
+</div>
+</div>
+</div>
+<!-- KPI Overlays (Top Right) -->
+<div class="absolute top-28 right-10 flex flex-col gap-4">
+<!-- Scenario Projections vs Baseline -->
+<div class="glass-panel rounded-lg border border-white/10 p-5 w-72">
+<div class="flex justify-between items-center mb-6">
+<div class="font-label text-[0.65rem] uppercase tracking-widest text-on-surface-variant">Scenario Projections</div>
+<div class="flex items-center gap-1 text-primary-container">
+<div class="w-2 h-2 rounded-full bg-primary animate-pulse"></div>
+<span class="text-[0.6rem] font-bold">LIVE</span>
+</div>
+</div>
+<div class="space-y-6">
+<div>
+<div class="flex justify-between items-end mb-1">
+<span class="text-on-surface-variant text-[0.6rem] font-label uppercase tracking-tighter">Avg. Commute</span>
+<span class="text-error font-headline text-lg font-light leading-none">42.5m</span>
+</div>
+<div class="flex justify-between items-center text-[0.55rem] font-medium">
+<span class="text-on-surface-variant">Baseline: 28.1m</span>
+<span class="text-error">+51% Delay</span>
+</div>
+<div class="mt-2 w-full h-[2px] bg-surface-container-highest">
+<div class="h-full bg-error w-3/4"></div>
+</div>
+</div>
+<div>
+<div class="flex justify-between items-end mb-1">
+<span class="text-on-surface-variant text-[0.6rem] font-label uppercase tracking-tighter">CO2 Output</span>
+<span class="text-on-surface font-headline text-lg font-light leading-none">148.2 <span class="text-[0.6rem]">kt</span></span>
+</div>
+<div class="flex justify-between items-center text-[0.55rem] font-medium">
+<span class="text-on-surface-variant">Baseline: 122.4kt</span>
+<span class="text-error">+21%</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Fleet Efficiency -->
+<div class="glass-panel rounded-lg border border-white/10 p-5 w-72">
+<div class="font-label text-[0.65rem] uppercase tracking-widest text-on-surface-variant mb-4">Network Fluidity</div>
+<div class="flex items-center gap-4">
+<div class="text-3xl font-light font-headline text-primary">64%</div>
+<div class="flex-1">
+<div class="h-1 w-full bg-surface-container-highest rounded-full">
+<div class="h-full w-2/3 bg-primary rounded-full"></div>
+</div>
+<div class="mt-2 text-[0.55rem] text-on-surface-variant leading-tight">Critical congestion detected in Mission District sector.</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Floating Action Controls (Tool Selection) -->
+<div class="absolute top-28 left-[132px] flex flex-col gap-2">
+<button class="w-12 h-12 rounded-full glass-panel border border-primary/40 text-primary flex items-center justify-center shadow-xl active:scale-95 transition-all">
+<span class="material-symbols-outlined" data-icon="cloudy_snowing">cloudy_snowing</span>
+</button>
+<button class="w-12 h-12 rounded-full glass-panel border border-white/10 text-on-surface-variant hover:text-white flex items-center justify-center shadow-xl active:scale-95 transition-all">
+<span class="material-symbols-outlined" data-icon="traffic">traffic</span>
+</button>
+<button class="w-12 h-12 rounded-full glass-panel border border-white/10 text-on-surface-variant hover:text-white flex items-center justify-center shadow-xl active:scale-95 transition-all">
+<span class="material-symbols-outlined" data-icon="group">group</span>
+</button>
+</div>
+</main>
+<!-- Map Zoom/Compass Controls -->
+<div class="fixed bottom-10 right-10 flex flex-col gap-2">
+<div class="bg-surface-container-low/90 backdrop-blur-xl rounded-full border border-white/10 flex flex-col items-center p-2 shadow-2xl">
+<button class="p-2 text-on-surface-variant hover:text-white transition-colors">
+<span class="material-symbols-outlined">add</span>
+</button>
+<div class="w-4 h-[1px] bg-white/10 my-1"></div>
+<button class="p-2 text-on-surface-variant hover:text-white transition-colors">
+<span class="material-symbols-outlined">remove</span>
+</button>
+</div>
+<button class="w-10 h-10 bg-surface-container-low/90 backdrop-blur-xl rounded-full border border-white/10 flex items-center justify-center text-on-surface-variant shadow-2xl">
+<span class="material-symbols-outlined text-sm">explore</span>
+</button>
+</div>
+</body></html>
