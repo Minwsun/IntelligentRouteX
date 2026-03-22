@@ -3,6 +3,7 @@ module routechain.ai {
     requires javafx.web;
     requires com.google.gson;
     requires jdk.jsobject;
+    requires java.net.http;
     requires org.slf4j;
 
     opens com.routechain.app to javafx.graphics;

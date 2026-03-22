@@ -818,8 +818,8 @@ public class MainApp extends Application {
         eventBus.subscribe(Events.SimulationTick.class, e -> {
             if (mapBridge == null) return;
 
-            // Push traffic, weather, heatmap every 5 ticks
-            if (e.tickNumber() % 5 == 0) {
+            // Push traffic, weather, heatmap every 15 ticks (reduce flicker)
+            if (e.tickNumber() % 15 == 0) {
                 mapBridge.updateTraffic(simEngine.getCorridorSeverity());
                 mapBridge.updateWeatherZones(simEngine.getRegions());
                 mapBridge.updateOrderHeat(simEngine.getActiveOrders());
@@ -840,6 +840,8 @@ public class MainApp extends Application {
                         mapBridge.clearDriverRoute(d.getId());
                     }
                 }
+                // Push all cached routes (OSRM results) to the map
+                mapBridge.pushCachedRoutes();
             }
         });
 
