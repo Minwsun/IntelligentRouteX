@@ -52,6 +52,10 @@ public class MapBridge {
     private volatile String lastRoutesHash = "";
     private volatile boolean routesDirty = false;
 
+    // ── Corridor road-snapped geometries (OSRM, fetched once at startup) ─
+    private final Map<String, List<double[]>> corridorGeometries = new ConcurrentHashMap<>();
+    private volatile boolean corridorGeometriesFetched = false;
+
     // Driver lookup for pushing route waypoints to simulation
     private volatile java.util.function.Function<String, Driver> driverLookup;
 
@@ -81,6 +85,7 @@ public class MapBridge {
             System.out.println("[MapBridge] Native map ready");
         });
         mapReady = true; // Native pane is always ready
+        fetchCorridorGeometries(); // One-time OSRM fetch for road-snapped traffic
     }
 
     public void setOnDriverSelected(java.util.function.Consumer<String> callback) {
@@ -141,7 +146,7 @@ public class MapBridge {
             routesDirty = false;
         }
 
-        // --- Traffic ---
+        // --- Traffic (road-snapped via OSRM geometries) ---
         if (pendingTraffic != null) {
             List<NativeMapPane.TrafficSegment> segments = new ArrayList<>();
             for (var corridor : cachedCorridors) {
@@ -149,10 +154,16 @@ public class MapBridge {
                 if (severity < 0.05) continue;
                 NativeMapPane.TrafficSegment seg = new NativeMapPane.TrafficSegment();
                 seg.severity = severity;
-                seg.coordinates = List.of(
-                        new double[]{corridor.from().lng(), corridor.from().lat()},
-                        new double[]{corridor.to().lng(), corridor.to().lat()}
-                );
+                // Use OSRM road geometry if available, fallback to straight line
+                List<double[]> roadGeometry = corridorGeometries.get(corridor.id());
+                if (roadGeometry != null && roadGeometry.size() >= 2) {
+                    seg.coordinates = new ArrayList<>(roadGeometry);
+                } else {
+                    seg.coordinates = List.of(
+                            new double[]{corridor.from().lng(), corridor.from().lat()},
+                            new double[]{corridor.to().lng(), corridor.to().lat()}
+                    );
+                }
                 segments.add(seg);
             }
             Platform.runLater(() -> mapPane.setTrafficSegments(segments));
@@ -329,6 +340,74 @@ public class MapBridge {
 
     public void focusDriver(String id) {
         Platform.runLater(() -> mapPane.focusDriver(id));
+    }
+
+    // ── Corridor geometry fetch (one-time OSRM for road-snapped traffic) ─
+    /**
+     * Fetch OSRM road geometry for all traffic corridors once at startup.
+     * Results are cached permanently — corridor topology never changes.
+     */
+    private void fetchCorridorGeometries() {
+        if (corridorGeometriesFetched) return;
+        corridorGeometriesFetched = true;
+
+        CompletableFuture.runAsync(() -> {
+            System.out.println("[MapBridge] Fetching OSRM geometries for " + cachedCorridors.size() + " traffic corridors...");
+            for (var corridor : cachedCorridors) {
+                try {
+                    String url = String.format(Locale.US,
+                            "https://router.project-osrm.org/route/v1/driving/%.6f,%.6f;%.6f,%.6f?overview=full&geometries=geojson",
+                            corridor.from().lng(), corridor.from().lat(),
+                            corridor.to().lng(), corridor.to().lat());
+
+                    HttpRequest req = HttpRequest.newBuilder()
+                            .uri(URI.create(url))
+                            .timeout(Duration.ofSeconds(10))
+                            .header("User-Agent", "RouteChainAI/1.0")
+                            .GET()
+                            .build();
+
+                    HttpResponse<String> response = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+                    if (response.statusCode() == 200) {
+                        List<double[]> coords = parseOsrmGeometry(response.body());
+                        if (coords != null && coords.size() >= 2) {
+                            corridorGeometries.put(corridor.id(), coords);
+                            System.out.println("[MapBridge] ✓ Corridor " + corridor.name() + ": " + coords.size() + " points");
+                        }
+                    }
+                    // Throttle to avoid OSRM rate limiting
+                    Thread.sleep(300);
+                } catch (Exception e) {
+                    System.err.println("[MapBridge] ✗ Corridor " + corridor.name() + ": " + e.getMessage());
+                }
+            }
+            System.out.println("[MapBridge] Corridor geometry fetch complete: " + corridorGeometries.size() + "/" + cachedCorridors.size());
+        });
+    }
+
+    /**
+     * Parse OSRM response body to extract route coordinates.
+     * Returns list of [lng, lat] pairs matching NativeMapPane coordinate format.
+     */
+    private List<double[]> parseOsrmGeometry(String body) {
+        try {
+            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            if (!"Ok".equals(root.has("code") ? root.get("code").getAsString() : "")) return null;
+            JsonArray routes = root.getAsJsonArray("routes");
+            if (routes != null && !routes.isEmpty()) {
+                JsonArray coordsArray = routes.get(0).getAsJsonObject()
+                        .getAsJsonObject("geometry").getAsJsonArray("coordinates");
+                List<double[]> coordinates = new ArrayList<>();
+                for (JsonElement coord : coordsArray) {
+                    JsonArray c = coord.getAsJsonArray();
+                    coordinates.add(new double[]{c.get(0).getAsDouble(), c.get(1).getAsDouble()});
+                }
+                return coordinates.size() >= 2 ? coordinates : null;
+            }
+        } catch (Exception e) {
+            System.err.println("[MapBridge] OSRM corridor parse error: " + e.getMessage());
+        }
+        return null;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────

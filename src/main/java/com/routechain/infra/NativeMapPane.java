@@ -379,13 +379,31 @@ public class NativeMapPane extends Pane {
         synchronized (trafficSegments) {
             for (TrafficSegment seg : trafficSegments) {
                 if (seg.severity < 0.1 || seg.coordinates == null || seg.coordinates.size() < 2) continue;
+                // Google Maps-style traffic colors: green → orange → red
                 Color color = seg.severity > 0.7 ? Color.web("#d7383b") :
                         seg.severity > 0.4 ? Color.web("#ff716c") : Color.web("#ff9966");
-                gc.setStroke(color.deriveColor(0, 1, 1, 0.4 + seg.severity * 0.3));
-                gc.setLineWidth(3 + seg.severity * 4);
+
+                gc.setLineCap(javafx.scene.shape.StrokeLineCap.ROUND);
+                gc.setLineJoin(javafx.scene.shape.StrokeLineJoin.ROUND);
                 gc.setLineDashes(null);
+
+                // Glow layer (wider, semi-transparent) — road outline effect
+                gc.setStroke(color.deriveColor(0, 1, 1, 0.15));
+                gc.setLineWidth(8 + seg.severity * 3);
                 gc.beginPath();
                 boolean first = true;
+                for (double[] coord : seg.coordinates) {
+                    Point2D pt = geoToScreen(coord[1], coord[0]);
+                    if (first) { gc.moveTo(pt.getX(), pt.getY()); first = false; }
+                    else gc.lineTo(pt.getX(), pt.getY());
+                }
+                gc.stroke();
+
+                // Main traffic line (thinner, more opaque) — sits on top
+                gc.setStroke(color.deriveColor(0, 1, 1, 0.55 + seg.severity * 0.35));
+                gc.setLineWidth(3 + seg.severity * 2);
+                gc.beginPath();
+                first = true;
                 for (double[] coord : seg.coordinates) {
                     Point2D pt = geoToScreen(coord[1], coord[0]);
                     if (first) { gc.moveTo(pt.getX(), pt.getY()); first = false; }

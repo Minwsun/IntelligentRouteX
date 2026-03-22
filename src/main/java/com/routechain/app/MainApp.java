@@ -1,6 +1,7 @@
 package com.routechain.app;
 
 import com.routechain.domain.Driver;
+import com.routechain.domain.Order;
 import com.routechain.domain.Enums.*;
 import com.routechain.infra.EventBus;
 import com.routechain.infra.Events;
@@ -1057,7 +1058,24 @@ public class MainApp extends Application {
             selectedDriverOrders.set(driver.getActiveOrderIds().size() + " Active");
             selectedDriverEta.set(driver.getSpeedKmh() > 0 ? String.format("%.0f km/h", driver.getSpeedKmh()) : "Idle");
             selectedDriverDeadhead.set(String.format("%.1f km", 0.0));
-            selectedDriverEarnings.set(String.format("%.0f₫", driver.getNetEarningToday()));
+
+            // Earnings: accumulated + pending delivery fees
+            double earned = driver.getNetEarningToday();
+            double pendingFee = 0;
+            for (Order o : simEngine.getActiveOrders()) {
+                if (driver.getActiveOrderIds().contains(o.getId())) {
+                    pendingFee += o.getQuotedFee();
+                }
+            }
+            if (earned > 0 || pendingFee > 0) {
+                String earningStr = String.format("%,.0f₫", earned);
+                if (pendingFee > 0) {
+                    earningStr += String.format(" (+%,.0f₫)", pendingFee);
+                }
+                selectedDriverEarnings.set(earningStr);
+            } else {
+                selectedDriverEarnings.set("Chưa có đơn");
+            }
         });
 
         if (mapBridge != null) mapBridge.focusDriver(driverId);
