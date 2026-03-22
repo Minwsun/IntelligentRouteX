@@ -51,6 +51,8 @@ public class SimulationEngine {
     private volatile long totalAssignmentLatencyMs = 0;
     private volatile int totalAssignments = 0;
     private volatile int totalBundled = 0;
+    private volatile int surgeEventsCounter = 0;
+    private volatile int shortageEventsCounter = 0;
 
     // AI dispatch engines
     private final ReDispatchEngine reDispatchEngine = new ReDispatchEngine();
@@ -85,6 +87,8 @@ public class SimulationEngine {
             scheduler.shutdownNow();
             scheduler = null;
         }
+        // Generate run report on stop
+        generateRunReport();
         eventBus.publish(new SimulationStopped(Instant.now()));
     }
 
@@ -103,6 +107,8 @@ public class SimulationEngine {
         totalAssignmentLatencyMs = 0;
         totalAssignments = 0;
         totalBundled = 0;
+        surgeEventsCounter = 0;
+        shortageEventsCounter = 0;
         reDispatchEngine.reset();
         eventBus.publish(new SimulationReset(Instant.now()));
     }
@@ -562,15 +568,16 @@ public class SimulationEngine {
 
         double netPerHour = totalEarnings / Math.max(1, tickCounter.get() / 3600.0);
 
-        // Avg assignment latency in seconds
         double avgAssignLatency = totalAssignments > 0
                 ? (double) totalAssignmentLatencyMs / totalAssignments / 1000.0 : 0;
 
-        // Avg driver utilization
         double avgUtilization = drivers.stream()
                 .filter(d -> d.getState() != DriverState.OFFLINE)
                 .mapToDouble(Driver::getComputedUtilization)
                 .average().orElse(0);
+
+        int totalOrders = totalDelivered + cancelledOrders.size() + active;
+        double bundleRate = totalOrders > 0 ? (double) totalBundled / totalOrders * 100 : 0;
 
         eventBus.publish(new MetricsSnapshot(
                 Math.round(onTime * 10) / 10.0,
@@ -580,7 +587,32 @@ public class SimulationEngine {
                 active,
                 activeDriverCount,
                 totalDelivered,
-                cancelledOrders.size()
+                cancelledOrders.size(),
+                Math.round(bundleRate * 10) / 10.0,
+                reDispatchEngine.getReDispatchCount(),
+                Math.round(avgUtilization * 1000) / 1000.0
+        ));
+    }
+
+    // ── Run report generation ────────────────────────────────────────────
+    private void generateRunReport() {
+        if (totalDelivered == 0 && activeOrders.isEmpty()) return;
+
+        RunReportExporter exporter = new RunReportExporter("simulation", 42);
+        RunReport report = exporter.generateReport(
+                drivers, completedOrders, cancelledOrders, activeOrders,
+                totalDelivered, totalLateDelivered, totalDeadheadKm, totalEarnings,
+                totalAssignmentLatencyMs, totalAssignments, totalBundled,
+                reDispatchEngine.getReDispatchCount(),
+                tickCounter.get(), surgeEventsCounter, shortageEventsCounter
+        );
+
+        System.out.println(report.toSummary());
+        eventBus.publish(new RunReportGenerated(
+                report.runId(), report.scenarioName(),
+                report.completionRate(), report.onTimeRate(),
+                report.deadheadDistanceRatio(), report.bundleRate(),
+                report.reDispatchCount(), Instant.now()
         ));
     }
 

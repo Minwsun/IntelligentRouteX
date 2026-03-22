@@ -60,7 +60,19 @@ public final class Events {
 
     // ── Metrics snapshot ────────────────────────────────────────────────
     public record MetricsSnapshot(double onTimePercent, double deadheadPercent,
-                                   double netPerHour, double avgEtaMinutes,
+                                   double netPerHour, double avgAssignLatencySec,
                                    int activeOrders, int activeDrivers,
-                                   int completedOrders, int cancelledOrders) {}
+                                   int completedOrders, int cancelledOrders,
+                                   double bundleRate, int reDispatchCount,
+                                   double avgUtilization) {}
+
+    // ── Run report events ───────────────────────────────────────────────
+    public record RunReportGenerated(String runId, String scenarioName,
+                                      double completionRate, double onTimeRate,
+                                      double deadheadRatio, double bundleRate,
+                                      int reDispatchCount, Instant timestamp) {}
+
+    public record ReplayCompareCompleted(String runIdA, String runIdB,
+                                          String verdict, double overallGain,
+                                          Instant timestamp) {}
 }
