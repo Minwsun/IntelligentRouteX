@@ -26,6 +26,9 @@ dependencies {
     // JSON processing
     implementation("com.google.code.gson:gson:2.11.0")
 
+    // Database
+    implementation("org.xerial:sqlite-jdbc:3.45.1.0")
+
     // Logging
     implementation("org.slf4j:slf4j-api:2.0.13")
     implementation("ch.qos.logback:logback-classic:1.5.6")
@@ -49,4 +52,10 @@ application {
 
 tasks.withType<JavaCompile> {
     options.encoding = "UTF-8"
+}
+
+tasks.register<JavaExec>("benchmark") {
+    group = "application"
+    mainClass.set("com.routechain.simulation.BenchmarkRunner")
+    classpath = sourceSets["main"].runtimeClasspath
 }

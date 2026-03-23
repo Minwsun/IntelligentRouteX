@@ -48,6 +48,10 @@ public class OmegaDispatchAgent {
     private final PlanRanker planRanker;
     private final UncertaintyEstimator uncertaintyEstimator;
 
+    // ── Centralized scoring + constraints (Phase 3) ─────────────────────
+    private final PlanUtilityScorer utilityScorer;
+    private final ConstraintEngine constraintEngine;
+
     // ── Existing components (reused) ────────────────────────────────────
     private final List<Region> regions;
 
@@ -81,6 +85,10 @@ public class OmegaDispatchAgent {
         this.uncertaintyEstimator = new UncertaintyEstimator();
 
         this.replayTrainer = new ReplayTrainer();
+
+        // Phase 3: centralized scorer + constraint engine
+        this.utilityScorer = new PlanUtilityScorer();
+        this.constraintEngine = new ConstraintEngine();
 
         // Driver-centric components
         this.orderIndex = new NearbyOrderIndexer();
@@ -313,19 +321,15 @@ public class OmegaDispatchAgent {
         plan.setCongestionPenalty(traffic * 0.6);
         plan.setRepositionPenalty(deadheadKm > 3.0 ? 0.3 : 0.1);
 
-        // ── Hard constraints ──────────────────────────────────────────
-        if (lateRisk > 0.75) { rejectReasons[0]++; return false; }
-        if (profit < -15000) { rejectReasons[1]++; return false; }
-        if (deadheadKm > 15.0) { rejectReasons[2]++; return false; }
-        double standaloneDist = bundle.orders().stream()
-                .mapToDouble(o -> o.getPickupPoint()
-                        .distanceTo(o.getDropoffPoint()) / 1000.0)
-                .sum();
-        double detourRatio = standaloneDist > 0
-                ? totalDist / standaloneDist : 1.5;
-        if (detourRatio > 5.0) { rejectReasons[3]++; return false; }
+        // ── Hard constraints (delegated to ConstraintEngine) ──────────
+        // Use a dynamic batch cap of 5 (default max) — the real cap was already
+        // applied during plan generation in DriverPlanGenerator
+        int dynamicBatchCap = 5;
+        if (!constraintEngine.validate(plan, dynamicBatchCap, rejectReasons)) {
+            return false;
+        }
 
-        // ── Robust scoring (UNCHANGED — same HorizonPlanner + Ranker) ──
+        // ── Robust scoring (HorizonPlanner + Ranker for base) ──────────
         double[] planFeatures = featureExtractor.planFeatures(
                 plan, field, traffic, weather);
 
@@ -336,7 +340,12 @@ public class OmegaDispatchAgent {
         UncertaintyEstimator.Prediction pred = uncertaintyEstimator
                 .predict(planFeatures);
 
-        plan.setTotalScore(robustScore);
+        // ── Final scoring via PlanUtilityScorer (Phase 3) ───────────────
+        // Blend robust score with centralized utility for final rank
+        double utilityScore = utilityScorer.score(plan);
+        double finalScore = robustScore * 0.6 + utilityScore * 0.4;
+
+        plan.setTotalScore(finalScore);
         plan.setConfidence(pred.confidence());
         plan.setTraceId("OMEGA-DC-" + System.nanoTime()
                 + "-" + driver.getId());

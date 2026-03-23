@@ -52,9 +52,12 @@ public class OsrmRoutingService {
         scheduler.scheduleAtFixedRate(this::processRequestQueue, 500, 150, TimeUnit.MILLISECONDS);
     }
 
-    /**
-     * Clear all pending routing requests to free memory/threads on shutdown/reset.
-     */
+    private volatile boolean headlessMode = false;
+
+    public void setHeadlessMode(boolean headless) {
+        this.headlessMode = headless;
+    }
+
     public void reset() {
         requestQueue.clear();
         lastRequestedDest.clear();
@@ -70,6 +73,14 @@ public class OsrmRoutingService {
      * Once route returns, it'll populate `driver.setRouteWaypoints()`.
      */
     public void requestRouteAsync(Driver driver, GeoPoint from, GeoPoint to) {
+        if (headlessMode) {
+            List<double[]> coords = new ArrayList<>();
+            coords.add(new double[]{from.lng(), from.lat()});
+            coords.add(new double[]{to.lng(), to.lat()});
+            driver.setRouteWaypoints(coords);
+            return;
+        }
+
         String destKey = Math.round(to.lat() * 1000) + "_" + Math.round(to.lng() * 1000);
         
         String lastReq = lastRequestedDest.get(driver.getId());

@@ -4,6 +4,7 @@ import com.routechain.domain.*;
 import com.routechain.domain.Enums.*;
 import com.routechain.infra.EventBus;
 import com.routechain.infra.Events.*;
+import com.routechain.infra.DatabaseStorageService;
 import com.routechain.ai.OmegaDispatchAgent;
 
 import java.time.Instant;
@@ -59,6 +60,7 @@ public class SimulationEngine {
     private final OmegaDispatchAgent omegaAgent;
     private final ReDispatchEngine reDispatchEngine = new ReDispatchEngine();
     private final OsrmRoutingService routingService = new OsrmRoutingService();
+    private final DatabaseStorageService dbService = new DatabaseStorageService();
 
     // Enhancements
     private final DriverSupplyEngine driverSupplyEngine = new DriverSupplyEngine();
@@ -154,6 +156,26 @@ public class SimulationEngine {
     public OmegaDispatchAgent getOmegaAgent() { return omegaAgent; }
     public SimulationClock getClock() { return clock; }
 
+    // ── Metric Getters & Headless Execution ─────────────────────────────
+    public int getTotalLateDelivered() { return totalLateDelivered; }
+    public double getTotalDeadheadKm() { return totalDeadheadKm; }
+    public double getTotalEarnings() { return totalEarnings; }
+    public long getTotalAssignmentLatencyMs() { return totalAssignmentLatencyMs; }
+    public int getTotalAssignments() { return totalAssignments; }
+    public int getTotalBundled() { return totalBundled; }
+    public int getSurgeEventsCounter() { return surgeEventsCounter; }
+    public int getShortageEventsCounter() { return shortageEventsCounter; }
+
+    /** Run headless (sync) tick */
+    public void tickHeadless() {
+        if (lifecycle != SimulationLifecycle.RUNNING) {
+            lifecycle = SimulationLifecycle.RUNNING;
+            routingService.setHeadlessMode(true);
+            initializeDrivers(initialDriverCount);
+        }
+        tick();
+    }
+
     // ── Scenario config ─────────────────────────────────────────────────
     public void setTrafficIntensity(double v) { this.trafficIntensity = Math.max(0, Math.min(1, v)); }
     public void setWeatherProfile(WeatherProfile wp) { this.weatherProfile = wp; }
@@ -172,8 +194,8 @@ public class SimulationEngine {
      * Inject a manually-created order into the active simulation.
      */
     public void injectOrder(GeoPoint pickup, GeoPoint dropoff, double fee, int promisedEtaMin) {
-        String id = "MANUAL-" + System.nanoTime();
-        String custId = "CUS-MANUAL";
+        String id = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 10).toUpperCase();
+        String custId = "CUS-" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase();
         String pickupRegionId = findNearestRegionId(pickup);
         String dropoffRegionId = findNearestRegionId(dropoff);
 
@@ -181,6 +203,7 @@ public class SimulationEngine {
                 dropoffRegionId, fee, promisedEtaMin);
         activeOrders.add(order);
         eventBus.publish(new OrderCreated(order));
+        dbService.saveOrder(order);
         System.out.println("[Editor] Injected order " + id + " at " +
                 String.format("(%.5f, %.5f)", pickup.lat(), pickup.lng()));
     }
@@ -330,13 +353,21 @@ public class SimulationEngine {
         }
     }
 
-    // ── Order generation (Negative Binomial + Arrival Engine) ──────────
     private void generateOrders() {
+        int currentPending = (int) activeOrders.stream()
+                .filter(o -> o.getStatus() == com.routechain.domain.Enums.OrderStatus.CONFIRMED 
+                          || o.getStatus() == com.routechain.domain.Enums.OrderStatus.PENDING_ASSIGNMENT)
+                .count();
+        int maxPending = drivers.size() * 5;
+
+        if (currentPending >= maxPending) return;
+
         List<Order> newOrders = orderArrivalEngine.generateOrders(
                 clock.getSimulatedHour(), weatherProfile, clock.getSubTickCounter());
         
         for (Order order : newOrders) {
-            // Assign merchant meta via MerchantWaitEngine
+            if (currentPending >= maxPending) break;
+
             Region pickupRegion = regions.stream()
                     .filter(r -> r.getId().equals(order.getPickupRegionId()))
                     .findFirst().orElse(regions.get(0));
@@ -346,6 +377,8 @@ public class SimulationEngine {
             activeOrders.add(order);
             pickupRegion.setCurrentDemandPressure(pickupRegion.getCurrentDemandPressure() + 1);
             eventBus.publish(new OrderCreated(order));
+            dbService.saveOrder(order);
+            currentPending++;
         }
     }
 
@@ -359,19 +392,29 @@ public class SimulationEngine {
         double fee = 12000 + dist * 5; // VND
         int eta = (int) (dist / 500 * (1 + trafficIntensity)); // rough ETA
 
-        return new Order("ORD-" + seq, "CUS-" + (rng.nextInt(1000) + 1),
+        return new Order(java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 10).toUpperCase(),
+                "CUS-" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase(),
                 region.getId(), pickup, dropoff, dropoffRegion.getId(),
                 fee, Math.max(5, eta));
     }
 
     public void spawnRandomOrders(int count) {
         if (regions.isEmpty()) return;
+        int activePending = (int) activeOrders.stream()
+                .filter(o -> o.getStatus() == com.routechain.domain.Enums.OrderStatus.CONFIRMED 
+                          || o.getStatus() == com.routechain.domain.Enums.OrderStatus.PENDING_ASSIGNMENT)
+                .count();
+        int maxPending = drivers.size() * 5;
+
         for (int i = 0; i < count; i++) {
+            if (activePending >= maxPending) break;
             Region region = regions.get(rng.nextInt(regions.size()));
             Order order = createRandomOrder(region);
             activeOrders.add(order);
             region.setCurrentDemandPressure(region.getCurrentDemandPressure() + 1);
             eventBus.publish(new OrderCreated(order));
+            dbService.saveOrder(order);
+            activePending++;
         }
     }
 
@@ -521,7 +564,9 @@ public class SimulationEngine {
                             if (order.isLate()) totalLateDelivered++;
                             totalEarnings += order.getQuotedFee();
                             completedOrders.add(order);
+                            activeOrders.remove(order);
                             eventBus.publish(new OrderDelivered(order.getId()));
+                            dbService.saveOrder(order);
 
                             double distKm = order.getPickupPoint().distanceTo(order.getDropoffPoint()) / 1000.0;
                             double etaActual = distKm / Math.max(6, driver.getSpeedKmh()) * 60;
@@ -603,6 +648,7 @@ public class SimulationEngine {
                         }
                     }
                     eventBus.publish(new OrderCancelled(order.getId(), "customer_cancelled"));
+                    dbService.saveOrder(order);
 
                     // Omega learning callback
                     omegaAgent.onOrderCancelled(order, trafficIntensity,
@@ -831,13 +877,34 @@ public class SimulationEngine {
 
     // ── Utilities ────────────────────────────────────────────────────────
     private GeoPoint randomPointInRegion(Region region) {
-        double angle = rng.nextDouble() * 2 * Math.PI;
-        double dist = rng.nextDouble() * region.getRadiusMeters();
-        double dLat = dist * Math.cos(angle) / 111320.0;
-        double dLng = dist * Math.sin(angle) / (111320.0 * Math.cos(Math.toRadians(region.getCenter().lat())));
-        return new GeoPoint(
-                region.getCenter().lat() + dLat,
-                region.getCenter().lng() + dLng
-        );
+        int maxRetries = 10;
+        for (int i = 0; i < maxRetries; i++) {
+            double angle = rng.nextDouble() * 2 * Math.PI;
+            double dist = Math.sqrt(rng.nextDouble()) * region.getRadiusMeters();
+            double dLat = dist * Math.cos(angle) / 111320.0;
+            double dLng = dist * Math.sin(angle) / (111320.0 * Math.cos(Math.toRadians(region.getCenter().lat())));
+            GeoPoint point = new GeoPoint(region.getCenter().lat() + dLat, region.getCenter().lng() + dLng);
+
+            boolean inRegionBounds = false;
+            for (Region r : regions) {
+                if (r.contains(point)) {
+                    inRegionBounds = true;
+                    break;
+                }
+            }
+
+            if (inRegionBounds && isValidLandPoint(point)) return point;
+        }
+        return region.getCenter();
+    }
+
+    private boolean isValidLandPoint(GeoPoint p) {
+        double lat = p.lat();
+        double lng = p.lng();
+        if (lat >= 10.760 && lat <= 10.785 && lng >= 106.715 && lng <= 106.735) return false;
+        if (lat >= 10.795 && lat <= 10.825 && lng >= 106.720 && lng <= 106.745) return false;
+        if (lat >= 10.750 && lat <= 10.765 && lng >= 106.705 && lng <= 106.725) return false;
+        if (lat < 10.710 && lng > 106.720) return false;
+        return true;
     }
 }

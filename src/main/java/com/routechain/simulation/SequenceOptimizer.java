@@ -15,8 +15,16 @@ import java.util.*;
  * - Pickup must precede dropoff for each order
  * - Insertion cost minimized
  * - Late risk must not exceed threshold
+ * - Pickup span ≤ 12 minutes
+ * - Cumulative merchant wait ≤ 8 minutes
+ * - Detour ratio ≤ 2.0
  */
 public class SequenceOptimizer {
+
+    private static final double MAX_PICKUP_SPAN_MINUTES = 12.0;
+    private static final double MAX_MERCHANT_WAIT_MINUTES = 8.0;
+    private static final double MAX_DETOUR_RATIO = 2.0;
+    private static final double SLA_LATENESS_FACTOR = 0.7;
 
     private final double trafficIntensity;
     private final Enums.WeatherProfile weather;
@@ -28,6 +36,7 @@ public class SequenceOptimizer {
 
     /**
      * Generate up to maxCandidates feasible stop sequences for a bundle.
+     * Includes a specific "Pickup-Wave" candidate for larger bundles.
      */
     public List<List<Stop>> generateFeasibleSequences(
             Driver driver, DispatchPlan.Bundle bundle, int maxCandidates) {
@@ -37,29 +46,75 @@ public class SequenceOptimizer {
             return List.of(singleOrderSequence(driver, orders.get(0)));
         }
 
-        // Build initial sequence using cheapest insertion
-        List<Stop> baseSequence = buildInitialSequence(driver, orders);
-
         List<List<Stop>> candidates = new ArrayList<>();
-        candidates.add(baseSequence);
 
-        // Generate variations via local improvement
-        for (int i = 0; i < Math.min(orders.size() * 2, maxCandidates - 1); i++) {
-            List<Stop> variant = localImprovement(baseSequence, orders, i);
-            if (variant != null && isFeasible(variant, orders)) {
-                candidates.add(variant);
+        // 1. Pickup-Wave sequence (All Pickups -> All Dropoffs)
+        List<Stop> waveSequence = generatePickupWaveSequence(driver, orders);
+        if (waveSequence != null) {
+            computeArrivalTimes(driver.getCurrentLocation(), waveSequence, orders);
+            if (isFeasible(waveSequence, orders)) {
+                candidates.add(waveSequence);
             }
         }
 
-        // Compute arrival times for all candidates
-        for (List<Stop> seq : candidates) {
-            computeArrivalTimes(driver.getCurrentLocation(), seq);
+        // 2. Cheapest insertion sequence
+        List<Stop> baseSequence = buildInitialSequence(driver, orders);
+        computeArrivalTimes(driver.getCurrentLocation(), baseSequence, orders);
+        if (isFeasible(baseSequence, orders) && !candidates.contains(baseSequence)) {
+            candidates.add(baseSequence);
         }
 
-        // Sort by total route time
-        candidates.sort(Comparator.comparingDouble(this::totalRouteTime));
+        // 3. Local improvement variants
+        for (int i = 0; i < Math.min(orders.size() * 2, maxCandidates - candidates.size()); i++) {
+            List<Stop> variant = localImprovement(baseSequence, orders, i);
+            if (variant != null) {
+                computeArrivalTimes(driver.getCurrentLocation(), variant, orders);
+                if (isFeasible(variant, orders) && !candidates.contains(variant)) {
+                    candidates.add(variant);
+                }
+            }
+        }
+
+        // Sort by total route cost (distance + merchant wait penalty)
+        candidates.sort(Comparator.comparingDouble(
+                s -> computeRouteCost(driver.getCurrentLocation(), s, orders)));
 
         return candidates.subList(0, Math.min(candidates.size(), maxCandidates));
+    }
+
+    /**
+     * Generate a "Pickup-Wave" sequence: collect all items then deliver all.
+     * Order of pickups and dropoffs is determined by proximity.
+     */
+    private List<Stop> generatePickupWaveSequence(Driver driver, List<Order> orders) {
+        List<Stop> route = new ArrayList<>();
+        List<Order> remainingPickups = new ArrayList<>(orders);
+        GeoPoint current = driver.getCurrentLocation();
+
+        // 1. Pickups wave — nearest-first
+        while (!remainingPickups.isEmpty()) {
+            final GeoPoint loc = current;
+            Order nearest = remainingPickups.stream()
+                    .min(Comparator.comparingDouble(o -> loc.distanceTo(o.getPickupPoint())))
+                    .get();
+            route.add(new Stop(nearest.getId(), nearest.getPickupPoint(), StopType.PICKUP, 0));
+            remainingPickups.remove(nearest);
+            current = nearest.getPickupPoint();
+        }
+
+        // 2. Dropoffs wave — nearest-first
+        List<Order> remainingDropoffs = new ArrayList<>(orders);
+        while (!remainingDropoffs.isEmpty()) {
+            final GeoPoint loc = current;
+            Order nearest = remainingDropoffs.stream()
+                    .min(Comparator.comparingDouble(o -> loc.distanceTo(o.getDropoffPoint())))
+                    .get();
+            route.add(new Stop(nearest.getId(), nearest.getDropoffPoint(), StopType.DROPOFF, 0));
+            remainingDropoffs.remove(nearest);
+            current = nearest.getDropoffPoint();
+        }
+
+        return route;
     }
 
     // ── Cheapest insertion ──────────────────────────────────────────────
@@ -67,12 +122,10 @@ public class SequenceOptimizer {
     private List<Stop> buildInitialSequence(Driver driver, List<Order> orders) {
         List<Stop> route = new ArrayList<>();
 
-        // Start with first order (pickup then dropoff)
         Order first = orders.get(0);
         route.add(new Stop(first.getId(), first.getPickupPoint(), StopType.PICKUP, 0));
         route.add(new Stop(first.getId(), first.getDropoffPoint(), StopType.DROPOFF, 0));
 
-        // Insert remaining orders one by one at cheapest position
         for (int i = 1; i < orders.size(); i++) {
             Order order = orders.get(i);
             insertCheapest(route, order, driver.getCurrentLocation());
@@ -89,17 +142,15 @@ public class SequenceOptimizer {
         int bestPickupPos = -1;
         int bestDropoffPos = -1;
 
-        // Try all valid insertion positions
         for (int pPos = 0; pPos <= route.size(); pPos++) {
             for (int dPos = pPos + 1; dPos <= route.size() + 1; dPos++) {
-                // Create trial route
                 List<Stop> trial = new ArrayList<>(route);
                 trial.add(pPos, pickup);
                 trial.add(dPos, dropoff);
 
                 if (!isOrderConstraintSatisfied(trial)) continue;
 
-                double cost = computeRouteCost(driverPos, trial);
+                double cost = computeDistanceOnly(driverPos, trial);
                 if (cost < bestCost) {
                     bestCost = cost;
                     bestPickupPos = pPos;
@@ -112,7 +163,6 @@ public class SequenceOptimizer {
             route.add(bestPickupPos, pickup);
             route.add(bestDropoffPos, dropoff);
         } else {
-            // Fallback: append at end
             route.add(pickup);
             route.add(dropoff);
         }
@@ -122,39 +172,83 @@ public class SequenceOptimizer {
 
     private List<Stop> localImprovement(List<Stop> base, List<Order> orders, int iteration) {
         List<Stop> improved = new ArrayList<>(base);
-
         if (improved.size() < 4) return null;
 
-        // Swap adjacent dropoffs that don't violate pickup-before-dropoff
         int swapIdx = (iteration * 2 + 1) % (improved.size() - 1);
         if (swapIdx > 0 && swapIdx < improved.size() - 1) {
             Stop a = improved.get(swapIdx);
             Stop b = improved.get(swapIdx + 1);
 
-            // Only swap if both are dropoffs or both are pickups
             if (a.type() == b.type()) {
                 improved.set(swapIdx, b);
                 improved.set(swapIdx + 1, a);
 
                 if (!isOrderConstraintSatisfied(improved)) {
-                    // Revert
                     improved.set(swapIdx, a);
                     improved.set(swapIdx + 1, b);
                     return null;
                 }
             }
         }
-
         return improved;
     }
 
-    // ── Feasibility ─────────────────────────────────────────────────────
+    // ── Feasibility — REAL hard constraints ──────────────────────────────
 
+    /**
+     * Validates a sequence against all hard constraints:
+     * 1. Pickup-before-dropoff ordering
+     * 2. Pickup span ≤ 12 minutes
+     * 3. First-order lateness ≤ SLA * 0.7
+     * 4. Cumulative merchant wait ≤ 8 minutes
+     * 5. Detour ratio ≤ 2.0
+     */
     private boolean isFeasible(List<Stop> sequence, List<Order> orders) {
-        return isOrderConstraintSatisfied(sequence);
+        if (!isOrderConstraintSatisfied(sequence)) return false;
+
+        // Constraint 2: Pickup span — time from first pickup to last pickup ≤ 12 min
+        double firstPickupTime = Double.MAX_VALUE;
+        double lastPickupTime = 0;
+        for (Stop stop : sequence) {
+            if (stop.type() == StopType.PICKUP) {
+                firstPickupTime = Math.min(firstPickupTime, stop.estimatedArrivalMinutes());
+                lastPickupTime = Math.max(lastPickupTime, stop.estimatedArrivalMinutes());
+            }
+        }
+        double pickupSpan = lastPickupTime - firstPickupTime;
+        if (pickupSpan > MAX_PICKUP_SPAN_MINUTES) return false;
+
+        // Constraint 3: First-order lateness — earliest order's dropoff must not exceed SLA*0.7
+        if (!orders.isEmpty()) {
+            Order firstOrder = orders.stream()
+                    .min(Comparator.comparing(Order::getCreatedAt))
+                    .orElse(orders.get(0));
+            for (Stop stop : sequence) {
+                if (stop.type() == StopType.DROPOFF && stop.orderId().equals(firstOrder.getId())) {
+                    double maxAllowed = firstOrder.getPromisedEtaMinutes() * SLA_LATENESS_FACTOR;
+                    if (stop.estimatedArrivalMinutes() > maxAllowed) return false;
+                    break;
+                }
+            }
+        }
+
+        // Constraint 4: Cumulative merchant wait ≤ 8 min
+        double cumulativeMerchantWait = computeCumulativeMerchantWait(sequence, orders);
+        if (cumulativeMerchantWait > MAX_MERCHANT_WAIT_MINUTES) return false;
+
+        // Constraint 5: Detour ratio ≤ 2.0
+        double standaloneDistKm = orders.stream()
+                .mapToDouble(o -> o.getPickupPoint().distanceTo(o.getDropoffPoint()) / 1000.0)
+                .sum();
+        double totalRouteDistKm = computeSequenceDistanceKm(sequence);
+        if (standaloneDistKm > 0) {
+            double detourRatio = totalRouteDistKm / standaloneDistKm;
+            if (detourRatio > MAX_DETOUR_RATIO) return false;
+        }
+
+        return true;
     }
 
-    /** Ensure pickup comes before dropoff for every order. */
     private boolean isOrderConstraintSatisfied(List<Stop> sequence) {
         Set<String> pickedUp = new HashSet<>();
         for (Stop stop : sequence) {
@@ -169,22 +263,74 @@ public class SequenceOptimizer {
 
     // ── Cost computation ────────────────────────────────────────────────
 
-    private double computeRouteCost(GeoPoint start, List<Stop> sequence) {
+    /**
+     * Route cost = travel distance (km) + merchant wait penalty.
+     * Merchant wait penalty: if driver arrives before merchant is ready,
+     * the idle time incurs a cost proportional to the wait.
+     */
+    private double computeRouteCost(GeoPoint start, List<Stop> sequence, List<Order> orders) {
+        double totalDistKm = computeDistanceOnly(start, sequence);
+        double merchantWaitPenalty = computeCumulativeMerchantWait(sequence, orders);
+        // Weight merchant wait: 1 minute wait ~ 0.5 km penalty
+        return totalDistKm + merchantWaitPenalty * 0.5;
+    }
+
+    /**
+     * Pure distance cost (km) without penalties — used for cheapest insertion.
+     */
+    private double computeDistanceOnly(GeoPoint start, List<Stop> sequence) {
         double totalDist = 0;
         GeoPoint prev = start;
         for (Stop stop : sequence) {
             totalDist += prev.distanceTo(stop.location());
             prev = stop.location();
         }
-        return totalDist / 1000.0; // km
+        return totalDist / 1000.0;
     }
 
-    private double totalRouteTime(List<Stop> sequence) {
-        if (sequence.isEmpty()) return 0;
-        return sequence.get(sequence.size() - 1).estimatedArrivalMinutes();
+    /**
+     * Total route distance in km from sequence stops only.
+     */
+    private double computeSequenceDistanceKm(List<Stop> sequence) {
+        double dist = 0;
+        for (int i = 1; i < sequence.size(); i++) {
+            dist += sequence.get(i - 1).location().distanceTo(sequence.get(i).location());
+        }
+        return dist / 1000.0;
     }
 
-    private void computeArrivalTimes(GeoPoint driverPos, List<Stop> sequence) {
+    /**
+     * Calculate cumulative merchant wait across all pickup stops.
+     * If driver arrives before merchantReadyAt, the difference is wait time.
+     */
+    private double computeCumulativeMerchantWait(List<Stop> sequence, List<Order> orders) {
+        double totalWait = 0;
+        for (Stop stop : sequence) {
+            if (stop.type() == StopType.PICKUP) {
+                Order order = orders.stream()
+                        .filter(o -> o.getId().equals(stop.orderId()))
+                        .findFirst().orElse(null);
+                if (order != null && order.getPredictedReadyAt() != null && order.getCreatedAt() != null) {
+                    // Merchant ready time in minutes since order creation
+                    double merchantReadyMin = java.time.Duration.between(
+                            order.getCreatedAt(), order.getPredictedReadyAt()).toSeconds() / 60.0;
+                    double driverArrivalMin = stop.estimatedArrivalMinutes();
+                    if (driverArrivalMin < merchantReadyMin) {
+                        totalWait += (merchantReadyMin - driverArrivalMin);
+                    }
+                }
+            }
+        }
+        return totalWait;
+    }
+
+    /**
+     * Compute arrival times for each stop, incorporating:
+     * - Travel time based on speed
+     * - Merchant wait time: if driver arrives before merchant is ready,
+     *   elapsed advances to merchant ready time
+     */
+    private void computeArrivalTimes(GeoPoint driverPos, List<Stop> sequence, List<Order> orders) {
         double speedKmh = estimateSpeed();
         double elapsed = 0;
         GeoPoint prev = driverPos;
@@ -192,12 +338,27 @@ public class SequenceOptimizer {
         List<Stop> updated = new ArrayList<>();
         for (Stop stop : sequence) {
             double distKm = prev.distanceTo(stop.location()) / 1000.0;
-            elapsed += (distKm / speedKmh) * 60.0; // minutes
+            double travelTime = (distKm / speedKmh) * 60.0;
+            elapsed += travelTime;
+
+            // Merchant readiness integration: if pickup and driver arrives early, wait
+            if (stop.type() == StopType.PICKUP) {
+                Order order = orders.stream()
+                        .filter(o -> o.getId().equals(stop.orderId()))
+                        .findFirst().orElse(null);
+                if (order != null && order.getPredictedReadyAt() != null && order.getCreatedAt() != null) {
+                    double merchantReadyMin = java.time.Duration.between(
+                            order.getCreatedAt(), order.getPredictedReadyAt()).toSeconds() / 60.0;
+                    if (elapsed < merchantReadyMin) {
+                        elapsed = merchantReadyMin; // Wait for merchant
+                    }
+                }
+            }
+
             updated.add(new Stop(stop.orderId(), stop.location(), stop.type(), elapsed));
             prev = stop.location();
         }
 
-        // Replace in-place (we have to clear and re-add since list is mutable)
         sequence.clear();
         sequence.addAll(updated);
     }
@@ -210,16 +371,10 @@ public class SequenceOptimizer {
     }
 
     private List<Stop> singleOrderSequence(Driver driver, Order order) {
-        double speedKmh = estimateSpeed();
-        double pickupDist = driver.getCurrentLocation().distanceTo(order.getPickupPoint()) / 1000.0;
-        double deliveryDist = order.getPickupPoint().distanceTo(order.getDropoffPoint()) / 1000.0;
-
-        double pickupMinutes = (pickupDist / speedKmh) * 60.0;
-        double deliveryMinutes = pickupMinutes + (deliveryDist / speedKmh) * 60.0;
-
-        return List.of(
-                new Stop(order.getId(), order.getPickupPoint(), StopType.PICKUP, pickupMinutes),
-                new Stop(order.getId(), order.getDropoffPoint(), StopType.DROPOFF, deliveryMinutes)
-        );
+        List<Stop> seq = new ArrayList<>();
+        seq.add(new Stop(order.getId(), order.getPickupPoint(), StopType.PICKUP, 0));
+        seq.add(new Stop(order.getId(), order.getDropoffPoint(), StopType.DROPOFF, 0));
+        computeArrivalTimes(driver.getCurrentLocation(), seq, List.of(order));
+        return seq;
     }
 }

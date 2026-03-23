@@ -227,6 +227,12 @@ public class DriverMotionEngine {
             }
         }
         driver.setCurrentLocation(current);
+        
+        // If we have reached the destination (within 10 meters) and have no pending waypoints
+        if (!driver.hasRouteWaypoints() && current.distanceTo(target) < 10.0) {
+            driver.setCurrentLocation(target);
+            driver.setTargetLocation(null); // Triggers SimulationEngine.processDeliveries()
+        }
     }
 
     /**

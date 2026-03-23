@@ -21,27 +21,19 @@ import java.util.UUID;
  * Generates candidate dispatch plans for a single driver from their
  * {@link DriverDecisionContext}.
  *
- * The key paradigm shift: instead of building bundles globally and then
- * assigning drivers, we start from the driver and generate driver-local plans:
- *
+ * Driver-centric plan generation:
  *   1. Single-order plans (one per reachable order)
- *   2. Bundle plans (from pickup clusters, 2-4 orders)
+ *   2. Bundle plans (from pickup clusters, 2-N orders with dynamic cap)
  *   3. Hold/wait plan (stay put, anticipate incoming orders)
  *   4. Reposition plans (move to a better zone)
  *
  * For bundle plans, the approach is SEQUENCE-FIRST:
  *   candidate orders → generate valid pickup/dropoff sequences → compute route cost
- *
- * This replaces the old flow of:
- *   BundleGraph → searchBundles → match to nearest drivers
  */
 public class DriverPlanGenerator {
 
     /** Maximum candidate plans to emit per driver. */
     private static final int MAX_PLANS_PER_DRIVER = 12;
-
-    /** Maximum orders in a single bundle. */
-    private static final int MAX_BUNDLE_SIZE = 4;
 
     /** Maximum candidate sequences to evaluate per bundle. */
     private static final int MAX_SEQUENCES_PER_BUNDLE = 3;
@@ -60,9 +52,6 @@ public class DriverPlanGenerator {
     /**
      * Generate up to {@link #MAX_PLANS_PER_DRIVER} candidate plans for a
      * single driver.
-     *
-     * Plans are sorted by their preliminary score (sequence route time).
-     * The caller (OmegaDispatchAgent) will re-score them with full AI models.
      *
      * @param ctx              driver's local world snapshot
      * @param trafficIntensity current global traffic intensity
@@ -91,8 +80,8 @@ public class DriverPlanGenerator {
         for (OrderCluster cluster : ctx.pickupClusters()) {
             if (cluster.orders().size() < 2) continue;
 
-            // Try bundle sizes 2, 3, 4 from the cluster
-            int maxSize = Math.min(MAX_BUNDLE_SIZE, cluster.orders().size());
+            int dynamicMax = computeDynamicBatchCap(cluster, trafficIntensity, weather, driver);
+            int maxSize = Math.min(dynamicMax, cluster.orders().size());
             for (int size = 2; size <= maxSize; size++) {
                 List<DispatchPlan> bundlePlans = buildBundlePlans(
                         driver, cluster, size, trafficIntensity, weather);
@@ -111,12 +100,10 @@ public class DriverPlanGenerator {
             }
         }
 
-        // Sort by preliminary score (sequence route time, lower = better for
-        // delivery plans; higher totalScore = better overall)
+        // Sort by preliminary score descending
         plans.sort(Comparator.comparingDouble(
                 DispatchPlan::getTotalScore).reversed());
 
-        // Keep top N
         if (plans.size() > MAX_PLANS_PER_DRIVER) {
             return new ArrayList<>(plans.subList(0, MAX_PLANS_PER_DRIVER));
         }
@@ -125,9 +112,6 @@ public class DriverPlanGenerator {
 
     // ── Plan builders ───────────────────────────────────────────────────
 
-    /**
-     * Build a plan for a single order: driver → pickup → dropoff.
-     */
     private DispatchPlan buildSingleOrderPlan(Driver driver, Order order,
                                                double trafficIntensity,
                                                WeatherProfile weather) {
@@ -147,7 +131,6 @@ public class DriverPlanGenerator {
 
         DispatchPlan plan = new DispatchPlan(driver, bundle, sequences.get(0));
 
-        // Preliminary scoring: based on deadhead distance + fee
         double deadheadKm = driver.getCurrentLocation()
                 .distanceTo(order.getPickupPoint()) / 1000.0;
         double deliveryKm = order.getPickupPoint()
@@ -166,15 +149,7 @@ public class DriverPlanGenerator {
 
     /**
      * Build bundle plans from a pickup cluster.
-     *
-     * SEQUENCE-FIRST approach:
-     *   1. Select top orders from cluster by fee
-     *   2. Generate valid pickup/dropoff sequences
-     *   3. Score each sequence by route time + efficiency
-     *
-     * @param cluster cluster of nearby orders
-     * @param bundleSize target number of orders in the bundle
-     * @return list of valid bundle plans (may be empty)
+     * SEQUENCE-FIRST approach.
      */
     private List<DispatchPlan> buildBundlePlans(Driver driver,
                                                   OrderCluster cluster,
@@ -184,7 +159,6 @@ public class DriverPlanGenerator {
         List<DispatchPlan> result = new ArrayList<>();
         List<Order> candidates = cluster.orders();
 
-        // If cluster is exactly the target size, use all orders
         if (candidates.size() == bundleSize) {
             DispatchPlan plan = buildBundlePlanFromOrders(
                     driver, candidates, trafficIntensity, weather);
@@ -192,7 +166,7 @@ public class DriverPlanGenerator {
             return result;
         }
 
-        // Otherwise: select top orders by fee, try one combination
+        // Strategy 1: top orders by fee
         List<Order> sorted = new ArrayList<>(candidates);
         sorted.sort(Comparator.comparingDouble(Order::getQuotedFee).reversed());
         List<Order> selected = sorted.subList(0,
@@ -202,7 +176,7 @@ public class DriverPlanGenerator {
                 driver, selected, trafficIntensity, weather);
         if (plan != null) result.add(plan);
 
-        // Try another combination: nearest pickups to driver
+        // Strategy 2: nearest pickups to driver
         if (candidates.size() > bundleSize) {
             List<Order> nearest = new ArrayList<>(candidates);
             GeoPoint driverPos = driver.getCurrentLocation();
@@ -238,7 +212,6 @@ public class DriverPlanGenerator {
                 orders.size()
         );
 
-        // SEQUENCE-FIRST: generate valid sequences, then pick best
         SequenceOptimizer seqOpt = createSequenceOptimizer(
                 trafficIntensity, weather);
         List<List<Stop>> sequences = seqOpt.generateFeasibleSequences(
@@ -246,11 +219,9 @@ public class DriverPlanGenerator {
 
         if (sequences.isEmpty()) return null;
 
-        // Take best sequence (already sorted by route time in SequenceOptimizer)
         List<Stop> bestSeq = sequences.get(0);
         DispatchPlan plan = new DispatchPlan(driver, bundle, bestSeq);
 
-        // Preliminary scoring: bundle efficiency + fee
         double deadheadKm = driver.getCurrentLocation()
                 .distanceTo(orders.get(0).getPickupPoint()) / 1000.0;
         double standaloneDist = orders.stream()
@@ -277,10 +248,6 @@ public class DriverPlanGenerator {
         return plan;
     }
 
-    /**
-     * Build a hold/wait plan — driver stays in place, expecting orders.
-     * Score is based on local demand and spike probability.
-     */
     private DispatchPlan buildHoldPlan(Driver driver,
                                         DriverDecisionContext ctx) {
         Bundle holdBundle = new Bundle("HOLD", List.of(), 0, 0);
@@ -288,7 +255,6 @@ public class DriverPlanGenerator {
 
         DispatchPlan plan = new DispatchPlan(driver, holdBundle, emptySeq);
 
-        // Hold is attractive when local demand/spike is high
         double holdScore = HOLD_PLAN_BASE_SCORE
                 + ctx.localDemandIntensity() * 0.04
                 + ctx.localSpikeProbability() * 0.06
@@ -296,16 +262,12 @@ public class DriverPlanGenerator {
                 - ctx.localDriverDensity() / 20.0 * 0.02;
 
         plan.setTotalScore(Math.max(0.01, holdScore));
-        plan.setConfidence(0.3); // low confidence — it's a fallback
+        plan.setConfidence(0.3);
         plan.setTraceId("HOLD");
 
         return plan;
     }
 
-    /**
-     * Build a reposition plan — driver moves to a more attractive zone.
-     * Only worth it when current zone is poor and target zone is clearly better.
-     */
     private DispatchPlan buildRepositionPlan(Driver driver,
                                               EndZoneCandidate zone) {
         if (zone.distanceKm() < 0.3 || zone.distanceKm() > 2.5) return null;
@@ -320,7 +282,6 @@ public class DriverPlanGenerator {
 
         DispatchPlan plan = new DispatchPlan(driver, reposBundle, seq);
 
-        // Reposition worth = attraction gain - travel cost
         double score = REPOSITION_BASE_SCORE
                 + zone.attractionScore() * 0.08
                 - zone.distanceKm() / 5.0 * 0.04;
@@ -340,9 +301,6 @@ public class DriverPlanGenerator {
         return new SequenceOptimizer(trafficIntensity, weather);
     }
 
-    /**
-     * Compute total route distance from driver position through all stops.
-     */
     private double computeRouteDistance(GeoPoint start, List<Stop> sequence) {
         double dist = 0;
         GeoPoint prev = start;
@@ -351,5 +309,53 @@ public class DriverPlanGenerator {
             prev = stop.location();
         }
         return dist;
+    }
+
+    /**
+     * Compute dynamic batch cap based on real-time conditions.
+     * Factors: traffic, weather, merchant readiness, driver load, cluster compactness.
+     */
+    private int computeDynamicBatchCap(OrderCluster cluster,
+                                        double trafficSeverity,
+                                        WeatherProfile weather,
+                                        Driver driver) {
+        int cap = 3; // default base
+
+        // Traffic severity — high traffic reduces capacity
+        if (trafficSeverity > 0.6) cap -= 1;
+
+        // Weather severity
+        if (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM) cap -= 1;
+
+        // Perfect conditions boost
+        if (trafficSeverity < 0.2 && weather == WeatherProfile.CLEAR) cap += 1;
+
+        // Cluster compactness — same merchant orders are highly compact
+        boolean sameMerchant = true;
+        String firstMerchantId = cluster.orders().isEmpty()
+                ? null : cluster.orders().get(0).getMerchantId();
+        if (firstMerchantId != null && !firstMerchantId.isEmpty()) {
+            for (Order o : cluster.orders()) {
+                if (!firstMerchantId.equals(o.getMerchantId())) {
+                    sameMerchant = false;
+                    break;
+                }
+            }
+        } else {
+            sameMerchant = false;
+        }
+        if (sameMerchant) cap += 1;
+
+        // Merchant readiness — high delay hazard reduces capacity
+        double avgDelayHazard = cluster.orders().stream()
+                .mapToDouble(Order::getPickupDelayHazard)
+                .average().orElse(0);
+        if (avgDelayHazard > 0.5) cap -= 1;
+
+        // Driver load — already carrying orders reduces new capacity
+        if (driver.getActiveOrderIds().size() >= 2) cap -= 1;
+
+        // Bounded between 2 and 5
+        return Math.max(2, Math.min(cap, 5));
     }
 }

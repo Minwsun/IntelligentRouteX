@@ -210,17 +210,46 @@ public class OrderArrivalEngine {
     }
 
     private GeoPoint randomPointInRegion(Region region) {
-        double angle = rng.nextDouble() * 2 * Math.PI;
-        double dist = Math.sqrt(rng.nextDouble()) * region.getRadiusMeters();
-        double dLat = dist * Math.cos(angle) / 111320.0;
-        double dLng = dist * Math.sin(angle) / (111320.0 * Math.cos(Math.toRadians(region.getCenter().lat())));
-        GeoPoint point = new GeoPoint(region.getCenter().lat() + dLat, region.getCenter().lng() + dLng);
+        int maxRetries = 10;
+        for (int i = 0; i < maxRetries; i++) {
+            double angle = rng.nextDouble() * 2 * Math.PI;
+            double dist = Math.sqrt(rng.nextDouble()) * region.getRadiusMeters();
+            double dLat = dist * Math.cos(angle) / 111320.0;
+            double dLng = dist * Math.sin(angle) / (111320.0 * Math.cos(Math.toRadians(region.getCenter().lat())));
+            GeoPoint point = new GeoPoint(region.getCenter().lat() + dLat, region.getCenter().lng() + dLng);
 
-        // Basic land check: must be near a region center
-        for (Region r : regions) {
-            if (r.contains(point)) return point;
+            // Basic land check: must be near a region center AND not in the river
+            boolean inRegionBounds = false;
+            for (Region r : regions) {
+                if (r.contains(point)) {
+                    inRegionBounds = true;
+                    break;
+                }
+            }
+
+            if (inRegionBounds && isValidLandPoint(point)) {
+                return point;
+            }
         }
-        return region.getCenter(); // fallback to center
+        return region.getCenter(); // fallback to center if all retries fail
+    }
+
+    /**
+     * Crude exclusion zones for the Saigon River and major water bodies.
+     */
+    private boolean isValidLandPoint(GeoPoint p) {
+        double lat = p.lat();
+        double lng = p.lng();
+        // 1. Saigon River - Thu Thiem Bend (approximate)
+        if (lat >= 10.760 && lat <= 10.785 && lng >= 106.715 && lng <= 106.735) return false;
+        // 2. Saigon River - Thanh Da Loop / District 2 riverfront
+        if (lat >= 10.795 && lat <= 10.825 && lng >= 106.720 && lng <= 106.745) return false;
+        // 3. Saigon River - South (Q4/Q7 boundary)
+        if (lat >= 10.750 && lat <= 10.765 && lng >= 106.705 && lng <= 106.725) return false;
+        // 4. Nha Be / Can Gio rivers (far south/east)
+        if (lat < 10.710 && lng > 106.720) return false;
+        
+        return true;
     }
 
     private Region pickDropoffRegion(Region origin) {
