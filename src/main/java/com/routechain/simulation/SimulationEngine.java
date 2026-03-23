@@ -60,6 +60,10 @@ public class SimulationEngine {
     private final ReDispatchEngine reDispatchEngine = new ReDispatchEngine();
     private final OsrmRoutingService routingService = new OsrmRoutingService();
 
+    // Enhancements
+    private final DriverSupplyEngine driverSupplyEngine = new DriverSupplyEngine();
+    private final ScenarioShockEngine shockEngine = new ScenarioShockEngine();
+
     public SimulationEngine() {
         this.regions = new ArrayList<>(HcmcCityData.createRegions());
         this.corridors = HcmcCityData.createCorridors();
@@ -142,6 +146,8 @@ public class SimulationEngine {
     public void setWeatherProfile(WeatherProfile wp) { this.weatherProfile = wp; }
     public void setDemandMultiplier(double dm) { this.demandMultiplier = dm; }
     public void setInitialDriverCount(int count) { this.initialDriverCount = count; }
+    public DriverSupplyEngine getDriverSupplyEngine() { return driverSupplyEngine; }
+    public ScenarioShockEngine getShockEngine() { return shockEngine; }
     public double getTrafficIntensity() { return trafficIntensity; }
     public WeatherProfile getWeatherProfile() { return weatherProfile; }
     public double getDemandMultiplier() { return demandMultiplier; }
@@ -205,6 +211,10 @@ public class SimulationEngine {
 
             evolveWeather();
             evolveTraffic();
+            
+            // Apply driver shifts & spawning
+            driverSupplyEngine.evaluateShifts(drivers, regions, (int)tick, simulatedHour, weatherProfile, demandMultiplier);
+            
             generateOrders();
             moveDrivers();
             trackDriverProductivity();
@@ -237,6 +247,7 @@ public class SimulationEngine {
             GeoPoint location = randomPointInRegion(region);
             VehicleType vt = rng.nextDouble() > 0.3 ? VehicleType.MOTORBIKE : VehicleType.CAR;
             Driver d = new Driver("D" + (i + 1), names[i], location, region.getId(), vt);
+            driverSupplyEngine.initializeDriver(d);
             drivers.add(d);
             eventBus.publish(new DriverOnline(d.getId()));
         }
@@ -285,23 +296,35 @@ public class SimulationEngine {
         }
     }
 
-    // ── Order generation (Poisson-like) ─────────────────────────────────
+    // ── Order generation (Negative Binomial) ────────────────────────────
     private void generateOrders() {
         Map<String, Double> baseRates = HcmcCityData.baseDemandRates();
         double hourMult = HcmcCityData.hourlyMultiplier(simulatedHour);
-        double weatherMult = switch (weatherProfile) {
-            case CLEAR -> 1.0;
-            case LIGHT_RAIN -> 1.3;
-            case HEAVY_RAIN -> 1.7;
-            case STORM -> 0.6; // fewer orders in storm
-        };
 
         for (Region region : regions) {
-            double rate = baseRates.getOrDefault(region.getId(), 0.1)
-                    * hourMult * weatherMult * demandMultiplier;
+            // Very roughly classify region type
+            String type = region.getId().equals("q1") || region.getId().equals("q3") ? "OFFICE" 
+                        : region.getId().equals("q7") || region.getId().equals("tb") ? "APARTMENT" : "MIXED";
 
-            // Poisson approximation
-            if (rng.nextDouble() < rate) {
+            double shockDemandMult = shockEngine.getDemandMultiplier(region.getId(), type, tickCounter.get());
+            
+            double weatherMult = switch (weatherProfile) {
+                case CLEAR -> 1.0;
+                case LIGHT_RAIN -> 1.3;
+                case HEAVY_RAIN -> 1.7;
+                case STORM -> type.equals("APARTMENT") ? 1.5 : 0.6; // Apartment users order more in storm
+            };
+
+            double lambda = baseRates.getOrDefault(region.getId(), 0.1)
+                    * hourMult * weatherMult * demandMultiplier * shockDemandMult;
+
+            // Cap lambda to prevent system crash (e.g. max 5.0 base Poisson mean)
+            lambda = Math.min(lambda, 5.0);
+
+            // Generate using Negative Binomial for variance (dispersion = 2.0 is quite bursty)
+            int numOrders = SimulationMath.nextNegativeBinomial(lambda, 2.0, rng);
+            
+            for (int i = 0; i < numOrders; i++) {
                 Order order = createRandomOrder(region);
                 activeOrders.add(order);
                 region.setCurrentDemandPressure(region.getCurrentDemandPressure() + 1);
@@ -325,6 +348,17 @@ public class SimulationEngine {
                 fee, Math.max(5, eta));
     }
 
+    public void spawnRandomOrders(int count) {
+        if (regions.isEmpty()) return;
+        for (int i = 0; i < count; i++) {
+            Region region = regions.get(rng.nextInt(regions.size()));
+            Order order = createRandomOrder(region);
+            activeOrders.add(order);
+            region.setCurrentDemandPressure(region.getCurrentDemandPressure() + 1);
+            eventBus.publish(new OrderCreated(order));
+        }
+    }
+
     // ── Driver movement ─────────────────────────────────────────────────
     private void moveDrivers() {
         for (Driver driver : drivers) {
@@ -344,12 +378,35 @@ public class SimulationEngine {
                     driver.setSpeedKmh(5 + rng.nextDouble() * 10);
                 }
             } else {
-                // Calculate speed based on traffic + weather
-                double baseSpeed = (20 + rng.nextDouble() * 20) * (1.0 - trafficIntensity * 0.6);
-                if (weatherProfile == WeatherProfile.HEAVY_RAIN) baseSpeed *= 0.7;
-                if (weatherProfile == WeatherProfile.STORM) baseSpeed *= 0.4;
+                // Traffic light simulation (Red lights at intersections)
+                if (driver.getRedLightWaitTicks() > 0) {
+                    driver.decreaseRedLightWait();
+                    driver.setSpeedKmh(0);
+                    
+                    eventBus.publish(new DriverLocationUpdated(
+                            driver.getId(), driver.getCurrentLocation(), 0));
+                    continue; // Wait at light, do not move
+                }
 
-                double remainingDist = baseSpeed; // meters to travel this tick
+                if (rng.nextDouble() < 0.01) { // 1% chance per tick to hit a red light
+                    driver.setRedLightWaitTicks(5 + rng.nextInt(15)); // wait 5-20 ticks
+                    driver.setSpeedKmh(0);
+                    
+                    eventBus.publish(new DriverLocationUpdated(
+                            driver.getId(), driver.getCurrentLocation(), 0));
+                    continue;
+                }
+
+                // Speed limits (20-50 km/h)
+                double speedKmh = 20 + rng.nextDouble() * 30; // base 20-50 km/h
+                speedKmh *= (1.0 - trafficIntensity * 0.4);
+                if (weatherProfile == WeatherProfile.HEAVY_RAIN) speedKmh *= 0.7;
+                if (weatherProfile == WeatherProfile.STORM) speedKmh *= 0.4;
+                
+                speedKmh = Math.max(20, Math.min(50, speedKmh)); // strict clamp
+
+                double baseSpeedMps = speedKmh / 3.6;
+                double remainingDist = baseSpeedMps; // meters to travel this tick
                 GeoPoint currentPos = driver.getCurrentLocation();
 
                 if (driver.hasRouteWaypoints()) {
@@ -384,13 +441,13 @@ public class SimulationEngine {
                         currentPos = currentPos.moveTowards(target, remainingDist);
                     } else {
                         // Wait for OSRM to load
-                        baseSpeed = 0;
+                        baseSpeedMps = 0;
                         remainingDist = 0;
                     }
                 }
 
                 driver.setCurrentLocation(currentPos);
-                driver.setSpeedKmh(baseSpeed * 3.6);
+                driver.setSpeedKmh(baseSpeedMps * 3.6);
 
                 // Check if arrived at final destination
                 if (currentPos.distanceTo(target) < 30) {
@@ -581,16 +638,24 @@ public class SimulationEngine {
             }
         }
 
-        // Random cancellation risk for active orders
+        // Random cancellation hazard for active orders using Sigmoid approximation
         for (Order order : activeOrders) {
             if (order.getStatus() != OrderStatus.DELIVERED
                     && order.getStatus() != OrderStatus.CANCELLED) {
-                double risk = trafficIntensity * 0.1
-                        + (weatherProfile == WeatherProfile.HEAVY_RAIN ? 0.08 : 0)
+                
+                double waitTimeFactor = order.getStatus() == OrderStatus.PENDING_ASSIGNMENT ? 0.02 : 0.005;
+                double weatherFactor = (weatherProfile == WeatherProfile.HEAVY_RAIN ? 0.08 : 0)
                         + (weatherProfile == WeatherProfile.STORM ? 0.15 : 0);
-                order.setCancellationRisk(risk);
+                double shortageFactor = 0.05 * trafficIntensity; 
+                
+                // Sigmoid: 1 / (1 + exp(-x))
+                // We use a base affine translation to keep baseline hazard low (-5.0 base ~ 0.006 hazard)
+                double linearSum = -5.0 + (waitTimeFactor * 10) + (weatherFactor * 15) + (shortageFactor * 10);
+                double hazard = 1.0 / (1.0 + Math.exp(-linearSum)); 
 
-                if (rng.nextDouble() < risk * 0.01) { // very small chance per tick
+                order.setCancellationRisk(hazard);
+
+                if (rng.nextDouble() < hazard) {
                     order.markCancelled("customer_cancelled");
                     cancelledOrders.add(order);
                     

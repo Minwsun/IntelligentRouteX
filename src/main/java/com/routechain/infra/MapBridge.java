@@ -170,8 +170,12 @@ public class MapBridge {
             for (Order order : pendingOrders) {
                 NativeMapPane.OrderPoint op = new NativeMapPane.OrderPoint();
                 op.id = order.getId();
-                op.lat = order.getPickupPoint().lat();
-                op.lng = order.getPickupPoint().lng();
+                op.pickupLat = order.getPickupPoint().lat();
+                op.pickupLng = order.getPickupPoint().lng();
+                op.dropoffLat = order.getDropoffPoint().lat();
+                op.dropoffLng = order.getDropoffPoint().lng();
+                op.assignedDriverId = order.getAssignedDriverId();
+                op.isPickedUp = (order.getStatus() == Enums.OrderStatus.PICKED_UP || order.getStatus() == Enums.OrderStatus.DELIVERED);
                 points.add(op);
             }
             Platform.runLater(() -> mapPane.setOrderPoints(points));

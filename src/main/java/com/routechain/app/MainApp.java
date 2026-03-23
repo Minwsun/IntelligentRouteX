@@ -401,16 +401,15 @@ public class MainApp extends Application {
         spamRandomOrders.getStyleClass().add("sim-btn");
         spamRandomOrders.setStyle("-fx-background-color: rgba(241,196,15,0.2); -fx-text-fill: #f1c40f; -fx-background-radius: 6;");
         spamRandomOrders.setOnAction(e -> {
-            for (int i = 0; i < 10; i++) {
-                // Random within HCMC area
-                double pLat = 10.74 + Math.random() * 0.08;
-                double pLng = 106.62 + Math.random() * 0.10;
-                double dLat = 10.74 + Math.random() * 0.08;
-                double dLng = 106.62 + Math.random() * 0.10;
-                double fee = 15000 + Math.random() * 30000;
-                simEngine.injectOrder(new GeoPoint(pLat, pLng), new GeoPoint(dLat, dLng), fee, 30);
+            simEngine.spawnRandomOrders(10);
+            
+            // Force map update right away
+            if (mapBridge != null) {
+                mapBridge.setOrderData(simEngine.getActiveOrders());
+                mapBridge.flushFrame();
             }
-            editorStatusLabel.setText("✅ Đã thêm 10 đơn ngẫu nhiên!");
+
+            editorStatusLabel.setText("✅ Đã thêm 10 đơn ngẫu nhiên trên đất liền!");
             editorStatusLabel.setStyle("-fx-text-fill: #00ffab; -fx-font-size: 11;");
         });
 
@@ -419,15 +418,15 @@ public class MainApp extends Application {
         spam50Orders.getStyleClass().add("sim-btn");
         spam50Orders.setStyle("-fx-background-color: rgba(241,196,15,0.2); -fx-text-fill: #f1c40f; -fx-background-radius: 6;");
         spam50Orders.setOnAction(e -> {
-            for (int i = 0; i < 50; i++) {
-                double pLat = 10.74 + Math.random() * 0.08;
-                double pLng = 106.62 + Math.random() * 0.10;
-                double dLat = 10.74 + Math.random() * 0.08;
-                double dLng = 106.62 + Math.random() * 0.10;
-                double fee = 15000 + Math.random() * 30000;
-                simEngine.injectOrder(new GeoPoint(pLat, pLng), new GeoPoint(dLat, dLng), fee, 30);
+            simEngine.spawnRandomOrders(50);
+            
+            // Force map update right away
+            if (mapBridge != null) {
+                mapBridge.setOrderData(simEngine.getActiveOrders());
+                mapBridge.flushFrame();
             }
-            editorStatusLabel.setText("✅ Đã thêm 50 đơn ngẫu nhiên!");
+
+            editorStatusLabel.setText("✅ Đã thêm 50 đơn ngẫu nhiên trên đất liền!");
             editorStatusLabel.setStyle("-fx-text-fill: #00ffab; -fx-font-size: 11;");
         });
 

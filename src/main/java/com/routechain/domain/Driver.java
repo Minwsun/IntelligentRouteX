@@ -25,7 +25,12 @@ public class Driver {
     private volatile double speedKmh;
     private volatile double heading;
     private volatile Instant lastSeenAt;
+    private volatile int redLightWaitTicks = 0;
     private final List<String> activeOrderIds = new ArrayList<>();
+
+    public int getRedLightWaitTicks() { return redLightWaitTicks; }
+    public void setRedLightWaitTicks(int ticks) { this.redLightWaitTicks = ticks; }
+    public void decreaseRedLightWait() { if (redLightWaitTicks > 0) redLightWaitTicks--; }
 
     // ── Route waypoints ─────────────────────────────────────────────────
     private final List<GeoPoint> routeWaypoints = new ArrayList<>();

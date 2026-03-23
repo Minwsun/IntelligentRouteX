@@ -64,6 +64,7 @@ public class NativeMapPane extends Pane {
     // ── Callbacks ───────────────────────────────────────────────────────
     private Runnable onMapReady;
     private java.util.function.Consumer<String> onDriverSelected;
+    private String selectedDriverId = null;
 
     // ── Animation ───────────────────────────────────────────────────────
     private boolean needsRepaint = true;
@@ -93,7 +94,10 @@ public class NativeMapPane extends Pane {
 
     public static class OrderPoint {
         public String id;
-        public double lat, lng;
+        public double pickupLat, pickupLng;
+        public double dropoffLat, dropoffLng;
+        public String assignedDriverId;
+        public boolean isPickedUp;
     }
 
     public NativeMapPane() {
@@ -236,6 +240,7 @@ public class NativeMapPane extends Pane {
     }
 
     public void focusDriver(String driverId) {
+        selectedDriverId = driverId;
         DriverState ds = drivers.get(driverId);
         if (ds != null) {
             centerLat = ds.curLat;
@@ -243,6 +248,11 @@ public class NativeMapPane extends Pane {
             zoom = 15.0;
             needsRepaint = true;
         }
+    }
+
+    public void clearSelectedDriver() {
+        this.selectedDriverId = null;
+        needsRepaint = true;
     }
 
     public void centerMap(double lat, double lng, double z) {
@@ -473,10 +483,33 @@ public class NativeMapPane extends Pane {
 
     private void drawOrders(GraphicsContext gc) {
         synchronized (orderPoints) {
-            gc.setFill(Color.RED);
             for (OrderPoint op : orderPoints) {
-                Point2D pt = geoToScreen(op.lat, op.lng);
-                gc.fillOval(pt.getX() - 3, pt.getY() - 3, 6, 6); // slightly larger red dot
+                boolean isAssignedToSelected = (selectedDriverId != null && selectedDriverId.equals(op.assignedDriverId));
+
+                // Draw dropoff point (Orange) ONLY if it belongs to selected driver
+                if (isAssignedToSelected) {
+                    Point2D dropoffPt = geoToScreen(op.dropoffLat, op.dropoffLng);
+                    gc.setFill(Color.web("#e67e22")); // Orange
+                    gc.fillOval(dropoffPt.getX() - 4, dropoffPt.getY() - 4, 8, 8);
+                    
+                    // Draw a faint line connecting pickup/current to dropoff
+                }
+
+                // Draw pickup point
+                if (!op.isPickedUp) {
+                    Point2D pickupPt = geoToScreen(op.pickupLat, op.pickupLng);
+                    if (isAssignedToSelected) {
+                        gc.setFill(Color.web("#9b59b6")); // Purple
+                        gc.fillOval(pickupPt.getX() - 5, pickupPt.getY() - 5, 10, 10);
+                        // Add glow for emphasis
+                        gc.setStroke(Color.web("#9b59b6", 0.4));
+                        gc.setLineWidth(4);
+                        gc.strokeOval(pickupPt.getX() - 5, pickupPt.getY() - 5, 10, 10);
+                    } else if (op.assignedDriverId == null || !op.assignedDriverId.equals(selectedDriverId)) {
+                        gc.setFill(Color.RED);
+                        gc.fillOval(pickupPt.getX() - 3, pickupPt.getY() - 3, 6, 6);
+                    }
+                }
             }
         }
     }
@@ -712,15 +745,25 @@ public class NativeMapPane extends Pane {
     private void onMouseClicked(MouseEvent e) {
         // Left click: select driver
         if (e.getButton() == javafx.scene.input.MouseButton.PRIMARY
-                && e.getClickCount() == 1 && onDriverSelected != null) {
+                && e.getClickCount() == 1) {
             Point2D click = new Point2D(e.getX(), e.getY());
+            boolean driverClicked = false;
             for (DriverState ds : drivers.values()) {
                 Point2D pt = geoToScreen(ds.curLat, ds.curLng);
                 if (click.distance(pt) < 15) {
-                    onDriverSelected.accept(ds.id);
-                    return;
+                    selectedDriverId = ds.id;
+                    if (onDriverSelected != null) onDriverSelected.accept(ds.id);
+                    needsRepaint = true;
+                    driverClicked = true;
+                    break;
                 }
             }
+            if (!driverClicked) {
+                // Clicked on empty space, clear selection
+                selectedDriverId = null;
+                needsRepaint = true;
+            }
+            if (driverClicked) return;
         }
         // Right click: fire geo callback for editor
         if (e.getButton() == javafx.scene.input.MouseButton.SECONDARY && onMapClickedGeo != null) {
