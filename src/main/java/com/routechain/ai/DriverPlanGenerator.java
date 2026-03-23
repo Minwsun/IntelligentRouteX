@@ -36,7 +36,7 @@ public class DriverPlanGenerator {
     private static final int MAX_PLANS_PER_DRIVER = 12;
 
     /** Maximum candidate sequences to evaluate per bundle. */
-    private static final int MAX_SEQUENCES_PER_BUNDLE = 3;
+    private static final int MAX_SEQUENCES_PER_BUNDLE = 5;
 
     /** Hold plan base score — represents the expected value of waiting. */
     private static final double HOLD_PLAN_BASE_SCORE = 0.08;

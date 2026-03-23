@@ -23,9 +23,9 @@ public class ConstraintEngine {
 
     private static final double MAX_LATE_RISK = 0.35;
     private static final double MIN_PROFIT_PER_ORDER_VND = 3000.0;
-    private static final double MAX_DEADHEAD_KM = 6.0;
-    private static final double MAX_DETOUR_RATIO = 2.0;
-    private static final double MAX_CUMULATIVE_MERCHANT_WAIT_MIN = 8.0;
+    private static final double MAX_DEADHEAD_KM = 7.0;
+    private static final double MAX_DETOUR_RATIO = 3.0;
+    private static final double MAX_CUMULATIVE_MERCHANT_WAIT_MIN = 15.0;
 
     /**
      * Validate all hard constraints on a plan.

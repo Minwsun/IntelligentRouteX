@@ -21,9 +21,9 @@ import java.util.*;
  */
 public class SequenceOptimizer {
 
-    private static final double MAX_PICKUP_SPAN_MINUTES = 12.0;
-    private static final double MAX_MERCHANT_WAIT_MINUTES = 8.0;
-    private static final double MAX_DETOUR_RATIO = 2.0;
+    private static final double MAX_PICKUP_SPAN_MINUTES = 15.0;
+    private static final double MAX_MERCHANT_WAIT_MINUTES = 15.0;
+    private static final double MAX_DETOUR_RATIO = 3.0;
     private static final double SLA_LATENESS_FACTOR = 0.7;
 
     private final double trafficIntensity;
