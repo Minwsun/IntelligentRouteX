@@ -29,24 +29,24 @@ import java.util.List;
 public class PlanUtilityScorer {
 
     // ── Positive weights ────────────────────────────────────────────────
-    private static final double W_ON_TIME = 0.20;
-    private static final double W_PROFIT = 0.15;
+    private static final double W_ON_TIME = 0.35;
+    private static final double W_PROFIT = 0.10;
     private static final double W_PICKUP_WAVE = 0.15;
     private static final double W_DROP_EFFICIENCY = 0.20;
     private static final double W_END_STATE = 0.08;
     private static final double W_NEXT_ORDER = 0.07;
 
     // ── Penalty weights ─────────────────────────────────────────────────
-    private static final double P_DEADHEAD = 0.25;
+    private static final double P_DEADHEAD = 0.30;
     private static final double P_MERCHANT_WAIT = 0.05;
     private static final double P_CONGESTION = 0.05;
-    private static final double P_LATE_RISK = 0.05;
-    private static final double P_CANCEL_RISK = 0.03;
+    private static final double P_LATE_RISK = 0.25;
+    private static final double P_CANCEL_RISK = 0.15;
     private static final double P_OVERLOAD = 0.02;
 
     // ── Normalization thresholds ─────────────────────────────────────────
     private static final double PROFIT_NORM = 50000.0;  // VND
-    private static final double DEADHEAD_THRESHOLD_KM = 6.0;
+    private static final double DEADHEAD_THRESHOLD_KM = 5.0;
     private static final double MERCHANT_WAIT_THRESHOLD_MIN = 8.0;
 
     /**

@@ -27,10 +27,10 @@ import java.util.UUID;
 public class DriverContextBuilder {
 
     /** Maximum minutes a driver is willing to travel for pickup. */
-    private static final double REACHABILITY_HORIZON_MINUTES = 6.5;
+    private static final double REACHABILITY_HORIZON_MINUTES = 8.0;
 
     /** Maximum distance (meters) between pickups to be in the same cluster. */
-    private static final double CLUSTER_RADIUS_METERS = 2500.0;
+    private static final double CLUSTER_RADIUS_METERS = 1500.0;
 
     /** Maximum end-zone distance to consider (km). */
     private static final double MAX_END_ZONE_KM = 3.0;
@@ -39,7 +39,7 @@ public class DriverContextBuilder {
     private static final int TOP_END_ZONES = 3;
 
     /** Minimum synergy threshold for cluster inclusion. */
-    private static final double SYNERGY_THRESHOLD = 0.20;
+    private static final double SYNERGY_THRESHOLD = 0.35;
 
     private final NearbyOrderIndexer orderIndex;
     private final SpatiotemporalField field;
