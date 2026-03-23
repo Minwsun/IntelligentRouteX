@@ -17,8 +17,10 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
+import com.routechain.domain.GeoPoint;
 import com.routechain.infra.NativeMapPane;
 import javafx.stage.Stage;
+import javafx.scene.Node;
 
 import java.time.*;
 import java.time.format.DateTimeFormatter;
@@ -72,6 +74,12 @@ public class MainApp extends Application {
     private Slider demandSlider;
     private HBox weatherBtnBox;
 
+    // ── Editor state ────────────────────────────────────────────────────
+    private enum EditorMode { NONE, SET_PICKUP, SET_DROPOFF, PLACE_DRIVER }
+    private EditorMode editorMode = EditorMode.NONE;
+    private double pendingPickupLat, pendingPickupLng;
+    private Label editorStatusLabel;
+    private NativeMapPane nativeMapRef;
 
     @Override
     public void start(Stage stage) {
@@ -85,11 +93,11 @@ public class MainApp extends Application {
         mapBridge = new MapBridge(nativeMap);
         mapBridge.attach();
         mapBridge.setOnDriverSelected(this::onDriverSelected);
-        mapBridge.setDriverLookup(id -> simEngine.getDrivers().stream()
-                .filter(d -> d.getId().equals(id)).findFirst().orElse(null));
         mapBridge.setOnMapReady(() -> {
             System.out.println("[App] Map ready — road network will push on first tick");
         });
+        nativeMapRef = nativeMap;
+        nativeMap.setOnMapClickedGeo(this::onMapGeoClicked);
 
         // ── Header ──────────────────────────────────────────────────────
         HBox header = createHeader();
@@ -121,16 +129,41 @@ public class MainApp extends Application {
         rightStack.setPrefWidth(340);
         rightStack.getChildren().addAll(
                 createAiInsightCard(),
+                createEditorCard(),
                 createScenarioCard()
         );
 
         // ── Floating layout ─────────────────────────────────────────────
-        HBox leftColumn = new HBox(12, leftScroll);
+        Button leftToggle = new Button("◀");
+        leftToggle.getStyleClass().add("sim-btn");
+        leftToggle.setStyle("-fx-background-radius: 999; -fx-padding: 8; -fx-font-size: 10;");
+        leftToggle.setOnAction(e -> {
+            boolean vis = leftScroll.isVisible();
+            leftScroll.setVisible(!vis);
+            leftScroll.setManaged(!vis);
+            leftToggle.setText(vis ? "▶" : "◀");
+        });
+
+        HBox leftColumn = new HBox(8, leftToggle, leftScroll);
         leftColumn.setAlignment(Pos.TOP_LEFT);
         leftColumn.setPickOnBounds(false);
         leftColumn.setPadding(new Insets(80, 0, 24, 16));
 
-        VBox rightColumn = new VBox(16, rightStack);
+        Button rightToggle = new Button("▶");
+        rightToggle.getStyleClass().add("sim-btn");
+        rightToggle.setStyle("-fx-background-radius: 999; -fx-padding: 8; -fx-font-size: 10;");
+        rightToggle.setOnAction(e -> {
+            boolean vis = rightStack.isVisible();
+            rightStack.setVisible(!vis);
+            rightStack.setManaged(!vis);
+            rightToggle.setText(vis ? "◀" : "▶");
+        });
+
+        HBox rightColumnHBox = new HBox(8, rightStack, rightToggle);
+        rightColumnHBox.setAlignment(Pos.TOP_RIGHT);
+        rightColumnHBox.setPickOnBounds(false);
+
+        VBox rightColumn = new VBox(16, rightColumnHBox);
         rightColumn.setAlignment(Pos.TOP_RIGHT);
         rightColumn.setPickOnBounds(false);
         rightColumn.setPadding(new Insets(80, 16, 24, 0));
@@ -182,6 +215,54 @@ public class MainApp extends Application {
     // ═══════════════════════════════════════════════════════════════════
     // COMPONENT BUILDERS
     // ═══════════════════════════════════════════════════════════════════
+
+    private VBox createCollapsibleCard(String iconStr, String titleStr, Node summaryContent, Node fullContent, boolean defaultExpanded) {
+        VBox card = new VBox(0);
+        card.getStyleClass().add("glass-card");
+
+        HBox header = new HBox();
+        header.setAlignment(Pos.CENTER_LEFT);
+        header.setPadding(new Insets(14, 16, 14, 16));
+        header.setCursor(javafx.scene.Cursor.HAND);
+
+        Label icon = new Label(iconStr);
+        icon.setStyle("-fx-font-size: 16; -fx-text-fill: #99f7ff;");
+        Label title = new Label(" " + titleStr);
+        title.getStyleClass().add("text-title");
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        Label toggleIcon = new Label(defaultExpanded ? "▲" : "▼");
+        toggleIcon.setStyle("-fx-text-fill: #aaabad; -fx-font-size: 12px;");
+
+        header.getChildren().addAll(icon, title, spacer, toggleIcon);
+
+        VBox body = new VBox();
+        body.setPadding(new Insets(0, 16, 16, 16));
+
+        VBox collapsedBox = new VBox();
+        if (summaryContent != null) collapsedBox.getChildren().add(summaryContent);
+        collapsedBox.setVisible(!defaultExpanded);
+        collapsedBox.setManaged(!defaultExpanded);
+
+        VBox expandedBox = new VBox();
+        if (fullContent != null) expandedBox.getChildren().add(fullContent);
+        expandedBox.setVisible(defaultExpanded);
+        expandedBox.setManaged(defaultExpanded);
+
+        body.getChildren().addAll(collapsedBox, expandedBox);
+
+        header.setOnMouseClicked(e -> {
+            boolean isExpanded = expandedBox.isVisible();
+            expandedBox.setVisible(!isExpanded);
+            expandedBox.setManaged(!isExpanded);
+            collapsedBox.setVisible(isExpanded);
+            collapsedBox.setManaged(isExpanded);
+            toggleIcon.setText(isExpanded ? "▼" : "▲");
+        });
+
+        card.getChildren().addAll(header, body);
+        return card;
+    }
 
     private HBox createHeader() {
         HBox header = new HBox();
@@ -237,53 +318,10 @@ public class MainApp extends Application {
     }
 
     private VBox createCollapsibleControlsCard() {
-        VBox card = new VBox(0);
-        card.getStyleClass().add("glass-card");
-
-        HBox header = new HBox();
-        header.setAlignment(Pos.CENTER_LEFT);
-        header.setPadding(new Insets(14, 16, 14, 16));
-        header.setCursor(javafx.scene.Cursor.HAND);
-
-        Label icon = new Label("⚙");
-        icon.setStyle("-fx-font-size: 16; -fx-text-fill: #99f7ff;");
-
-        Label title = new Label(" MAP LAYERS");
-        title.getStyleClass().add("text-title");
-        title.setPadding(new Insets(0, 0, 0, 8));
-
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-
-        Label toggleIcon = new Label("▼");
-        toggleIcon.setStyle("-fx-text-fill: #aaabad; -fx-font-size: 12px;");
-
-        header.getChildren().addAll(icon, title, spacer, toggleIcon);
-
-        VBox contentContainer = new VBox(16);
-        contentContainer.setPadding(new Insets(0, 16, 16, 16));
-
-        VBox layerBox = createLayerBox();
-
-        contentContainer.getChildren().addAll(layerBox);
-        contentContainer.setVisible(false);
-        contentContainer.setManaged(false);
-
-        header.setOnMouseClicked(e -> {
-            boolean isExpanded = contentContainer.isVisible();
-            contentContainer.setVisible(!isExpanded);
-            contentContainer.setManaged(!isExpanded);
-            toggleIcon.setText(isExpanded ? "▼" : "▲");
-        });
-
-        card.getChildren().addAll(header, contentContainer);
-        return card;
+        return createCollapsibleCard("⚙", "MAP LAYERS", null, createLayerBox(), false);
     }
 
     private VBox createModeCard() {
-        VBox card = new VBox(12);
-        card.getStyleClass().add("glass-card-compact");
-
         HBox topRow = new HBox(8);
         topRow.setAlignment(Pos.CENTER_LEFT);
 
@@ -295,13 +333,10 @@ public class MainApp extends Application {
         pmLabel.getStyleClass().add("label-eyebrow");
         pmLabel.setPadding(new Insets(10, 0, 0, 4));
 
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-
         Label liveBadge = new Label("LIVE");
         liveBadge.getStyleClass().add("badge-live");
 
-        topRow.getChildren().addAll(clock, pmLabel, spacer, liveBadge);
+        topRow.getChildren().addAll(clock, pmLabel, liveBadge);
 
         // Active counts
         HBox counters = new HBox(16);
@@ -314,25 +349,10 @@ public class MainApp extends Application {
         driversLabel.textProperty().bind(activeDriversCount.asString("🏍 %d drivers"));
         counters.getChildren().addAll(ordersLabel, driversLabel);
 
-        card.getChildren().addAll(topRow, counters);
-        return card;
+        return createCollapsibleCard("⏱", "SIM CLOCK", topRow, counters, false);
     }
 
     private VBox createAiInsightCard() {
-        VBox card = new VBox(8);
-        card.getStyleClass().add("glass-card-accent");
-
-        HBox header = new HBox(12);
-        header.setAlignment(Pos.CENTER_LEFT);
-
-        StackPane iconCircle = new StackPane();
-        iconCircle.setMinSize(36, 36);
-        iconCircle.setMaxSize(36, 36);
-        iconCircle.setStyle("-fx-background-color: rgba(153,247,255,0.1); -fx-background-radius: 999;");
-        Label icon = new Label("🧠");
-        icon.setStyle("-fx-font-size: 16;");
-        iconCircle.getChildren().add(icon);
-
         VBox textCol = new VBox(2);
         Label eyebrow = new Label();
         eyebrow.getStyleClass().add("label-eyebrow-primary");
@@ -348,26 +368,177 @@ public class MainApp extends Application {
         delta.getStyleClass().add("metric-delta-positive");
         delta.textProperty().bind(aiInsightDelta);
 
-        textCol.getChildren().addAll(eyebrow, body, delta);
-        header.getChildren().addAll(iconCircle, textCol);
-        card.getChildren().add(header);
-        return card;
+        VBox fullContent = new VBox(8, body, delta);
+        return createCollapsibleCard("🧠", "AI INSIGHTS", eyebrow, fullContent, false);
+    }
+
+    // ── Editor Card ──────────────────────────────────────────────────────
+
+    private VBox createEditorCard() {
+        VBox content = new VBox(12);
+
+        // Status label
+        editorStatusLabel = new Label("Sẵn sàng. Chọn chế độ rồi chuột phải trên bản đồ.");
+        editorStatusLabel.setWrapText(true);
+        editorStatusLabel.setStyle("-fx-text-fill: #aaabad; -fx-font-size: 11;");
+
+        // ── ORDER SECTION ────────────────────────────────────────────
+        Label orderTitle = new Label("📦 SPAM ĐƠN HÀNG");
+        orderTitle.setStyle("-fx-text-fill: #99f7ff; -fx-font-weight: bold; -fx-font-size: 11;");
+
+        Button pickupBtn = new Button("📍 Đặt điểm lấy (Pickup)");
+        pickupBtn.setMaxWidth(Double.MAX_VALUE);
+        pickupBtn.getStyleClass().add("sim-btn");
+        pickupBtn.setStyle("-fx-background-color: rgba(0,168,255,0.25); -fx-text-fill: #00a8ff; -fx-background-radius: 6;");
+        pickupBtn.setOnAction(e -> {
+            editorMode = EditorMode.SET_PICKUP;
+            editorStatusLabel.setText("▶ Chuột PHẢI trên bản đồ để đặt PICKUP");
+            editorStatusLabel.setStyle("-fx-text-fill: #00a8ff; -fx-font-size: 11;");
+        });
+
+        Button spamRandomOrders = new Button("⚡ Spam 10 đơn ngẫu nhiên");
+        spamRandomOrders.setMaxWidth(Double.MAX_VALUE);
+        spamRandomOrders.getStyleClass().add("sim-btn");
+        spamRandomOrders.setStyle("-fx-background-color: rgba(241,196,15,0.2); -fx-text-fill: #f1c40f; -fx-background-radius: 6;");
+        spamRandomOrders.setOnAction(e -> {
+            for (int i = 0; i < 10; i++) {
+                // Random within HCMC area
+                double pLat = 10.74 + Math.random() * 0.08;
+                double pLng = 106.62 + Math.random() * 0.10;
+                double dLat = 10.74 + Math.random() * 0.08;
+                double dLng = 106.62 + Math.random() * 0.10;
+                double fee = 15000 + Math.random() * 30000;
+                simEngine.injectOrder(new GeoPoint(pLat, pLng), new GeoPoint(dLat, dLng), fee, 30);
+            }
+            editorStatusLabel.setText("✅ Đã thêm 10 đơn ngẫu nhiên!");
+            editorStatusLabel.setStyle("-fx-text-fill: #00ffab; -fx-font-size: 11;");
+        });
+
+        Button spam50Orders = new Button("⚡ Spam 50 đơn ngẫu nhiên");
+        spam50Orders.setMaxWidth(Double.MAX_VALUE);
+        spam50Orders.getStyleClass().add("sim-btn");
+        spam50Orders.setStyle("-fx-background-color: rgba(241,196,15,0.2); -fx-text-fill: #f1c40f; -fx-background-radius: 6;");
+        spam50Orders.setOnAction(e -> {
+            for (int i = 0; i < 50; i++) {
+                double pLat = 10.74 + Math.random() * 0.08;
+                double pLng = 106.62 + Math.random() * 0.10;
+                double dLat = 10.74 + Math.random() * 0.08;
+                double dLng = 106.62 + Math.random() * 0.10;
+                double fee = 15000 + Math.random() * 30000;
+                simEngine.injectOrder(new GeoPoint(pLat, pLng), new GeoPoint(dLat, dLng), fee, 30);
+            }
+            editorStatusLabel.setText("✅ Đã thêm 50 đơn ngẫu nhiên!");
+            editorStatusLabel.setStyle("-fx-text-fill: #00ffab; -fx-font-size: 11;");
+        });
+
+        // ── DRIVER SECTION ───────────────────────────────────────────
+        Separator sep1 = new Separator();
+        sep1.setStyle("-fx-background-color: rgba(255,255,255,0.08);");
+
+        Label driverTitle = new Label("🏍 SPAM TÀI XẾ");
+        driverTitle.setStyle("-fx-text-fill: #99f7ff; -fx-font-weight: bold; -fx-font-size: 11;");
+
+        Button placeDriverBtn = new Button("📍 Đặt tài xế (chuột phải)");
+        placeDriverBtn.setMaxWidth(Double.MAX_VALUE);
+        placeDriverBtn.getStyleClass().add("sim-btn");
+        placeDriverBtn.setStyle("-fx-background-color: rgba(0,255,171,0.2); -fx-text-fill: #00ffab; -fx-background-radius: 6;");
+        placeDriverBtn.setOnAction(e -> {
+            editorMode = EditorMode.PLACE_DRIVER;
+            editorStatusLabel.setText("▶ Chuột PHẢI trên bản đồ để đặt TÀI XẾ");
+            editorStatusLabel.setStyle("-fx-text-fill: #00ffab; -fx-font-size: 11;");
+        });
+
+        Button spam10Drivers = new Button("⚡ Thêm 10 tài xế ngẫu nhiên");
+        spam10Drivers.setMaxWidth(Double.MAX_VALUE);
+        spam10Drivers.getStyleClass().add("sim-btn");
+        spam10Drivers.setStyle("-fx-background-color: rgba(0,255,171,0.15); -fx-text-fill: #00ffab; -fx-background-radius: 6;");
+        spam10Drivers.setOnAction(e -> {
+            for (int i = 0; i < 10; i++) {
+                double lat = 10.74 + Math.random() * 0.08;
+                double lng = 106.62 + Math.random() * 0.10;
+                simEngine.injectDriver(new GeoPoint(lat, lng));
+            }
+            editorStatusLabel.setText("✅ Đã thêm 10 tài xế!");
+            editorStatusLabel.setStyle("-fx-text-fill: #00ffab; -fx-font-size: 11;");
+        });
+
+        Button spam30Drivers = new Button("⚡ Thêm 30 tài xế ngẫu nhiên");
+        spam30Drivers.setMaxWidth(Double.MAX_VALUE);
+        spam30Drivers.getStyleClass().add("sim-btn");
+        spam30Drivers.setStyle("-fx-background-color: rgba(0,255,171,0.15); -fx-text-fill: #00ffab; -fx-background-radius: 6;");
+        spam30Drivers.setOnAction(e -> {
+            for (int i = 0; i < 30; i++) {
+                double lat = 10.74 + Math.random() * 0.08;
+                double lng = 106.62 + Math.random() * 0.10;
+                simEngine.injectDriver(new GeoPoint(lat, lng));
+            }
+            editorStatusLabel.setText("✅ Đã thêm 30 tài xế!");
+            editorStatusLabel.setStyle("-fx-text-fill: #00ffab; -fx-font-size: 11;");
+        });
+
+        // ── RESET BUTTON ─────────────────────────────────────────────
+        Separator sep2 = new Separator();
+        sep2.setStyle("-fx-background-color: rgba(255,255,255,0.08);");
+
+        Button cancelBtn = new Button("✕ Hủy chế độ đặt");
+        cancelBtn.setMaxWidth(Double.MAX_VALUE);
+        cancelBtn.getStyleClass().add("sim-btn");
+        cancelBtn.setStyle("-fx-background-color: rgba(255,60,60,0.15); -fx-text-fill: #ff4444; -fx-background-radius: 6;");
+        cancelBtn.setOnAction(e -> {
+            editorMode = EditorMode.NONE;
+            editorStatusLabel.setText("Đã hủy. Sẵn sàng.");
+            editorStatusLabel.setStyle("-fx-text-fill: #aaabad; -fx-font-size: 11;");
+        });
+
+        content.getChildren().addAll(
+                editorStatusLabel,
+                orderTitle, pickupBtn, spamRandomOrders, spam50Orders,
+                sep1, driverTitle, placeDriverBtn, spam10Drivers, spam30Drivers,
+                sep2, cancelBtn
+        );
+
+        Label summaryLabel = new Label("Editor Tools Available");
+        summaryLabel.setStyle("-fx-text-fill: #888; -fx-font-size: 11; -fx-font-style: italic;");
+        return createCollapsibleCard("✏", "EDITOR PANEL", summaryLabel, content, false);
+    }
+
+    /**
+     * Handle right-click on map for editor mode placement.
+     */
+    private void onMapGeoClicked(Double lat, Double lng) {
+        Platform.runLater(() -> {
+            switch (editorMode) {
+                case SET_PICKUP -> {
+                    pendingPickupLat = lat;
+                    pendingPickupLng = lng;
+                    editorMode = EditorMode.SET_DROPOFF;
+                    editorStatusLabel.setText(String.format(
+                            "✅ Pickup: (%.5f, %.5f)\n▶ Bây giờ chuột PHẢI để đặt DROPOFF", lat, lng));
+                    editorStatusLabel.setStyle("-fx-text-fill: #f1c40f; -fx-font-size: 11; -fx-padding: 6 10;");
+                }
+                case SET_DROPOFF -> {
+                    double fee = 15000 + Math.random() * 30000;
+                    simEngine.injectOrder(
+                            new GeoPoint(pendingPickupLat, pendingPickupLng),
+                            new GeoPoint(lat, lng), fee, 30);
+                    editorMode = EditorMode.SET_PICKUP;
+                    editorStatusLabel.setText(String.format(
+                            "✅ Đơn tạo xong! Dropoff: (%.5f, %.5f)\n▶ Tiếp tục: chuột PHẢI để đặt PICKUP mới", lat, lng));
+                    editorStatusLabel.setStyle("-fx-text-fill: #00ffab; -fx-font-size: 11; -fx-padding: 6 10;");
+                }
+                case PLACE_DRIVER -> {
+                    simEngine.injectDriver(new GeoPoint(lat, lng));
+                    editorStatusLabel.setText(String.format(
+                            "✅ Tài xế đặt tại (%.5f, %.5f)\n▶ Tiếp tục: chuột PHẢI để đặt thêm", lat, lng));
+                    editorStatusLabel.setStyle("-fx-text-fill: #00ffab; -fx-font-size: 11; -fx-padding: 6 10;");
+                }
+                case NONE -> { /* ignore */ }
+            }
+        });
     }
 
     private VBox createScenarioCard() {
-        VBox card = new VBox(16);
-        card.getStyleClass().add("glass-card");
-
-        // Title
-        HBox titleRow = new HBox();
-        titleRow.setAlignment(Pos.CENTER_LEFT);
-        Label title = new Label("Scenario / Edit Tools");
-        title.getStyleClass().add("text-title");
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-        Label version = new Label("v1.0");
-        version.getStyleClass().add("label-eyebrow");
-        titleRow.getChildren().addAll(title, spacer, version);
+        VBox content = new VBox(16);
 
         // ── Preset Levels ───────────────────────────────────────────────
         VBox presetBox = new VBox(6);
@@ -480,8 +651,12 @@ public class MainApp extends Application {
         runBtn.setMaxWidth(Double.MAX_VALUE);
         runBtn.setOnAction(e -> toggleSimulation(runBtn));
 
-        card.getChildren().addAll(titleRow, presetBox, new Separator(), trafficBox, weatherBox, demandBox, runBtn);
-        return card;
+        content.getChildren().addAll(presetBox, new Separator(), trafficBox, weatherBox, demandBox, runBtn);
+        
+        Label summaryLabel = new Label("Traffic, Weather & Presets");
+        summaryLabel.setStyle("-fx-text-fill: #888; -fx-font-size: 11; -fx-font-style: italic;");
+        
+        return createCollapsibleCard("⚙", "SCENARIOS v1.0", summaryLabel, content, false);
     }
 
     private void updateWeatherUI(WeatherProfile wp) {
@@ -569,9 +744,6 @@ public class MainApp extends Application {
     }
 
     private VBox createKpiBar() {
-        VBox card = new VBox(0);
-        card.getStyleClass().add("glass-card-compact");
-
         HBox kpiRow = new HBox(0);
         kpiRow.setAlignment(Pos.CENTER);
 
@@ -591,14 +763,10 @@ public class MainApp extends Application {
         netHrBox.getChildren().addAll(netLabel, netVal);
 
         kpiRow.getChildren().addAll(onTimePct, sep1, deadheadPct, sep2, netHrBox);
-        card.getChildren().add(kpiRow);
-        return card;
+        return createCollapsibleCard("📊", "KEY METRICS", null, kpiRow, false);
     }
 
     private VBox createCountersCard() {
-        VBox card = new VBox(10);
-        card.getStyleClass().add("glass-card-compact");
-
         HBox row = new HBox(16);
         row.setAlignment(Pos.CENTER);
 
@@ -632,8 +800,7 @@ public class MainApp extends Application {
         drvrs.getChildren().addAll(drLabel, drVal);
 
         row.getChildren().addAll(delivered, active, drvrs);
-        card.getChildren().add(row);
-        return card;
+        return createCollapsibleCard("📈", "FLEET COUNTERS", null, row, false);
     }
 
     private VBox createKpiItem(String label, DoubleProperty value, String unit, String colorClass) {
@@ -813,23 +980,7 @@ public class MainApp extends Application {
             // ── EVERY tick: driver positions (animation in JS handles smoothing) ──
             mapBridge.setDriverPositions(simEngine.getDrivers());
 
-            // ── Every 3 ticks: request OSRM routes + build route GeoJSON ──
-            if (e.tickNumber() % 3 == 0) {
-                for (Driver d : simEngine.getDrivers()) {
-                    if (d.getTargetLocation() != null) {
-                        String phase = (d.getState() == com.routechain.domain.Enums.DriverState.PICKUP_EN_ROUTE)
-                                ? "pickup" : "delivery";
-                        mapBridge.requestDriverRoute(
-                                d.getId(),
-                                d.getCurrentLocation().lat(), d.getCurrentLocation().lng(),
-                                d.getTargetLocation().lat(), d.getTargetLocation().lng(),
-                                phase);
-                    } else {
-                        mapBridge.clearDriverRoute(d.getId());
-                    }
-                }
-                mapBridge.buildAndSetRouteData();
-            }
+            // ── Routes are now handled dynamically in MapBridge.flushFrame() based on Driver waypoints ──
 
             // ── Every 15 ticks: traffic, weather, orders overlays ──
             if (e.tickNumber() % 15 == 0) {

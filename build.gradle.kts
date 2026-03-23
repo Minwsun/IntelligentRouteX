@@ -29,10 +29,18 @@ dependencies {
     // Logging
     implementation("org.slf4j:slf4j-api:2.0.13")
     implementation("ch.qos.logback:logback-classic:1.5.6")
+
+    // Testing
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 application {
-    mainClass.set("com.routechain.app.MainApp")
+    mainClass.set(project.findProperty("mainClass")?.toString() ?: "com.routechain.app.MainApp")
     applicationDefaultJvmArgs = listOf(
         "--add-modules", "javafx.controls,javafx.web",
         "-Dprism.dirtyopts=false"

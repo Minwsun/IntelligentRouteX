@@ -71,6 +71,8 @@ public class NativeMapPane extends Pane {
     // ── Data records ────────────────────────────────────────────────────
     public static class DriverState {
         public double curLat, curLng, tgtLat, tgtLng;
+        public double destLat, destLng;
+        public boolean hasDest;
         public String state, name, id;
     }
 
@@ -191,6 +193,9 @@ public class NativeMapPane extends Pane {
                 existing.tgtLng = entry.getValue().tgtLng;
                 existing.state = entry.getValue().state;
                 existing.name = entry.getValue().name;
+                existing.destLat = entry.getValue().destLat;
+                existing.destLng = entry.getValue().destLng;
+                existing.hasDest = entry.getValue().hasDest;
             } else {
                 drivers.put(entry.getKey(), entry.getValue());
             }
@@ -345,11 +350,17 @@ public class NativeMapPane extends Pane {
         // Draw routes
         if (showRoutes) drawRoutes(gc);
 
+        // Draw driver→destination fallback lines
+        if (showRoutes) drawDriverDestLines(gc);
+
         // Draw orders
         if (showOrders) drawOrders(gc);
 
         // Draw drivers (top layer)
         if (showDrivers) drawDrivers(gc);
+
+        // Draw legend (always on top)
+        drawLegend(gc, w, h);
     }
 
     private void drawWeather(GraphicsContext gc) {
@@ -515,6 +526,126 @@ public class NativeMapPane extends Pane {
         }
     }
 
+    /**
+     * Draw thin lines from each busy driver to their destination.
+     * If an OSRM route exists, skip (the route polyline handles it).
+     */
+    private void drawDriverDestLines(GraphicsContext gc) {
+        for (DriverState ds : drivers.values()) {
+            if (!ds.hasDest) continue;
+            // Skip if OSRM route already exists for this driver
+            if (routes.containsKey(ds.id)) continue;
+
+            boolean isPickup = "PICKUP_EN_ROUTE".equals(ds.state);
+            Color color = isPickup ? Color.web("#00a8ff", 0.5) : Color.web("#f1c40f", 0.5);
+
+            Point2D from = geoToScreen(ds.curLat, ds.curLng);
+            Point2D to = geoToScreen(ds.destLat, ds.destLng);
+
+            gc.setStroke(color);
+            gc.setLineWidth(1.5);
+            gc.setLineDashes(6, 4);
+            gc.beginPath();
+            gc.moveTo(from.getX(), from.getY());
+            gc.lineTo(to.getX(), to.getY());
+            gc.stroke();
+            gc.setLineDashes(null);
+
+            // Small destination marker
+            gc.setFill(color.deriveColor(0, 1, 1, 0.8));
+            gc.fillOval(to.getX() - 3, to.getY() - 3, 6, 6);
+        }
+    }
+
+    /**
+     * Draw map legend at bottom-right corner.
+     */
+    private void drawLegend(GraphicsContext gc, double w, double h) {
+        double legendW = 180;
+        double legendH = 175;
+        double padR = 16;
+        double padB = 16;
+        double x = w - legendW - padR;
+        double y = h - legendH - padB;
+        double rowH = 20;
+
+        // Background
+        gc.setFill(Color.web("#1a1c1e", 0.85));
+        gc.fillRoundRect(x, y, legendW, legendH, 10, 10);
+        gc.setStroke(Color.web("#444", 0.6));
+        gc.setLineWidth(1);
+        gc.setLineDashes(null);
+        gc.strokeRoundRect(x, y, legendW, legendH, 10, 10);
+
+        // Title
+        gc.setFill(Color.WHITE);
+        gc.setFont(Font.font("Segoe UI", FontWeight.BOLD, 11));
+        gc.fillText("CHÚ THÍCH", x + 12, y + 18);
+
+        gc.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 10));
+        double itemY = y + 36;
+
+        // Driver — Idle (green triangle)
+        drawLegendTriangle(gc, x + 18, itemY, Color.web("#00ffab"));
+        gc.setFill(Color.web("#ccc"));
+        gc.fillText("Tài xế rảnh", x + 34, itemY + 4);
+        itemY += rowH;
+
+        // Driver — Pickup (blue triangle)
+        drawLegendTriangle(gc, x + 18, itemY, Color.web("#00a8ff"));
+        gc.setFill(Color.web("#ccc"));
+        gc.fillText("Đang đi lấy hàng", x + 34, itemY + 4);
+        itemY += rowH;
+
+        // Driver — Delivering (yellow triangle)
+        drawLegendTriangle(gc, x + 18, itemY, Color.web("#f1c40f"));
+        gc.setFill(Color.web("#ccc"));
+        gc.fillText("Đang giao hàng", x + 34, itemY + 4);
+        itemY += rowH;
+
+        // Route — Pickup (blue dashed)
+        gc.setStroke(Color.web("#00a8ff"));
+        gc.setLineWidth(2);
+        gc.setLineDashes(5, 3);
+        gc.strokeLine(x + 10, itemY, x + 26, itemY);
+        gc.setLineDashes(null);
+        gc.setFill(Color.web("#ccc"));
+        gc.fillText("Route lấy hàng", x + 34, itemY + 4);
+        itemY += rowH;
+
+        // Route — Delivery (yellow solid)
+        gc.setStroke(Color.web("#f1c40f"));
+        gc.setLineWidth(2);
+        gc.strokeLine(x + 10, itemY, x + 26, itemY);
+        gc.setFill(Color.web("#ccc"));
+        gc.fillText("Route giao hàng", x + 34, itemY + 4);
+        itemY += rowH;
+
+        // Order (red dot)
+        gc.setFill(Color.RED);
+        gc.fillOval(x + 14, itemY - 4, 8, 8);
+        gc.setFill(Color.web("#ccc"));
+        gc.fillText("Đơn hàng chờ", x + 34, itemY + 4);
+        itemY += rowH;
+
+        // Traffic (red/orange line)
+        gc.setStroke(Color.web("#d7383b"));
+        gc.setLineWidth(3);
+        gc.strokeLine(x + 10, itemY, x + 18, itemY);
+        gc.setStroke(Color.web("#ff9966"));
+        gc.strokeLine(x + 18, itemY, x + 26, itemY);
+        gc.setFill(Color.web("#ccc"));
+        gc.fillText("Giao thông", x + 34, itemY + 4);
+    }
+
+    private void drawLegendTriangle(GraphicsContext gc, double cx, double cy, Color color) {
+        double s = 5;
+        double[] xs = {cx, cx - s * 0.866, cx + s * 0.866};
+        double[] ys = {cy - s, cy + s * 0.5, cy + s * 0.5};
+        gc.setFill(color);
+        gc.fillPolygon(xs, ys, 3);
+    }
+
     // ════════════════════════════════════════════════════════════════════
     // DRIVER ANIMATION
     // ════════════════════════════════════════════════════════════════════
@@ -579,15 +710,22 @@ public class NativeMapPane extends Pane {
     }
 
     private void onMouseClicked(MouseEvent e) {
-        if (e.getClickCount() == 1 && onDriverSelected != null) {
+        // Left click: select driver
+        if (e.getButton() == javafx.scene.input.MouseButton.PRIMARY
+                && e.getClickCount() == 1 && onDriverSelected != null) {
             Point2D click = new Point2D(e.getX(), e.getY());
             for (DriverState ds : drivers.values()) {
                 Point2D pt = geoToScreen(ds.curLat, ds.curLng);
                 if (click.distance(pt) < 15) {
                     onDriverSelected.accept(ds.id);
-                    break;
+                    return;
                 }
             }
+        }
+        // Right click: fire geo callback for editor
+        if (e.getButton() == javafx.scene.input.MouseButton.SECONDARY && onMapClickedGeo != null) {
+            double[] geo = screenToGeo(e.getX(), e.getY());
+            onMapClickedGeo.accept(geo[0], geo[1]);
         }
     }
 
@@ -620,5 +758,35 @@ public class NativeMapPane extends Pane {
         double screenY = (pointPxY - centerPxY) * scale + getHeight() / 2.0;
 
         return new Point2D(screenX, screenY);
+    }
+
+    /**
+     * Convert screen pixel position to geographic coordinates (inverse of geoToScreen).
+     */
+    public double[] screenToGeo(double screenX, double screenY) {
+        int z = (int) Math.round(zoom);
+        double scale = Math.pow(2, zoom - z);
+
+        double centerPxX = lngToTileX(centerLng, z) * TILE_SIZE;
+        double centerPxY = latToTileY(centerLat, z) * TILE_SIZE;
+
+        double pointPxX = (screenX - getWidth() / 2.0) / scale + centerPxX;
+        double pointPxY = (screenY - getHeight() / 2.0) / scale + centerPxY;
+
+        // Inverse of lngToTileX
+        double lng = pointPxX / (1 << z) / TILE_SIZE * 360.0 - 180.0;
+
+        // Inverse of latToTileY (Mercator)
+        double n = Math.PI - 2 * Math.PI * pointPxY / (1 << z) / TILE_SIZE;
+        double lat = Math.toDegrees(Math.atan(Math.sinh(n)));
+
+        return new double[]{lat, lng};
+    }
+
+    // ── Map click callback (for editor mode) ────────────────────────────
+    private java.util.function.BiConsumer<Double, Double> onMapClickedGeo;
+
+    public void setOnMapClickedGeo(java.util.function.BiConsumer<Double, Double> callback) {
+        this.onMapClickedGeo = callback;
     }
 }

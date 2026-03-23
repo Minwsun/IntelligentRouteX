@@ -58,6 +58,7 @@ public class SimulationEngine {
     // AI dispatch agent (Omega — learned multi-agent brain)
     private final OmegaDispatchAgent omegaAgent;
     private final ReDispatchEngine reDispatchEngine = new ReDispatchEngine();
+    private final OsrmRoutingService routingService = new OsrmRoutingService();
 
     public SimulationEngine() {
         this.regions = new ArrayList<>(HcmcCityData.createRegions());
@@ -114,6 +115,7 @@ public class SimulationEngine {
         shortageEventsCounter = 0;
         omegaAgent.reset();
         reDispatchEngine.reset();
+        routingService.reset();
         eventBus.publish(new SimulationReset(Instant.now()));
     }
 
@@ -133,6 +135,7 @@ public class SimulationEngine {
     }
     public int getTotalDelivered() { return totalDelivered; }
     public int getTotalCancelled() { return cancelledOrders.size(); }
+    public OmegaDispatchAgent getOmegaAgent() { return omegaAgent; }
 
     // ── Scenario config ─────────────────────────────────────────────────
     public void setTrafficIntensity(double v) { this.trafficIntensity = Math.max(0, Math.min(1, v)); }
@@ -143,6 +146,54 @@ public class SimulationEngine {
     public WeatherProfile getWeatherProfile() { return weatherProfile; }
     public double getDemandMultiplier() { return demandMultiplier; }
     public int getInitialDriverCount() { return initialDriverCount; }
+
+    // ── Manual inject API (for editor panel) ────────────────────────────
+
+    /**
+     * Inject a manually-created order into the active simulation.
+     */
+    public void injectOrder(GeoPoint pickup, GeoPoint dropoff, double fee, int promisedEtaMin) {
+        String id = "MANUAL-" + System.nanoTime();
+        String custId = "CUS-MANUAL";
+        String pickupRegionId = findNearestRegionId(pickup);
+        String dropoffRegionId = findNearestRegionId(dropoff);
+
+        Order order = new Order(id, custId, pickupRegionId, pickup, dropoff,
+                dropoffRegionId, fee, promisedEtaMin);
+        activeOrders.add(order);
+        eventBus.publish(new OrderCreated(order));
+        System.out.println("[Editor] Injected order " + id + " at " +
+                String.format("(%.5f, %.5f)", pickup.lat(), pickup.lng()));
+    }
+
+    /**
+     * Inject a manually-created driver into the simulation.
+     */
+    public void injectDriver(GeoPoint location) {
+        int seq = drivers.size() + 1;
+        String id = "DMANUAL-" + seq;
+        String name = "Manual D" + seq;
+        String regionId = findNearestRegionId(location);
+        VehicleType vehicle = VehicleType.MOTORBIKE;
+
+        Driver driver = new Driver(id, name, location, regionId, vehicle);
+        drivers.add(driver);
+        System.out.println("[Editor] Injected driver " + id + " at " +
+                String.format("(%.5f, %.5f)", location.lat(), location.lng()));
+    }
+
+    private String findNearestRegionId(GeoPoint point) {
+        double minDist = Double.MAX_VALUE;
+        String nearestId = regions.isEmpty() ? "unknown" : regions.get(0).getId();
+        for (Region r : regions) {
+            double dist = point.distanceTo(r.getCenter());
+            if (dist < minDist) {
+                minDist = dist;
+                nearestId = r.getId();
+            }
+        }
+        return nearestId;
+    }
 
     // ── Core tick ───────────────────────────────────────────────────────
     private void tick() {
@@ -294,30 +345,55 @@ public class SimulationEngine {
                 }
             } else {
                 // Calculate speed based on traffic + weather
-                double speedMs = (20 + rng.nextDouble() * 20) * (1.0 - trafficIntensity * 0.6);
-                if (weatherProfile == WeatherProfile.HEAVY_RAIN) speedMs *= 0.7;
-                if (weatherProfile == WeatherProfile.STORM) speedMs *= 0.4;
+                double baseSpeed = (20 + rng.nextDouble() * 20) * (1.0 - trafficIntensity * 0.6);
+                if (weatherProfile == WeatherProfile.HEAVY_RAIN) baseSpeed *= 0.7;
+                if (weatherProfile == WeatherProfile.STORM) baseSpeed *= 0.4;
 
-                // Determine movement target: follow waypoints if available,
-                // otherwise fall back to straight-line toward final target
-                GeoPoint moveTarget;
+                double remainingDist = baseSpeed; // meters to travel this tick
+                GeoPoint currentPos = driver.getCurrentLocation();
+
                 if (driver.hasRouteWaypoints()) {
-                    moveTarget = driver.getCurrentWaypoint();
+                    // Follow waypoints: consume distance across multiple waypoints
+                    while (remainingDist > 0.5 && driver.hasRouteWaypoints()) {
+                        GeoPoint wp = driver.getCurrentWaypoint();
+                        if (wp == null) break;
+
+                        double distToWp = currentPos.distanceTo(wp);
+
+                        if (distToWp <= remainingDist) {
+                            // Reached this waypoint — snap to it and advance
+                            currentPos = wp;
+                            remainingDist -= distToWp;
+                            driver.advanceWaypoint();
+                        } else {
+                            // Move partially toward this waypoint
+                            currentPos = currentPos.moveTowards(wp, remainingDist);
+                            remainingDist = 0;
+                        }
+                    }
+
+                    // If waypoints exhausted but still have distance, move toward target
+                    // This covers the last few meters to snap exactly to the destination
+                    if (remainingDist > 0.5 && !driver.hasRouteWaypoints()) {
+                        currentPos = currentPos.moveTowards(target, remainingDist);
+                    }
                 } else {
-                    moveTarget = target;
+                    // No waypoints — wait for async GPS route (prevent straight-line flying)
+                    if (currentPos.distanceTo(target) < 100) {
+                        // Target is very close, fallback to straight line
+                        currentPos = currentPos.moveTowards(target, remainingDist);
+                    } else {
+                        // Wait for OSRM to load
+                        baseSpeed = 0;
+                        remainingDist = 0;
+                    }
                 }
 
-                GeoPoint newLoc = driver.getCurrentLocation().moveTowards(moveTarget, speedMs);
-                driver.setCurrentLocation(newLoc);
-                driver.setSpeedKmh(speedMs * 3.6);
-
-                // Check if arrived at current waypoint → advance
-                if (driver.hasRouteWaypoints() && newLoc.distanceTo(moveTarget) < 30) {
-                    driver.advanceWaypoint();
-                }
+                driver.setCurrentLocation(currentPos);
+                driver.setSpeedKmh(baseSpeed * 3.6);
 
                 // Check if arrived at final destination
-                if (newLoc.distanceTo(target) < 30) {
+                if (currentPos.distanceTo(target) < 30) {
                     driver.setTargetLocation(null);
                     driver.clearRouteWaypoints();
                 }
@@ -358,6 +434,18 @@ public class SimulationEngine {
         for (DispatchPlan plan : result.plans()) {
             Driver best = plan.getDriver();
 
+            if (plan.getOrders().isEmpty()) {
+                if (plan.getBundle().bundleId().startsWith("REPOS") && !plan.getSequence().isEmpty()) {
+                     best.clearRouteWaypoints();
+                     best.setState(DriverState.REPOSITIONING);
+                     best.setTargetLocation(plan.getSequence().get(0).location());
+                     eventBus.publish(new DriverStateChanged(best.getId(),
+                         DriverState.ONLINE_IDLE, DriverState.REPOSITIONING));
+                     routingService.requestRouteAsync(best, best.getCurrentLocation(), best.getTargetLocation());
+                }
+                continue; // HOLD plans or invalid REPOS plans just skip assignment
+            }
+
             for (Order order : plan.getOrders()) {
                 order.assignDriver(best.getId());
                 order.markPickupStarted();
@@ -372,9 +460,11 @@ public class SimulationEngine {
                 totalAssignments++;
             }
 
+            best.clearRouteWaypoints();
             best.setState(DriverState.PICKUP_EN_ROUTE);
             best.setTargetLocation(plan.getOrders().get(0).getPickupPoint());
             best.setActiveBundleId(plan.getBundle().bundleId());
+            routingService.requestRouteAsync(best, best.getCurrentLocation(), best.getTargetLocation());
 
             double deadheadKm = plan.getPredictedDeadheadKm();
             totalDeadheadKm += deadheadKm;

@@ -3,6 +3,7 @@ package com.routechain.domain;
 import com.routechain.domain.Enums.*;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -236,6 +237,18 @@ public class Driver {
         synchronized (routeWaypoints) {
             routeWaypoints.clear();
             currentWaypointIndex = 0;
+        }
+    }
+
+    public List<double[]> getRemainingRoutePoints() {
+        synchronized (routeWaypoints) {
+            if (currentWaypointIndex >= routeWaypoints.size()) return Collections.emptyList();
+            List<double[]> pts = new ArrayList<>(routeWaypoints.size() - currentWaypointIndex);
+            for (int i = currentWaypointIndex; i < routeWaypoints.size(); i++) {
+                GeoPoint p = routeWaypoints.get(i);
+                pts.add(new double[]{p.lng(), p.lat()}); // MapBridge expects [lng, lat]
+            }
+            return pts;
         }
     }
 

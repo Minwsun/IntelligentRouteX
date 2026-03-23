@@ -37,43 +37,19 @@ public class MapBridge {
     private volatile List<Order> pendingOrders = null;
     private volatile boolean pendingRoadNetwork = false;
 
-    // ── OSRM routing via Java HttpClient ────────────────────────────────
+    // ── OSRM routing for Map rendering (HTTP client kept for geometry fetch) ─
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .executor(Executors.newFixedThreadPool(4))
             .build();
 
-    private final Map<String, CachedRoute> routeCache = new ConcurrentHashMap<>();
-    private final Map<String, String> lastRequestedDest = new ConcurrentHashMap<>();
-    private final Semaphore osrmSemaphore = new Semaphore(3);
-    private final ConcurrentLinkedQueue<OsrmRequest> requestQueue = new ConcurrentLinkedQueue<>();
-    private final AtomicInteger osrmSuccessCount = new AtomicInteger(0);
-    private final AtomicInteger osrmFailCount = new AtomicInteger(0);
-    private volatile String lastRoutesHash = "";
-    private volatile boolean routesDirty = false;
-
     // ── Corridor road-snapped geometries (OSRM, fetched once at startup) ─
     private final Map<String, List<double[]>> corridorGeometries = new ConcurrentHashMap<>();
     private volatile boolean corridorGeometriesFetched = false;
 
-    // Driver lookup for pushing route waypoints to simulation
-    private volatile java.util.function.Function<String, Driver> driverLookup;
-
-    private record CachedRoute(String destKey, List<double[]> coordinates, String phase) {}
-    private record OsrmRequest(String driverId, String destKey, String phase,
-                                double fromLat, double fromLng, double toLat, double toLng) {}
-
     public MapBridge(NativeMapPane mapPane) {
         this.mapPane = mapPane;
         this.cachedCorridors = HcmcCityData.createCorridors();
-
-        // OSRM queue processor
-        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "osrm-queue-processor");
-            t.setDaemon(true);
-            return t;
-        });
-        scheduler.scheduleAtFixedRate(this::processRequestQueue, 500, 200, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -96,13 +72,6 @@ public class MapBridge {
         mapPane.setOnMapReady(callback);
     }
 
-    /**
-     * Set driver lookup function for pushing OSRM waypoints to drivers.
-     */
-    public void setDriverLookup(java.util.function.Function<String, Driver> lookup) {
-        this.driverLookup = lookup;
-    }
-
     // ════════════════════════════════════════════════════════════════════
     // FRAME-BASED BATCH DISPATCHER
     // ════════════════════════════════════════════════════════════════════
@@ -112,10 +81,13 @@ public class MapBridge {
      * Called once per simulation tick from MainApp.
      */
     public void flushFrame() {
-        // --- Drivers ---
+        // --- Drivers & Routes ---
         if (pendingDrivers != null) {
             Map<String, NativeMapPane.DriverState> driverMap = new LinkedHashMap<>();
+            Map<String, NativeMapPane.RouteData> routeMap = new LinkedHashMap<>();
+            
             for (Driver d : pendingDrivers) {
+                // Driver marker
                 NativeMapPane.DriverState ds = new NativeMapPane.DriverState();
                 ds.id = d.getId();
                 ds.name = d.getName();
@@ -124,26 +96,33 @@ public class MapBridge {
                 ds.tgtLng = d.getCurrentLocation().lng();
                 ds.curLat = ds.tgtLat;
                 ds.curLng = ds.tgtLng;
+                if (d.getTargetLocation() != null) {
+                    ds.destLat = d.getTargetLocation().lat();
+                    ds.destLng = d.getTargetLocation().lng();
+                    ds.hasDest = true;
+                } else {
+                    ds.hasDest = false;
+                }
                 driverMap.put(d.getId(), ds);
+                
+                // Route lines
+                if (d.hasRouteWaypoints()) {
+                    List<double[]> pts = d.getRemainingRoutePoints();
+                    if (pts != null && pts.size() >= 2) {
+                        NativeMapPane.RouteData rd = new NativeMapPane.RouteData();
+                        rd.driverId = d.getId();
+                        rd.phase = d.getState() == com.routechain.domain.Enums.DriverState.PICKUP_EN_ROUTE ? "pickup" : "delivery";
+                        rd.coordinates = pts;
+                        routeMap.put(d.getId(), rd);
+                    }
+                }
             }
-            Platform.runLater(() -> mapPane.setDriverPositions(driverMap));
+            
+            Platform.runLater(() -> {
+                mapPane.setDriverPositions(driverMap);
+                mapPane.setRoutes(routeMap);
+            });
             pendingDrivers = null;
-        }
-
-        // --- Routes ---
-        if (routesDirty) {
-            Map<String, NativeMapPane.RouteData> routeMap = new LinkedHashMap<>();
-            for (var entry : routeCache.entrySet()) {
-                CachedRoute cr = entry.getValue();
-                if (cr.coordinates().size() < 2) continue;
-                NativeMapPane.RouteData rd = new NativeMapPane.RouteData();
-                rd.driverId = entry.getKey();
-                rd.phase = cr.phase();
-                rd.coordinates = cr.coordinates();
-                routeMap.put(entry.getKey(), rd);
-            }
-            Platform.runLater(() -> mapPane.setRoutes(routeMap));
-            routesDirty = false;
         }
 
         // --- Traffic (road-snapped via OSRM geometries) ---
@@ -225,113 +204,8 @@ public class MapBridge {
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // OSRM ROUTING — async, throttled, cached (unchanged architecture)
+    // OSRM GEOMETRY FETCH FOR TRAFFIC
     // ════════════════════════════════════════════════════════════════════
-
-    public void buildAndSetRouteData() {
-        String hash = String.valueOf(routeCache.size()) + "_" + routeCache.hashCode();
-        if (!hash.equals(lastRoutesHash)) {
-            lastRoutesHash = hash;
-            routesDirty = true;
-        }
-    }
-
-    public void requestDriverRoute(String driverId, double fromLat, double fromLng,
-                                    double toLat, double toLng, String phase) {
-        String destKey = Math.round(toLat * 1000) + "_" + Math.round(toLng * 1000) + "_" + phase;
-        CachedRoute cached = routeCache.get(driverId);
-        if (cached != null && cached.destKey().equals(destKey) && cached.coordinates().size() > 15) {
-            return;
-        }
-        String lastReq = lastRequestedDest.get(driverId);
-        if (destKey.equals(lastReq)) return;
-        lastRequestedDest.put(driverId, destKey);
-        requestQueue.offer(new OsrmRequest(driverId, destKey, phase, fromLat, fromLng, toLat, toLng));
-    }
-
-    public void clearDriverRoute(String driverId) {
-        routeCache.remove(driverId);
-        lastRequestedDest.remove(driverId);
-    }
-
-    private void processRequestQueue() {
-        while (!requestQueue.isEmpty() && osrmSemaphore.tryAcquire()) {
-            OsrmRequest req = requestQueue.poll();
-            if (req == null) { osrmSemaphore.release(); break; }
-            fireOsrmRequest(req);
-        }
-    }
-
-    private void fireOsrmRequest(OsrmRequest req) {
-        String url = String.format(Locale.US,
-                "https://router.project-osrm.org/route/v1/driving/%.6f,%.6f;%.6f,%.6f?overview=full&geometries=geojson",
-                req.fromLng(), req.fromLat(), req.toLng(), req.toLat());
-
-        HttpRequest httpReq = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(8))
-                .header("User-Agent", "RouteChainAI/1.0")
-                .GET()
-                .build();
-
-        httpClient.sendAsync(httpReq, HttpResponse.BodyHandlers.ofString())
-                .thenAccept(response -> {
-                    osrmSemaphore.release();
-                    if (response.statusCode() == 200) {
-                        boolean ok = parseAndCacheRoute(req.driverId(), req.destKey(), req.phase(), response.body());
-                        if (ok) {
-                            int c = osrmSuccessCount.incrementAndGet();
-                            if (c <= 5 || c % 10 == 0)
-                                System.out.println("[OSRM] ✓ Route OK for " + req.driverId() + " (" + c + " total, " + osrmFailCount.get() + " fail)");
-                        } else {
-                            osrmFailCount.incrementAndGet();
-                            lastRequestedDest.remove(req.driverId());
-                        }
-                    } else {
-                        osrmFailCount.incrementAndGet();
-                        lastRequestedDest.remove(req.driverId());
-                    }
-                })
-                .exceptionally(ex -> {
-                    osrmSemaphore.release();
-                    osrmFailCount.incrementAndGet();
-                    lastRequestedDest.remove(req.driverId());
-                    System.err.println("[OSRM] ✗ " + req.driverId() + ": " + ex.getMessage());
-                    return null;
-                });
-    }
-
-    private boolean parseAndCacheRoute(String driverId, String destKey, String phase, String body) {
-        try {
-            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
-            if (!"Ok".equals(root.has("code") ? root.get("code").getAsString() : "")) return false;
-            JsonArray routes = root.getAsJsonArray("routes");
-            if (routes != null && !routes.isEmpty()) {
-                JsonArray coordsArray = routes.get(0).getAsJsonObject()
-                        .getAsJsonObject("geometry").getAsJsonArray("coordinates");
-                List<double[]> coordinates = new ArrayList<>();
-                for (JsonElement coord : coordsArray) {
-                    JsonArray c = coord.getAsJsonArray();
-                    coordinates.add(new double[]{c.get(0).getAsDouble(), c.get(1).getAsDouble()});
-                }
-                if (coordinates.size() >= 2) {
-                    routeCache.put(driverId, new CachedRoute(destKey, coordinates, phase));
-                    // Push waypoints to driver for road-following movement
-                    var lookup = driverLookup;
-                    if (lookup != null) {
-                        Driver driver = lookup.apply(driverId);
-                        if (driver != null) {
-                            driver.setRouteWaypoints(coordinates);
-                        }
-                    }
-                    return true;
-                }
-            }
-        } catch (Exception e) {
-            System.err.println("[OSRM] Parse error: " + e.getMessage());
-        }
-        return false;
-    }
 
     // ── Layer toggle ────────────────────────────────────────────────────
     public void toggleLayer(String layer, boolean visible) {
