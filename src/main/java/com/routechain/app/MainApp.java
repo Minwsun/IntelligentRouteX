@@ -25,6 +25,7 @@ import javafx.scene.Node;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.concurrent.*;
+import java.util.List;
 
 /**
  * RouteChain AI — Main JavaFX Application.
@@ -57,6 +58,7 @@ public class MainApp extends Application {
     private final StringProperty selectedDriverEta = new SimpleStringProperty("—");
     private final StringProperty selectedDriverDeadhead = new SimpleStringProperty("—");
     private final StringProperty selectedDriverEarnings = new SimpleStringProperty("—");
+    private final VBox selectedDriverOrderSequence = new VBox(6);
 
     // Layer visibility
     private final BooleanProperty trafficLayerOn = new SimpleBooleanProperty(true);
@@ -925,7 +927,13 @@ public class MainApp extends Application {
         grid.add(createDriverStat("DEADHEAD", selectedDriverDeadhead), 0, 1);
         grid.add(createDriverStat("EARNINGS", selectedDriverEarnings), 1, 1);
 
-        card.getChildren().addAll(header, grid);
+        ScrollPane scrollSeq = new ScrollPane(selectedDriverOrderSequence);
+        scrollSeq.setFitToWidth(true);
+        scrollSeq.setStyle("-fx-background-color: transparent; -fx-background: transparent; -fx-padding: 0;");
+        scrollSeq.setPrefHeight(140);
+        scrollSeq.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+
+        card.getChildren().addAll(header, grid, new Separator(), scrollSeq);
         return card;
     }
 
@@ -1062,6 +1070,49 @@ public class MainApp extends Application {
                 selectedDriverEarnings.set(earningStr);
             } else {
                 selectedDriverEarnings.set("Chưa có đơn");
+            }
+
+            selectedDriverOrderSequence.getChildren().clear();
+            List<com.routechain.simulation.DispatchPlan.Stop> seq = driver.getAssignedSequence();
+            if (seq == null || seq.isEmpty()) {
+                Label noRoute = new Label("Chưa có tuyến đường được phân công");
+                noRoute.setStyle("-fx-text-fill: #535557; -fx-font-style: italic; -fx-font-size: 11;");
+                selectedDriverOrderSequence.getChildren().add(noRoute);
+            } else {
+                GeoPoint prevLoc = driver.getCurrentLocation();
+                for (int i = 0; i < seq.size(); i++) {
+                    com.routechain.simulation.DispatchPlan.Stop stop = seq.get(i);
+                    double distKm = prevLoc.distanceTo(stop.location()) / 1000.0;
+                    prevLoc = stop.location();
+                    
+                    HBox stopRow = new HBox(8);
+                    stopRow.setAlignment(Pos.CENTER_LEFT);
+                    
+                    Label icon = new Label(stop.type() == com.routechain.simulation.DispatchPlan.Stop.StopType.PICKUP ? "📦" : "🚩");
+                    icon.setStyle("-fx-font-size: 14;");
+                    
+                    VBox details = new VBox(0);
+                    String action = stop.type() == com.routechain.simulation.DispatchPlan.Stop.StopType.PICKUP ? "Lấy đơn" : "Giao đơn";
+                    Label title = new Label(action + " " + stop.orderId().substring(0, Math.min(6, stop.orderId().length())));
+                    title.setStyle("-fx-text-fill: #eeeef0; -fx-font-weight: 600; -fx-font-size: 11;");
+                    
+                    Label distLbl = new Label(String.format("%.1f km từ điểm trước", distKm));
+                    distLbl.setStyle("-fx-text-fill: #aaabad; -fx-font-size: 9;");
+                    
+                    details.getChildren().addAll(title, distLbl);
+                    
+                    if (i == driver.getCurrentSequenceIndex()) {
+                        stopRow.setStyle("-fx-background-color: rgba(0,255,171,0.08); -fx-padding: 4 8; -fx-background-radius: 4; -fx-border-color: rgba(0,255,171,0.3); -fx-border-radius: 4;");
+                    } else if (i < driver.getCurrentSequenceIndex()) {
+                        stopRow.setStyle("-fx-opacity: 0.4; -fx-padding: 4 8;");
+                        icon.setText("✅");
+                    } else {
+                        stopRow.setStyle("-fx-padding: 4 8;");
+                    }
+                    
+                    stopRow.getChildren().addAll(icon, details);
+                    selectedDriverOrderSequence.getChildren().add(stopRow);
+                }
             }
         });
 
