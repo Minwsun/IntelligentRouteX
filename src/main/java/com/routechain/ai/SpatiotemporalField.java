@@ -38,6 +38,8 @@ public class SpatiotemporalField {
     private final double[][] spikeProbability = new double[ROWS][COLS];
     private final double[][] shortagePressure = new double[ROWS][COLS];
     private final double[][] attractionScore  = new double[ROWS][COLS];
+    private final double[][] weatherExposure  = new double[ROWS][COLS];
+    private final double[][] congestionExposure = new double[ROWS][COLS];
 
     // ── Auxiliary state ─────────────────────────────────────────────────
     private final double[][] driverDensity    = new double[ROWS][COLS];
@@ -90,6 +92,12 @@ public class SpatiotemporalField {
             case HEAVY_RAIN -> 1.35;
             case STORM -> 1.6;
         };
+        double weatherSeverity = switch (weather) {
+            case CLEAR -> 0.0;
+            case LIGHT_RAIN -> 0.25;
+            case HEAVY_RAIN -> 0.65;
+            case STORM -> 1.0;
+        };
 
         double cellAreaKm2 = cellAreaKm2();
 
@@ -112,6 +120,15 @@ public class SpatiotemporalField {
                 shortagePressure[r][c] = demand > 0.01
                         ? Math.max(0, Math.min(1.0, (demand - supply) / Math.max(demand, 1)))
                         : 0;
+
+                congestionExposure[r][c] = Math.max(0, Math.min(1.0,
+                        trafficIntensity * 0.55
+                                + Math.min(1.0, demandIntensity[r][c] / 5.0) * 0.20
+                                + shortagePressure[r][c] * 0.15
+                                + Math.min(1.0, driverDensity[r][c] / 5.0) * 0.10));
+
+                weatherExposure[r][c] = Math.max(0, Math.min(1.0,
+                        weatherSeverity * (0.80 + shortagePressure[r][c] * 0.20)));
 
                 // Spike probability: demand growing fast
                 double trend = demandIntensity[r][c] - prevDemand[r][c];
@@ -137,6 +154,8 @@ public class SpatiotemporalField {
         diffuse(demandIntensity);
         diffuse(spikeProbability);
         diffuse(attractionScore);
+        diffuse(weatherExposure);
+        diffuse(congestionExposure);
     }
 
     // ── Spatial diffusion ───────────────────────────────────────────────
@@ -201,6 +220,54 @@ public class SpatiotemporalField {
         return cell != null ? driverDensity[cell[0]][cell[1]] : 0;
     }
 
+    /** Get weather risk exposure at a geographic point. */
+    public double getWeatherExposureAt(GeoPoint p) {
+        int[] cell = cellOf(p);
+        return cell != null ? weatherExposure[cell[0]][cell[1]] : 0;
+    }
+
+    /** Get corridor / congestion exposure at a geographic point. */
+    public double getCongestionExposureAt(GeoPoint p) {
+        int[] cell = cellOf(p);
+        return cell != null ? congestionExposure[cell[0]][cell[1]] : 0;
+    }
+
+    /** Risk-adjusted attraction, used for smart repositioning under adverse conditions. */
+    public double getRiskAdjustedAttractionAt(GeoPoint p) {
+        int[] cell = cellOf(p);
+        if (cell == null) return 0;
+
+        int r = cell[0];
+        int c = cell[1];
+        double raw = attractionScore[r][c];
+        double penalty = weatherExposure[r][c] * 0.18 + congestionExposure[r][c] * 0.22;
+        double shortageLift = shortagePressure[r][c] * 0.08;
+        return Math.max(0.0, raw - penalty + shortageLift);
+    }
+
+    /**
+     * Lightweight near-future demand forecast from the current field state.
+     * This is intentionally cheap enough for online use in dispatch/repositioning.
+     */
+    public double getForecastDemandAt(GeoPoint p, int horizonMinutes) {
+        int[] cell = cellOf(p);
+        if (cell == null) return 0;
+
+        int r = cell[0];
+        int c = cell[1];
+        double currentDemand = demandIntensity[r][c];
+        double spike = spikeProbability[r][c];
+        double shortage = shortagePressure[r][c];
+        double densityPenalty = Math.min(0.6, driverDensity[r][c] / 8.0);
+
+        double horizonFactor = Math.max(0.4, horizonMinutes / 10.0);
+        double spikeLift = spike * (0.45 + 0.08 * horizonFactor);
+        double shortageLift = shortage * (0.20 + 0.04 * horizonFactor);
+        double persistence = currentDemand * (0.80 + 0.03 * horizonFactor);
+
+        return Math.max(0.0, persistence + spikeLift + shortageLift - densityPenalty);
+    }
+
     // ── Grid utilities ──────────────────────────────────────────────────
 
     /**
@@ -249,6 +316,8 @@ public class SpatiotemporalField {
             case "shortage" -> shortagePressure;
             case "attraction" -> attractionScore;
             case "driverDensity" -> driverDensity;
+            case "weatherExposure" -> weatherExposure;
+            case "congestionExposure" -> congestionExposure;
             default -> demandIntensity;
         };
         for (int r = 0; r < ROWS; r++) {
@@ -271,6 +340,8 @@ public class SpatiotemporalField {
                 shortagePressure[r][c] = 0;
                 attractionScore[r][c] = 0;
                 driverDensity[r][c] = 0;
+                weatherExposure[r][c] = 0;
+                congestionExposure[r][c] = 0;
                 prevDemand[r][c] = 0;
             }
         }

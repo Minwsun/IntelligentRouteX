@@ -17,6 +17,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * on a configurable tick loop. All events are published to EventBus.
  */
 public class SimulationEngine {
+    public enum DispatchMode { OMEGA, LEGACY }
+
     private final EventBus eventBus = EventBus.getInstance();
     private final List<Region> regions;
     private final List<Driver> drivers = new CopyOnWriteArrayList<>();
@@ -40,6 +42,8 @@ public class SimulationEngine {
     private volatile int simulatedMinute = 0;
     private volatile int initialDriverCount = 5; // 5 drivers
     private final Random rng = new Random(42);
+    private static final int DEFAULT_START_HOUR = 12;
+    private static final int DEFAULT_START_MINUTE = 0;
 
     // Timeline history buffer (last 1800 ticks = 30 simulated minutes)
     private final Deque<TimelineDataPoint> timelineHistory = new ConcurrentLinkedDeque<>();
@@ -58,9 +62,11 @@ public class SimulationEngine {
 
     // AI dispatch agent (Omega — learned multi-agent brain)
     private final OmegaDispatchAgent omegaAgent;
+    private final DispatchAgent legacyDispatchAgent;
     private final ReDispatchEngine reDispatchEngine = new ReDispatchEngine();
     private final OsrmRoutingService routingService = new OsrmRoutingService();
     private final DatabaseStorageService dbService = new DatabaseStorageService();
+    private volatile DispatchMode dispatchMode = DispatchMode.OMEGA;
 
     // Enhancements
     private final DriverSupplyEngine driverSupplyEngine = new DriverSupplyEngine();
@@ -77,8 +83,9 @@ public class SimulationEngine {
         for (var c : corridors) {
             corridorSeverity.put(c.id(), 0.0);
         }
-        this.clock = new SimulationClock(simulatedHour, simulatedMinute);
+        this.clock = new SimulationClock(DEFAULT_START_HOUR, DEFAULT_START_MINUTE);
         this.orderArrivalEngine = new OrderArrivalEngine(regions, shockEngine, rng);
+        this.orderArrivalEngine.setManualDemandMultiplier(demandMultiplier);
         
         // Find intersection points (simple heuristic: centers of all regions)
         List<GeoPoint> intersections = regions.stream().map(Region::getCenter).toList();
@@ -86,6 +93,7 @@ public class SimulationEngine {
         this.merchantWaitEngine = new MerchantWaitEngine(rng);
         
         this.omegaAgent = new OmegaDispatchAgent(regions);
+        this.legacyDispatchAgent = new DispatchAgent(regions);
     }
 
     // ── Lifecycle ───────────────────────────────────────────────────────
@@ -100,7 +108,7 @@ public class SimulationEngine {
             return t;
         });
         scheduler.scheduleAtFixedRate(this::tick, 0, 1000, TimeUnit.MILLISECONDS);
-        eventBus.publish(new SimulationStarted(Instant.now()));
+        eventBus.publish(new SimulationStarted(clock.currentInstant()));
     }
 
     public void stop() {
@@ -111,7 +119,7 @@ public class SimulationEngine {
         }
         // Generate run report on stop
         generateRunReport();
-        eventBus.publish(new SimulationStopped(Instant.now()));
+        eventBus.publish(new SimulationStopped(clock.currentInstant()));
     }
 
     public void reset() {
@@ -122,6 +130,11 @@ public class SimulationEngine {
         cancelledOrders.clear();
         tickCounter.set(0);
         orderIdSeq.set(0);
+        simulatedHour = DEFAULT_START_HOUR;
+        simulatedMinute = DEFAULT_START_MINUTE;
+        clock.reset(DEFAULT_START_HOUR, DEFAULT_START_MINUTE);
+        orderArrivalEngine.reset();
+        orderArrivalEngine.setManualDemandMultiplier(demandMultiplier);
         totalDelivered = 0;
         totalLateDelivered = 0;
         totalDeadheadKm = 0;
@@ -132,9 +145,10 @@ public class SimulationEngine {
         surgeEventsCounter = 0;
         shortageEventsCounter = 0;
         omegaAgent.reset();
+        legacyDispatchAgent.reset();
         reDispatchEngine.reset();
         routingService.reset();
-        eventBus.publish(new SimulationReset(Instant.now()));
+        eventBus.publish(new SimulationReset(clock.currentInstant()));
     }
 
     public SimulationLifecycle getLifecycle() { return lifecycle; }
@@ -155,6 +169,13 @@ public class SimulationEngine {
     public int getTotalCancelled() { return cancelledOrders.size(); }
     public OmegaDispatchAgent getOmegaAgent() { return omegaAgent; }
     public SimulationClock getClock() { return clock; }
+    public DispatchMode getDispatchMode() { return dispatchMode; }
+    public void setDispatchMode(DispatchMode dispatchMode) {
+        this.dispatchMode = dispatchMode == null ? DispatchMode.OMEGA : dispatchMode;
+    }
+    public void setOmegaAblationMode(OmegaDispatchAgent.AblationMode ablationMode) {
+        omegaAgent.setAblationMode(ablationMode);
+    }
 
     // ── Metric Getters & Headless Execution ─────────────────────────────
     public int getTotalLateDelivered() { return totalLateDelivered; }
@@ -179,7 +200,10 @@ public class SimulationEngine {
     // ── Scenario config ─────────────────────────────────────────────────
     public void setTrafficIntensity(double v) { this.trafficIntensity = Math.max(0, Math.min(1, v)); }
     public void setWeatherProfile(WeatherProfile wp) { this.weatherProfile = wp; }
-    public void setDemandMultiplier(double dm) { this.demandMultiplier = dm; }
+    public void setDemandMultiplier(double dm) {
+        this.demandMultiplier = dm;
+        orderArrivalEngine.setManualDemandMultiplier(dm);
+    }
     public void setInitialDriverCount(int count) { this.initialDriverCount = count; }
     public DriverSupplyEngine getDriverSupplyEngine() { return driverSupplyEngine; }
     public ScenarioShockEngine getShockEngine() { return shockEngine; }
@@ -200,7 +224,7 @@ public class SimulationEngine {
         String dropoffRegionId = findNearestRegionId(dropoff);
 
         Order order = new Order(id, custId, pickupRegionId, pickup, dropoff,
-                dropoffRegionId, fee, promisedEtaMin);
+                dropoffRegionId, fee, promisedEtaMin, clock.currentInstant());
         activeOrders.add(order);
         eventBus.publish(new OrderCreated(order));
         dbService.saveOrder(order);
@@ -242,6 +266,7 @@ public class SimulationEngine {
         try {
             clock.advanceSubTick();
             long subTick = clock.getSubTickCounter();
+            tickCounter.set(subTick);
             
             // 1. Movement Sub-tick (Every 5 simulated seconds)
             if (clock.isMovementBoundary()) {
@@ -272,13 +297,13 @@ public class SimulationEngine {
                 checkReDispatch();
                 dispatchPendingOrders();
                 
-                omegaAgent.onTick(decTick, driverId -> {
-                    return drivers.stream()
+                if (dispatchMode == DispatchMode.OMEGA) {
+                    omegaAgent.onTick(decTick, driverId -> drivers.stream()
                             .filter(d -> d.getId().equals(driverId))
                             .findFirst()
                             .map(Driver::getAvgEarningPerHour)
-                            .orElse(0.0);
-                });
+                            .orElse(0.0));
+                }
                 
                 detectSurges();
                 computeMetrics();
@@ -289,7 +314,7 @@ public class SimulationEngine {
                 // Potential high-res traffic update here
             }
 
-            eventBus.publish(new SimulationTick(subTick, Instant.now()));
+            eventBus.publish(new SimulationTick(subTick, clock.currentInstant()));
         } catch (Exception e) {
             System.err.println("[SimEngine] Tick error: " + e.getMessage());
             e.printStackTrace();
@@ -363,7 +388,8 @@ public class SimulationEngine {
         if (currentPending >= maxPending) return;
 
         List<Order> newOrders = orderArrivalEngine.generateOrders(
-                clock.getSimulatedHour(), weatherProfile, clock.getSubTickCounter());
+                clock.getSimulatedHour(), weatherProfile,
+                clock.getSubTickCounter(), clock.currentInstant());
         
         for (Order order : newOrders) {
             if (currentPending >= maxPending) break;
@@ -395,7 +421,7 @@ public class SimulationEngine {
         return new Order(java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 10).toUpperCase(),
                 "CUS-" + java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase(),
                 region.getId(), pickup, dropoff, dropoffRegion.getId(),
-                fee, Math.max(5, eta));
+                fee, Math.max(5, eta), clock.currentInstant());
     }
 
     public void spawnRandomOrders(int count) {
@@ -451,14 +477,24 @@ public class SimulationEngine {
 
         if (available.isEmpty()) return;
 
-        // Run Omega dispatch pipeline
-        OmegaDispatchAgent.DispatchResult result = omegaAgent.dispatch(
-                new ArrayList<>(pending), new ArrayList<>(available),
-                drivers, activeOrders, simulatedHour,
-                trafficIntensity, weatherProfile);
+        List<DispatchPlan> selectedPlans;
+        if (dispatchMode == DispatchMode.LEGACY) {
+            DispatchAgent.DispatchResult result = legacyDispatchAgent.dispatch(
+                    new ArrayList<>(pending), new ArrayList<>(available),
+                    drivers, activeOrders, simulatedHour,
+                    trafficIntensity, weatherProfile);
+            selectedPlans = result.plans();
+        } else {
+            OmegaDispatchAgent.DispatchResult result = omegaAgent.dispatch(
+                    new ArrayList<>(pending), new ArrayList<>(available),
+                    drivers, activeOrders, simulatedHour,
+                    trafficIntensity, weatherProfile, clock.currentInstant());
+            selectedPlans = result.plans();
+        }
 
+        Instant decisionTime = clock.currentInstant();
         // Execute selected plans
-        for (DispatchPlan plan : result.plans()) {
+        for (DispatchPlan plan : selectedPlans) {
             Driver best = plan.getDriver();
 
             if (plan.getOrders().isEmpty()) {
@@ -475,12 +511,14 @@ public class SimulationEngine {
             }
 
             for (Order order : plan.getOrders()) {
-                order.assignDriver(best.getId());
-                order.markPickupStarted();
+                order.assignDriver(best.getId(), decisionTime);
+                order.markPickupStarted(decisionTime);
                 order.setDecisionTraceId(plan.getTraceId());
                 order.setBundle(plan.getBundle().bundleId());
                 order.setPredictedLateRisk(plan.getLateRisk());
                 order.setPredictedBundleFit(plan.getBundleEfficiency());
+                order.setPredictedTravelTime(plan.getPredictedTotalMinutes());
+                order.setPredictedAssignmentConfidence(plan.getConfidence());
 
                 best.addOrder(order.getId());
 
@@ -533,9 +571,13 @@ public class SimulationEngine {
 
     // ── Process deliveries (state transitions) ──────────────────────────
     private void processDeliveries() {
+        Instant simulatedNow = clock.currentInstant();
         for (Driver driver : drivers) {
             List<DispatchPlan.Stop> seq = driver.getAssignedSequence();
             if (seq == null || driver.getState() == DriverState.ONLINE_IDLE) {
+                continue;
+            }
+            if (driver.getMerchantWaitTicksRemaining() > 0) {
                 continue;
             }
 
@@ -553,10 +595,18 @@ public class SimulationEngine {
 
                     if (order != null && order.getStatus() != OrderStatus.CANCELLED) {
                         if (currentStop.type() == DispatchPlan.Stop.StopType.PICKUP) {
-                            order.markPickedUp();
+                            if (!merchantWaitEngine.isMerchantReady(order, simulatedNow)) {
+                                double waitMinutes = merchantWaitEngine
+                                        .estimateWaitMinutes(order, simulatedNow);
+                                int waitTicks = (int) Math.ceil(
+                                        (waitMinutes * 60.0) / SimulationClock.SUB_TICK_SECONDS);
+                                driver.setMerchantWaitTicksRemaining(Math.max(1, waitTicks));
+                                continue;
+                            }
+                            order.markPickedUp(simulatedNow);
                             eventBus.publish(new OrderPickedUp(order.getId()));
                         } else if (currentStop.type() == DispatchPlan.Stop.StopType.DROPOFF) {
-                            order.markDelivered();
+                            order.markDelivered(simulatedNow);
                             driver.removeOrder(order.getId());
                             driver.addEarning(order.getQuotedFee());
                             driver.incrementCompletedOrders();
@@ -568,11 +618,20 @@ public class SimulationEngine {
                             eventBus.publish(new OrderDelivered(order.getId()));
                             dbService.saveOrder(order);
 
-                            double distKm = order.getPickupPoint().distanceTo(order.getDropoffPoint()) / 1000.0;
-                            double etaActual = distKm / Math.max(6, driver.getSpeedKmh()) * 60;
-                            omegaAgent.onOrderDelivered(order, driver, etaActual, order.isLate(),
-                                    order.getQuotedFee(), trafficIntensity, weatherProfile,
-                                    simulatedHour, tickCounter.get());
+                            double etaActual = 0;
+                            if (order.getAssignedAt() != null && order.getDeliveredAt() != null) {
+                                etaActual = java.time.Duration.between(
+                                        order.getAssignedAt(), order.getDeliveredAt()).toSeconds() / 60.0;
+                            }
+                            if (etaActual <= 0) {
+                                double distKm = order.getPickupPoint().distanceTo(order.getDropoffPoint()) / 1000.0;
+                                etaActual = distKm / Math.max(6, driver.getSpeedKmh()) * 60;
+                            }
+                            if (dispatchMode == DispatchMode.OMEGA) {
+                                omegaAgent.onOrderDelivered(order, driver, etaActual, order.isLate(),
+                                        order.getQuotedFee(), trafficIntensity, weatherProfile,
+                                        simulatedHour, tickCounter.get(), simulatedNow);
+                            }
                         }
                     }
                     driver.advanceSequenceIndex();
@@ -594,9 +653,9 @@ public class SimulationEngine {
                                 .findFirst().orElse(null);
                         if (nextOrder != null && nextOrder.getStatus() != OrderStatus.CANCELLED) {
                             if (nextStop.type() == DispatchPlan.Stop.StopType.PICKUP && nextOrder.getStatus() == OrderStatus.PENDING_ASSIGNMENT) {
-                                 nextOrder.markPickupStarted();
+                                 nextOrder.markPickupStarted(simulatedNow);
                             } else if (nextStop.type() == DispatchPlan.Stop.StopType.DROPOFF) {
-                                 nextOrder.markDropoffStarted();
+                                 nextOrder.markDropoffStarted(simulatedNow);
                             }
                         }
                     }
@@ -610,25 +669,18 @@ public class SimulationEngine {
             }
         }
 
-        // Random cancellation hazard for active orders using Sigmoid approximation
+        // Customer cancellations are modeled as a short-horizon hazard before pickup only.
         for (Order order : activeOrders) {
-            if (order.getStatus() != OrderStatus.DELIVERED
-                    && order.getStatus() != OrderStatus.CANCELLED) {
-                
-                double waitTimeFactor = order.getStatus() == OrderStatus.PENDING_ASSIGNMENT ? 0.02 : 0.005;
-                double weatherFactor = (weatherProfile == WeatherProfile.HEAVY_RAIN ? 0.08 : 0)
-                        + (weatherProfile == WeatherProfile.STORM ? 0.15 : 0);
-                double shortageFactor = 0.05 * trafficIntensity; 
-                
-                // Sigmoid: 1 / (1 + exp(-x))
-                // We use a base affine translation to keep baseline hazard low (-5.0 base ~ 0.006 hazard)
-                double linearSum = -5.0 + (waitTimeFactor * 10) + (weatherFactor * 15) + (shortageFactor * 10);
-                double hazard = 1.0 / (1.0 + Math.exp(-linearSum)); 
+            if (isCustomerCancellable(order.getStatus())) {
+                double subTickHazard = computeCancellationSubTickProbability(order, simulatedNow);
+                double shortHorizonRisk = 1.0 - Math.pow(
+                        1.0 - subTickHazard,
+                        Math.max(1.0, 15.0 * 60.0 / SimulationClock.SUB_TICK_SECONDS));
 
-                order.setCancellationRisk(hazard);
+                order.setCancellationRisk(shortHorizonRisk);
 
-                if (rng.nextDouble() < hazard) {
-                    order.markCancelled("customer_cancelled");
+                if (rng.nextDouble() < subTickHazard) {
+                    order.markCancelled("customer_cancelled", simulatedNow);
                     cancelledOrders.add(order);
                     
                     if (order.getAssignedDriverId() != null) {
@@ -651,8 +703,10 @@ public class SimulationEngine {
                     dbService.saveOrder(order);
 
                     // Omega learning callback
-                    omegaAgent.onOrderCancelled(order, trafficIntensity,
-                            weatherProfile, simulatedHour);
+                    if (dispatchMode == DispatchMode.OMEGA) {
+                        omegaAgent.onOrderCancelled(order, trafficIntensity,
+                                weatherProfile, simulatedHour, tickCounter.get(), simulatedNow);
+                    }
                 }
             }
         }
@@ -661,6 +715,42 @@ public class SimulationEngine {
         activeOrders.removeIf(o -> o.getStatus() == OrderStatus.DELIVERED
                 || o.getStatus() == OrderStatus.CANCELLED
                 || o.getStatus() == OrderStatus.FAILED);
+    }
+
+    private boolean isCustomerCancellable(OrderStatus status) {
+        return status == OrderStatus.CONFIRMED
+                || status == OrderStatus.PENDING_ASSIGNMENT
+                || status == OrderStatus.ASSIGNED
+                || status == OrderStatus.PICKUP_EN_ROUTE;
+    }
+
+    private double computeCancellationSubTickProbability(Order order, Instant simulatedNow) {
+        double waitMinutes = order.getCreatedAt() != null
+                ? java.time.Duration.between(order.getCreatedAt(), simulatedNow).toSeconds() / 60.0
+                : 0.0;
+
+        boolean unassigned = order.getAssignedDriverId() == null;
+        double effectiveWait = Math.max(0.0, waitMinutes - (unassigned ? 2.0 : 4.0));
+        double weatherPenalty = switch (weatherProfile) {
+            case CLEAR -> 0.0;
+            case LIGHT_RAIN -> 0.15;
+            case HEAVY_RAIN -> 0.45;
+            case STORM -> 0.80;
+        };
+        double demandPenalty = Math.max(0.0, demandMultiplier - 1.0) * 0.20;
+        double congestionPenalty = trafficIntensity * 0.40;
+        double assignedShield = unassigned ? 0.0 : 0.75;
+
+        double linear = -3.8
+                + (effectiveWait * 0.38)
+                + weatherPenalty
+                + demandPenalty
+                + congestionPenalty
+                - assignedShield;
+
+        double perMinuteProbability = 0.18 / (1.0 + Math.exp(-linear));
+        double subTickFraction = SimulationClock.SUB_TICK_SECONDS / 60.0;
+        return 1.0 - Math.pow(1.0 - perMinuteProbability, subTickFraction);
     }
 
     // ── Surge detection ─────────────────────────────────────────────────
@@ -699,6 +789,7 @@ public class SimulationEngine {
             region.setSurgeSeverity(severity);
 
             if (severity != SurgeSeverity.NORMAL && severity != old) {
+                surgeEventsCounter++;
                 String cause = buildSurgeCause(pendingInRegion, shortage, region);
                 eventBus.publish(new SurgeDetected(region.getId(), surgeScore, severity, cause));
                 eventBus.publish(new AlertRaised(
@@ -708,7 +799,7 @@ public class SimulationEngine {
                         cause,
                         severity,
                         region.getId(),
-                        Instant.now()
+                        clock.currentInstant()
                 ));
 
                 // AI insight
@@ -718,12 +809,13 @@ public class SimulationEngine {
                             "Surge Prediction",
                             region.getName() + " surges detected. Rerouting " + reroute + " drivers.",
                             "Deadhead -" + (int)(surgeScore * 20) + "%",
-                            Instant.now()
+                            clock.currentInstant()
                     ));
                 }
             }
 
             if (shortage > 0.5) {
+                shortageEventsCounter++;
                 eventBus.publish(new DriverShortageDetected(region.getId(), shortage));
             }
         }
@@ -789,22 +881,27 @@ public class SimulationEngine {
     private void generateRunReport() {
         if (totalDelivered == 0 && activeOrders.isEmpty()) return;
 
-        RunReportExporter exporter = new RunReportExporter("simulation", 42);
-        RunReport report = exporter.generateReport(
-                drivers, completedOrders, cancelledOrders, activeOrders,
-                totalDelivered, totalLateDelivered, totalDeadheadKm, totalEarnings,
-                totalAssignmentLatencyMs, totalAssignments, totalBundled,
-                reDispatchEngine.getReDispatchCount(),
-                tickCounter.get(), surgeEventsCounter, shortageEventsCounter
-        );
+        RunReport report = createRunReport("simulation-" + dispatchMode.name().toLowerCase(), 42);
 
         System.out.println(report.toSummary());
         eventBus.publish(new RunReportGenerated(
                 report.runId(), report.scenarioName(),
                 report.completionRate(), report.onTimeRate(),
                 report.deadheadDistanceRatio(), report.bundleRate(),
-                report.reDispatchCount(), Instant.now()
+                report.reDispatchCount(), clock.currentInstant()
         ));
+    }
+
+    public RunReport createRunReport(String scenarioName, long seed) {
+        RunReportExporter exporter = new RunReportExporter(scenarioName, seed, clock.startInstant());
+        return exporter.generateReport(
+                drivers, completedOrders, cancelledOrders, activeOrders,
+                totalDelivered, totalLateDelivered, totalDeadheadKm, totalEarnings,
+                totalAssignmentLatencyMs, totalAssignments, totalBundled,
+                reDispatchEngine.getReDispatchCount(),
+                tickCounter.get(), surgeEventsCounter, shortageEventsCounter,
+                clock.currentInstant()
+        );
     }
 
     // ── Timeline snapshot recorder ───────────────────────────────────────

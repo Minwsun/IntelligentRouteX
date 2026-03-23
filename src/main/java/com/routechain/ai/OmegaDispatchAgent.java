@@ -32,6 +32,15 @@ import java.util.*;
  */
 public class OmegaDispatchAgent {
 
+    public enum AblationMode {
+        FULL,
+        NO_HOLD,
+        NO_REPOSITION,
+        NO_CONTINUATION,
+        NO_FALLBACK_TUNING,
+        SMALL_BATCH_ONLY
+    }
+
     // ── AI components ───────────────────────────────────────────────────
     private final SpatiotemporalField field;
     private final FeatureExtractor featureExtractor;
@@ -67,6 +76,9 @@ public class OmegaDispatchAgent {
     private static final int FALLBACK_DIRECT_COUNT = 25;
     private static final int RETRAIN_INTERVAL_TICKS = 300;
     private long lastRetrainTick = 0;
+    private final Map<String, PendingTraceOutcome> pendingTraceOutcomes = new HashMap<>();
+    private boolean diagnosticLoggingEnabled = true;
+    private AblationMode ablationMode = AblationMode.FULL;
 
     public OmegaDispatchAgent(List<Region> regions) {
         this.regions = regions;
@@ -94,6 +106,7 @@ public class OmegaDispatchAgent {
         this.orderIndex = new NearbyOrderIndexer();
         this.contextBuilder = new DriverContextBuilder(orderIndex, field);
         this.planGenerator = new DriverPlanGenerator();
+        applyAblationConfig();
     }
 
     // ── Main dispatch entry point ───────────────────────────────────────
@@ -106,16 +119,17 @@ public class OmegaDispatchAgent {
     public DispatchResult dispatch(
             List<Order> pendingOrders, List<Driver> availableDrivers,
             List<Driver> allDrivers, List<Order> allOrders,
-            int simulatedHour, double trafficIntensity, WeatherProfile weather) {
+            int simulatedHour, double trafficIntensity, WeatherProfile weather,
+            Instant currentTime) {
 
-        long tick = System.nanoTime();
+        long tick = currentTime.toEpochMilli();
 
         // ── Step 1: Update city brain (UNCHANGED) ────────────────────────
         field.update(allOrders, allDrivers, simulatedHour, trafficIntensity, weather);
 
         // ── Step 2: Select policy (UNCHANGED) ───────────────────────────
         double shortage = computeShortage(pendingOrders, availableDrivers);
-        double avgWait = computeAvgWaitSimulated(pendingOrders);
+        double avgWait = computeAvgWaitSimulated(pendingOrders, currentTime);
         double surge = computeSurgeLevel(pendingOrders);
         double[] contextFeatures = featureExtractor.contextFeatures(
                 trafficIntensity, weather, simulatedHour,
@@ -136,7 +150,7 @@ public class OmegaDispatchAgent {
         for (Driver driver : availableDrivers) {
             // Build driver's local world snapshot
             DriverDecisionContext ctx = contextBuilder.build(
-                    driver, trafficIntensity, weather, simulatedHour);
+                    driver, trafficIntensity, weather, simulatedHour, currentTime);
 
             // Generate candidate plans (single, bundle, hold, reposition)
             List<DispatchPlan> driverPlans = planGenerator.generate(
@@ -155,7 +169,7 @@ public class OmegaDispatchAgent {
                 int[] rejectReasons = new int[4];
                 boolean valid = scoreAndValidatePlan(
                         plan, simulatedHour, trafficIntensity,
-                        weather, activePolicy, rejectReasons);
+                        weather, activePolicy, currentTime, rejectReasons);
 
                 if (valid) {
                     allPlans.add(plan);
@@ -170,14 +184,14 @@ public class OmegaDispatchAgent {
 
         // ── Step 5: Conflict-free assignment ────────────────────────────
         AssignmentSolver solver = new AssignmentSolver();
-        List<DispatchPlan> selectedPlans = solver.solve(allPlans);
+        List<DispatchPlan> selectedPlans = new ArrayList<>(solver.solve(allPlans));
 
         // ── Step 6: FALLBACK — nearest-driver for uncovered orders ──────
         if (selectedPlans.size() < 5 && !availableDrivers.isEmpty()) {
             SequenceOptimizer seqOptimizer = new SequenceOptimizer(
                     trafficIntensity, weather);
             applyFallbackAssignment(selectedPlans, pendingOrders,
-                    availableDrivers, seqOptimizer, trafficIntensity);
+                    availableDrivers, seqOptimizer, trafficIntensity, weather, currentTime);
         }
 
         // ── Step 7: Reposition idle drivers ─────────────────────────────
@@ -188,8 +202,8 @@ public class OmegaDispatchAgent {
                 GeoPoint bestZone = findBestAttractionPoint(
                         driver.getCurrentLocation());
                 if (bestZone != null) {
-                    double attraction = field.getAttractionAt(bestZone);
-                    double currentAttraction = field.getAttractionAt(
+                    double attraction = field.getRiskAdjustedAttractionAt(bestZone);
+                    double currentAttraction = field.getRiskAdjustedAttractionAt(
                             driver.getCurrentLocation());
                     double dist = driver.getCurrentLocation()
                             .distanceTo(bestZone) / 1000.0;
@@ -216,18 +230,21 @@ public class OmegaDispatchAgent {
                 decisionLog.log(tick, contextFeatures, pf,
                         plan.getTotalScore(), activePolicy.name(),
                         plan.getTraceId());
+                registerPendingOutcome(plan);
             }
         }
 
         // Diagnostic log
-        System.out.printf(
-                "[Omega-DC] Policy:%s Drivers:%d Pending:%d " +
-                        "Candidates:%d Plans:%d→%d " +
-                        "(Rej: late=%d profit=%d dead=%d detour=%d)%n",
-                activePolicy.name(), availableDrivers.size(),
-                pendingOrders.size(), totalCandidates,
-                allPlans.size(), selectedPlans.size(),
-                rejectedLate, rejectedProfit, rejectedDead, rejectedDetour);
+        if (diagnosticLoggingEnabled) {
+            System.out.printf(
+                    "[Omega-DC] Policy:%s Drivers:%d Pending:%d " +
+                            "Candidates:%d Plans:%d→%d " +
+                            "(Rej: late=%d profit=%d dead=%d detour=%d)%n",
+                    activePolicy.name(), availableDrivers.size(),
+                    pendingOrders.size(), totalCandidates,
+                    allPlans.size(), selectedPlans.size(),
+                    rejectedLate, rejectedProfit, rejectedDead, rejectedDetour);
+        }
 
         return new DispatchResult(selectedPlans, repositions,
                 activePolicy.name(), pendingOrders.size(),
@@ -247,6 +264,7 @@ public class OmegaDispatchAgent {
     private boolean scoreAndValidatePlan(
             DispatchPlan plan, int hour, double traffic,
             WeatherProfile weather, PolicyProfile policy,
+            Instant currentTime,
             int[] rejectReasons) {
 
         Driver driver = plan.getDriver();
@@ -267,16 +285,36 @@ public class OmegaDispatchAgent {
                 totalDist, traffic, weather, hour,
                 bundle.size(), traffic * 0.8);
         double predictedETA = etaModel.predict(etaFeatures);
-        plan.setPredictedTotalMinutes(predictedETA);
+        double pickupWeatherExposure = field.getWeatherExposureAt(seq.get(0).location());
+        double pickupCongestionExposure = field.getCongestionExposureAt(seq.get(0).location());
+        double operationalDrag = switch (weather) {
+            case CLEAR -> pickupCongestionExposure * 0.02;
+            case LIGHT_RAIN -> pickupCongestionExposure * 0.03 + pickupWeatherExposure * 0.02;
+            case HEAVY_RAIN -> pickupCongestionExposure * 0.07 + pickupWeatherExposure * 0.06 + 0.03;
+            case STORM -> pickupCongestionExposure * 0.10 + pickupWeatherExposure * 0.08 + 0.06;
+        };
+        predictedETA *= (1.0 + operationalDrag);
+        final double adjustedPredictedETA = predictedETA;
+        plan.setPredictedTotalMinutes(adjustedPredictedETA);
 
         // Late risk
         double avgSlaSlack = bundle.orders().stream()
-                .mapToDouble(o -> o.getPromisedEtaMinutes() - predictedETA)
+                .mapToDouble(o -> {
+                    double elapsedMinutes = Duration.between(
+                            o.getCreatedAt(), currentTime).toSeconds() / 60.0;
+                    return o.getPromisedEtaMinutes() - elapsedMinutes - adjustedPredictedETA;
+                })
                 .average().orElse(10);
         double[] lateFeatures = featureExtractor.lateRiskFeatures(
                 totalDist, traffic, weather, hour,
                 bundle.size(), avgSlaSlack, 2.0);
         double lateRisk = lateRiskModel.predict(lateFeatures);
+        if (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM) {
+            lateRisk = Math.min(0.95, lateRisk
+                    + operationalDrag * 0.35
+                    + Math.max(0.0, deadheadKm - 2.5) * 0.025
+                    + Math.max(0, bundle.size() - 2) * pickupWeatherExposure * 0.025);
+        }
         plan.setLateRisk(lateRisk);
         plan.setOnTimeProbability(1.0 - lateRisk);
 
@@ -286,6 +324,11 @@ public class OmegaDispatchAgent {
         double[] cancelFeatures = featureExtractor.cancelFeatures(
                 3.0, lateRisk, avgFee, weather, bundle.size());
         double cancelRisk = cancelRiskModel.predict(cancelFeatures);
+        if (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM) {
+            cancelRisk = Math.min(0.90, cancelRisk
+                    + operationalDrag * 0.16
+                    + Math.max(0.0, deadheadKm - 3.0) * 0.02);
+        }
         plan.setCancellationRisk(cancelRisk);
 
         // Driver profit
@@ -315,11 +358,32 @@ public class OmegaDispatchAgent {
                 endPoint, estimatedEndHour, field, weather, driver);
         double continuationValue = continuationValueModel
                 .predictNormalized(endFeatures);
-        plan.setEndZoneOpportunity(continuationValue);
-        plan.setNextOrderAcquisitionScore(continuationValue * 0.8);
+        double endWeatherExposure = field.getWeatherExposureAt(endPoint);
+        double endCongestionExposure = field.getCongestionExposureAt(endPoint);
+        double endStateRiskPenalty = endCongestionExposure * 0.22
+                + endWeatherExposure * 0.18;
+        double adjustedContinuation = Math.max(0.05,
+                continuationValue * (1.0 - endStateRiskPenalty));
+        double futureOrderSignal = field.getForecastDemandAt(endPoint, 10) * 0.45
+                + field.getForecastDemandAt(endPoint, 15) * 0.35
+                + field.getForecastDemandAt(endPoint, 30) * 0.20;
+        double nextOrderScore = Math.max(0.05, Math.min(1.0,
+                futureOrderSignal * (1.0 - endCongestionExposure * 0.25 - endWeatherExposure * 0.20)));
 
-        plan.setCongestionPenalty(traffic * 0.6);
-        plan.setRepositionPenalty(deadheadKm > 3.0 ? 0.3 : 0.1);
+        if (ablationMode == AblationMode.NO_CONTINUATION) {
+            adjustedContinuation = 0.0;
+            nextOrderScore = 0.0;
+        }
+
+        plan.setEndZoneOpportunity(adjustedContinuation);
+        plan.setNextOrderAcquisitionScore(nextOrderScore);
+
+        double congestionPenalty = Math.min(1.0,
+                traffic * 0.35
+                        + endCongestionExposure * 0.45
+                        + endWeatherExposure * 0.20);
+        plan.setCongestionPenalty(congestionPenalty);
+        plan.setRepositionPenalty(deadheadKm > 3.0 ? 0.3 + endWeatherExposure * 0.08 : 0.1);
 
         // ── Hard constraints (delegated to ConstraintEngine) ──────────
         // Use a dynamic batch cap of 5 (default max) — the real cap was already
@@ -360,7 +424,7 @@ public class OmegaDispatchAgent {
     private void applyFallbackAssignment(
             List<DispatchPlan> selectedPlans, List<Order> pendingOrders,
             List<Driver> availableDrivers, SequenceOptimizer seqOptimizer,
-            double trafficIntensity) {
+            double trafficIntensity, WeatherProfile weather, Instant currentTime) {
 
         Set<String> assignedDriverIds = new HashSet<>();
         Set<String> assignedOrderIds = new HashSet<>();
@@ -394,7 +458,19 @@ public class OmegaDispatchAgent {
 
             double distKm = nearest.getCurrentLocation().distanceTo(
                     order.getPickupPoint()) / 1000.0;
-            if (distKm > 12.0) continue;
+            boolean legacyFallbackTuning = ablationMode == AblationMode.NO_FALLBACK_TUNING;
+            double maxFallbackDeadheadKm = legacyFallbackTuning
+                    ? 6.0 - trafficIntensity * 1.5
+                    : switch (weather) {
+                        case CLEAR -> 7.5 - trafficIntensity * 2.0;
+                        case LIGHT_RAIN -> 6.5 - trafficIntensity * 2.0;
+                        case HEAVY_RAIN -> 2.8 - trafficIntensity * 1.0;
+                        case STORM -> 2.0 - trafficIntensity * 0.5;
+                    };
+            double minFallbackDeadhead = legacyFallbackTuning ? 3.0
+                    : (weather == WeatherProfile.HEAVY_RAIN
+                    || weather == WeatherProfile.STORM) ? 1.8 : 3.0;
+            if (distKm > Math.max(minFallbackDeadhead, maxFallbackDeadheadKm)) continue;
 
             DispatchPlan.Bundle singleBundle = new DispatchPlan.Bundle(
                     "FBACK-" + order.getId(), List.of(order), 0, 1);
@@ -412,21 +488,79 @@ public class OmegaDispatchAgent {
             double delivDist = order.getPickupPoint().distanceTo(
                     order.getDropoffPoint()) / 1000.0;
             double speed = Math.max(8, 25 * (1 - trafficIntensity * 0.5));
+            speed *= switch (weather) {
+                case CLEAR -> 1.0;
+                case LIGHT_RAIN -> 0.9;
+                case HEAVY_RAIN -> 0.72;
+                case STORM -> 0.55;
+            };
+            speed = Math.max(8, speed);
             double eta = ((distKm + delivDist) / speed) * 60;
+            double elapsedMinutes = Duration.between(
+                    order.getCreatedAt(), currentTime).toSeconds() / 60.0;
+            double lateSlack = order.getPromisedEtaMinutes() - elapsedMinutes - eta;
+            double weatherLatePenalty = switch (weather) {
+                case CLEAR -> 0.02;
+                case LIGHT_RAIN -> 0.06;
+                case HEAVY_RAIN -> 0.15;
+                case STORM -> 0.25;
+            };
+            double lateRisk = legacyFallbackTuning
+                    ? Math.max(0.10, Math.min(0.70,
+                    0.18 + Math.max(0.0, -lateSlack) / Math.max(8.0, order.getPromisedEtaMinutes())
+                            + trafficIntensity * 0.10))
+                    : Math.max(0.08, Math.min(0.75,
+                    0.12
+                            + Math.max(0.0, -lateSlack) / Math.max(6.0, order.getPromisedEtaMinutes())
+                            + trafficIntensity * 0.12
+                            + weatherLatePenalty
+                            + Math.max(0.0, distKm - 3.0) * 0.04));
+            double onTimeProbability = Math.max(0.20, 1.0 - lateRisk);
+            double cancelRisk = legacyFallbackTuning
+                    ? Math.max(0.05, Math.min(0.45,
+                    order.getCancellationRisk() * 0.85
+                            + trafficIntensity * 0.06))
+                    : Math.max(0.05, Math.min(0.45,
+                    order.getCancellationRisk() * 0.8
+                            + trafficIntensity * 0.08
+                            + weatherLatePenalty * 0.6));
+            double totalFuelProxy = (distKm + delivDist) * 2200;
+            double bundleEfficiency = 1.0 / (1.0 + distKm / Math.max(0.5, delivDist));
+            double score = legacyFallbackTuning
+                    ? Math.max(0.08,
+                    onTimeProbability * 0.35
+                            + bundleEfficiency * 0.15
+                            + Math.max(0.0, order.getQuotedFee() - totalFuelProxy) / 40000.0 * 0.25
+                            - distKm / 8.0 * 0.10
+                            - cancelRisk * 0.10)
+                    : Math.max(0.08,
+                    onTimeProbability * 0.40
+                            + bundleEfficiency * 0.20
+                            + Math.max(0.0, order.getQuotedFee() - totalFuelProxy) / 40000.0 * 0.20
+                            - distKm / 8.0 * 0.15
+                            - cancelRisk * 0.10);
+
             fallbackPlan.setPredictedTotalMinutes(eta);
-            fallbackPlan.setDriverProfit(
-                    order.getQuotedFee() - delivDist * 2500);
-            fallbackPlan.setLateRisk(0.2);
-            fallbackPlan.setOnTimeProbability(0.8);
-            fallbackPlan.setCancellationRisk(0.1);
+            fallbackPlan.setDriverProfit(order.getQuotedFee() - totalFuelProxy);
+            fallbackPlan.setLateRisk(lateRisk);
+            fallbackPlan.setOnTimeProbability(onTimeProbability);
+            fallbackPlan.setCancellationRisk(cancelRisk);
             fallbackPlan.setCustomerFee(order.getQuotedFee());
-            fallbackPlan.setBundleEfficiency(1.0);
+            fallbackPlan.setBundleEfficiency(bundleEfficiency);
             fallbackPlan.setEndZoneOpportunity(0.5);
             fallbackPlan.setNextOrderAcquisitionScore(0.4);
             fallbackPlan.setCongestionPenalty(trafficIntensity * 0.4);
             fallbackPlan.setRepositionPenalty(0.1);
-            fallbackPlan.setTotalScore(0.5);
-            fallbackPlan.setConfidence(0.5);
+            fallbackPlan.setTotalScore(score);
+            fallbackPlan.setConfidence(Math.max(0.25, 0.75 - lateRisk - cancelRisk * 0.4));
+
+            if (!legacyFallbackTuning
+                    && (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM)
+                    && (fallbackPlan.getOnTimeProbability() < 0.48
+                    || fallbackPlan.getPredictedDeadheadKm() > 2.3
+                    || fallbackPlan.getLateRisk() > 0.52)) {
+                continue;
+            }
 
             selectedPlans.add(fallbackPlan);
             freeDrivers.remove(nearest);
@@ -438,9 +572,10 @@ public class OmegaDispatchAgent {
     // ── Learning callbacks ──────────────────────────────────────────────
 
     public void onOrderDelivered(Order order, Driver driver,
-                                  double actualETAMinutes, boolean wasLate,
-                                  double actualProfit, double traffic,
-                                  WeatherProfile weather, int hour, long currentTick) {
+                                 double actualETAMinutes, boolean wasLate,
+                                 double actualProfit, double traffic,
+                                 WeatherProfile weather, int hour,
+                                 long currentTick, Instant currentTime) {
 
         double distKm = order.getPickupPoint().distanceTo(order.getDropoffPoint()) / 1000.0;
 
@@ -460,19 +595,16 @@ public class OmegaDispatchAgent {
         continuationValueModel.recordCompletion(
                 driver.getId(), currentTick, endF, driver.getAvgEarningPerHour());
 
-        double actualUtility = PlanRanker.computeActualUtility(
-                !wasLate, actualProfit, 0.5, 0.5, 0, false);
-
-        double[] ctx = featureExtractor.contextFeatures(traffic, weather, hour,
-                0.3, 3.0, 10, 5, 0.3);
-        policySelector.recordReward(policySelector.getLastSelectedPolicy(), ctx, actualUtility);
+        recordPlanOutcome(order, driver, currentTick, actualProfit, wasLate, false);
     }
 
     public void onOrderCancelled(Order order, double traffic,
-                                  WeatherProfile weather, int hour) {
+                                 WeatherProfile weather, int hour,
+                                 long currentTick, Instant currentTime) {
         double[] cancelF = featureExtractor.cancelFeatures(
                 5.0, 0.5, order.getQuotedFee(), weather, 1);
         cancelRiskModel.update(cancelF, 1.0);
+        recordPlanOutcome(order, null, currentTick, 0.0, false, true);
     }
 
     public void onTick(long currentTick, java.util.function.Function<String, Double> earningLookup) {
@@ -502,12 +634,11 @@ public class OmegaDispatchAgent {
                 (double) (pending.size() - available.size()) / Math.max(1, pending.size())));
     }
 
-    private double computeAvgWaitSimulated(List<Order> pending) {
+    private double computeAvgWaitSimulated(List<Order> pending, Instant currentTime) {
         if (pending.isEmpty()) return 0;
-        Instant now = Instant.now();
         return pending.stream()
                 .mapToDouble(o -> {
-                    long secs = Duration.between(o.getCreatedAt(), now).getSeconds();
+                    long secs = Duration.between(o.getCreatedAt(), currentTime).getSeconds();
                     return Math.max(0, secs / 60.0);
                 })
                 .average().orElse(3.0);
@@ -517,8 +648,65 @@ public class OmegaDispatchAgent {
         return Math.min(1.0, pending.size() / 20.0);
     }
 
+    private void registerPendingOutcome(DispatchPlan plan) {
+        List<String> orderIds = plan.getOrders().stream()
+                .map(Order::getId)
+                .toList();
+        pendingTraceOutcomes.put(plan.getTraceId(), new PendingTraceOutcome(
+                new HashSet<>(orderIds),
+                new HashSet<>(),
+                plan.getPredictedDeadheadKm(),
+                plan.getBundleEfficiency()));
+    }
+
+    private void recordPlanOutcome(Order order, Driver driver, long currentTick,
+                                   double actualProfit, boolean wasLate,
+                                   boolean wasCancelled) {
+        String traceId = order.getDecisionTraceId();
+        if (traceId == null || traceId.isBlank()) return;
+
+        PendingTraceOutcome pending = pendingTraceOutcomes.get(traceId);
+        if (pending == null) {
+            double continuationActualNorm = driver != null
+                    ? Math.min(1.0, driver.getAvgEarningPerHour() / 50000.0)
+                    : 0.0;
+            double actualUtility = PlanRanker.computeActualUtility(
+                    !wasLate, actualProfit,
+                    Math.max(0.1, order.getPredictedBundleFit()),
+                    continuationActualNorm,
+                    0.0, wasCancelled);
+            decisionLog.recordOutcome(traceId, actualUtility, currentTick);
+            return;
+        }
+
+        if (!pending.terminalOrderIds.add(order.getId())) {
+            return;
+        }
+
+        pending.realizedProfit += actualProfit;
+        pending.anyLate |= wasLate;
+        pending.cancelled |= wasCancelled;
+        if (driver != null) {
+            pending.continuationActualNorm = Math.max(
+                    pending.continuationActualNorm,
+                    Math.min(1.0, driver.getAvgEarningPerHour() / 50000.0));
+        }
+
+        if (pending.terminalOrderIds.containsAll(pending.orderIds)) {
+            double actualUtility = PlanRanker.computeActualUtility(
+                    !pending.anyLate,
+                    pending.realizedProfit,
+                    Math.max(0.1, pending.bundleEfficiency),
+                    pending.continuationActualNorm,
+                    pending.predictedDeadheadKm,
+                    pending.cancelled);
+            decisionLog.recordOutcome(traceId, actualUtility, currentTick);
+            pendingTraceOutcomes.remove(traceId);
+        }
+    }
+
     private GeoPoint findBestAttractionPoint(GeoPoint currentPos) {
-        double bestScore = 0;
+        double bestScore = Double.NEGATIVE_INFINITY;
         GeoPoint bestPoint = null;
         for (int r = 0; r < SpatiotemporalField.ROWS; r++) {
             for (int c = 0; c < SpatiotemporalField.COLS; c++) {
@@ -526,7 +714,17 @@ public class OmegaDispatchAgent {
                 double dist = currentPos.distanceTo(center) / 1000.0;
                 if (dist > 1.5) continue;
 
-                double score = field.getAttractionAt(center);
+                double futureValue = field.getForecastDemandAt(center, 10) * 0.35
+                        + field.getForecastDemandAt(center, 15) * 0.30
+                        + field.getForecastDemandAt(center, 30) * 0.20
+                        + field.getSpikeAt(center) * 0.15;
+                double fuelPenalty = dist * 0.12;
+                double congestionPenalty = field.getCongestionExposureAt(center) * 0.18
+                        + field.getDriverDensityAt(center) * 0.03;
+                double weatherPenalty = field.getWeatherExposureAt(center) * 0.14;
+                double riskAdjustedAttraction = field.getRiskAdjustedAttractionAt(center) * 0.10;
+                double score = futureValue + riskAdjustedAttraction
+                        - fuelPenalty - congestionPenalty - weatherPenalty;
                 if (score > bestScore) {
                     bestScore = score;
                     bestPoint = center;
@@ -566,6 +764,31 @@ public class OmegaDispatchAgent {
         planRanker.reset();
         uncertaintyEstimator.reset();
         lastRetrainTick = 0;
+        pendingTraceOutcomes.clear();
+        applyAblationConfig();
+    }
+
+    public boolean isDiagnosticLoggingEnabled() {
+        return diagnosticLoggingEnabled;
+    }
+
+    public void setDiagnosticLoggingEnabled(boolean diagnosticLoggingEnabled) {
+        this.diagnosticLoggingEnabled = diagnosticLoggingEnabled;
+    }
+
+    public AblationMode getAblationMode() {
+        return ablationMode;
+    }
+
+    public void setAblationMode(AblationMode ablationMode) {
+        this.ablationMode = ablationMode == null ? AblationMode.FULL : ablationMode;
+        applyAblationConfig();
+    }
+
+    private void applyAblationConfig() {
+        planGenerator.setHoldPlansEnabled(ablationMode != AblationMode.NO_HOLD);
+        planGenerator.setRepositionPlansEnabled(ablationMode != AblationMode.NO_REPOSITION);
+        planGenerator.setSmallBatchOnly(ablationMode == AblationMode.SMALL_BATCH_ONLY);
     }
 
     // ── Result records ──────────────────────────────────────────────────
@@ -584,4 +807,25 @@ public class OmegaDispatchAgent {
             int continuationPending,
             int logSize, int logCompleted,
             Map<String, Integer> policySelections) {}
+
+    private static final class PendingTraceOutcome {
+        private final Set<String> orderIds;
+        private final Set<String> terminalOrderIds;
+        private final double predictedDeadheadKm;
+        private final double bundleEfficiency;
+        private double realizedProfit;
+        private double continuationActualNorm;
+        private boolean anyLate;
+        private boolean cancelled;
+
+        private PendingTraceOutcome(Set<String> orderIds,
+                                    Set<String> terminalOrderIds,
+                                    double predictedDeadheadKm,
+                                    double bundleEfficiency) {
+            this.orderIds = orderIds;
+            this.terminalOrderIds = terminalOrderIds;
+            this.predictedDeadheadKm = predictedDeadheadKm;
+            this.bundleEfficiency = bundleEfficiency;
+        }
+    }
 }

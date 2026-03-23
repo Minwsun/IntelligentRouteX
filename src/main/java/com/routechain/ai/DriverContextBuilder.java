@@ -27,7 +27,7 @@ import java.util.UUID;
 public class DriverContextBuilder {
 
     /** Maximum minutes a driver is willing to travel for pickup. */
-    private static final double REACHABILITY_HORIZON_MINUTES = 8.0;
+    private static final double BASE_REACHABILITY_HORIZON_MINUTES = 8.0;
 
     /** Maximum distance (meters) between pickups to be in the same cluster. */
     private static final double CLUSTER_RADIUS_METERS = 1500.0;
@@ -64,9 +64,10 @@ public class DriverContextBuilder {
      * Build a complete local-world snapshot for a single driver.
      */
     public DriverDecisionContext build(Driver driver,
-                                        double trafficIntensity,
-                                        WeatherProfile weather,
-                                        int simulatedHour) {
+                                       double trafficIntensity,
+                                       WeatherProfile weather,
+                                       int simulatedHour,
+                                       Instant currentTime) {
 
         // Cache for synergy computation
         this.currentTrafficIntensity = trafficIntensity;
@@ -74,20 +75,41 @@ public class DriverContextBuilder {
 
         GeoPoint pos = driver.getCurrentLocation();
         double speedKmh = estimateSpeed(trafficIntensity, weather);
+        double reachabilityHorizon = computeReachabilityHorizonMinutes(
+                trafficIntensity, weather);
 
         // 1. Find reachable orders
-        List<Order> reachable = orderIndex.findReachable(
-                pos, speedKmh, REACHABILITY_HORIZON_MINUTES);
+        List<Order> nearby = orderIndex.findReachable(
+                pos, speedKmh, reachabilityHorizon + 1.0);
+        List<Order> reachable = new ArrayList<>();
+        for (Order order : nearby) {
+            double travelMinutes = estimateTravelMinutes(pos, order, speedKmh, trafficIntensity);
+            double readySlackMinutes = estimateReadySlackMinutes(order, currentTime);
+            if (travelMinutes <= reachabilityHorizon
+                    || (travelMinutes <= reachabilityHorizon + 0.75
+                    && readySlackMinutes <= 1.5)) {
+                reachable.add(order);
+            }
+        }
 
         // 2. Cluster pickups (DBSCAN-simplified + 8-term synergy)
         List<OrderCluster> clusters = clusterPickups(reachable);
 
         // 3. Local environment from SpatiotemporalField
         double localDemand = field.getDemandAt(pos);
+        double forecast5m = field.getForecastDemandAt(pos, 5);
+        double forecast10m = field.getForecastDemandAt(pos, 10);
+        double forecast15m = field.getForecastDemandAt(pos, 15);
+        double forecast30m = field.getForecastDemandAt(pos, 30);
         double localShortage = field.getShortageAt(pos);
         double localDensity = field.getDriverDensityAt(pos);
         double localSpike = field.getSpikeAt(pos);
+        double localWeatherExposure = field.getWeatherExposureAt(pos);
+        double localCorridorExposure = field.getCongestionExposureAt(pos);
         double localAttraction = field.getAttractionAt(pos);
+        int nearReadyOrders = (int) reachable.stream()
+                .filter(o -> estimateReadySlackMinutes(o, currentTime) <= 1.5)
+                .count();
 
         // 4. Estimate local traffic
         double localTraffic = estimateLocalTraffic(pos, trafficIntensity);
@@ -100,9 +122,12 @@ public class DriverContextBuilder {
 
         return new DriverDecisionContext(
                 driver, reachable, clusters,
-                localTraffic, localDemand, localShortage,
+                localTraffic, localDemand,
+                forecast5m, forecast10m, forecast15m, forecast30m,
+                localShortage,
                 localDensity, localSpike,
-                localAttraction, idleMinutes, endZones
+                localWeatherExposure, localCorridorExposure,
+                localAttraction, idleMinutes, nearReadyOrders, endZones
         );
     }
 
@@ -135,7 +160,7 @@ public class DriverContextBuilder {
             for (int j = i + 1; j < sorted.size(); j++) {
                 if (assigned[j]) continue;
                 double dist = centroid.distanceTo(sorted.get(j).getPickupPoint());
-                if (dist <= CLUSTER_RADIUS_METERS) {
+                if (dist <= computeClusterRadiusMeters()) {
                     double synergy = computeSynergy(sorted.get(i), sorted.get(j));
                     if (synergy > SYNERGY_THRESHOLD) {
                         members.add(sorted.get(j));
@@ -286,10 +311,17 @@ public class DriverContextBuilder {
                 double distKm = driverPos.distanceTo(cellCenter) / 1000.0;
                 if (distKm > MAX_END_ZONE_KM || distKm < 0.2) continue;
 
-                double attraction = field.getAttractionAt(cellCenter);
+                double weatherExposure = field.getWeatherExposureAt(cellCenter);
+                double corridorExposure = field.getCongestionExposureAt(cellCenter);
+                double attraction = field.getRiskAdjustedAttractionAt(cellCenter) * 0.45
+                        + field.getForecastDemandAt(cellCenter, 10) * 0.30
+                        + field.getForecastDemandAt(cellCenter, 15) * 0.15
+                        + field.getForecastDemandAt(cellCenter, 30) * 0.10;
+                attraction -= weatherExposure * 0.10 + corridorExposure * 0.12;
                 if (attraction > 0.1) {
                     candidates.add(new EndZoneCandidate(
-                            cellCenter, attraction, distKm));
+                            cellCenter, attraction, distKm,
+                            weatherExposure, corridorExposure));
                 }
             }
         }
@@ -314,11 +346,57 @@ public class DriverContextBuilder {
                                          double globalTraffic) {
         double densityFactor = Math.min(0.15,
                 field.getDriverDensityAt(pos) / 50.0);
-        return Math.min(1.0, globalTraffic + densityFactor);
+        double corridorFactor = field.getCongestionExposureAt(pos) * 0.35;
+        return Math.min(1.0, globalTraffic + densityFactor + corridorFactor);
     }
 
     private double estimateIdleTime(double demand, double shortage) {
         double normalized = Math.max(0.01, demand * 0.3 + shortage * 0.7);
         return Math.max(0.5, 10.0 / normalized);
+    }
+
+    private double estimateTravelMinutes(GeoPoint driverPos, Order order,
+                                         double speedKmh, double trafficIntensity) {
+        double distanceKm = driverPos.distanceTo(order.getPickupPoint()) / 1000.0;
+        double startExposure = field.getCongestionExposureAt(driverPos);
+        double pickupExposure = field.getCongestionExposureAt(order.getPickupPoint());
+        double weatherExposure = field.getWeatherExposureAt(order.getPickupPoint());
+        double congestionFactor = 1.0
+                + trafficIntensity * 0.25
+                + ((startExposure + pickupExposure) * 0.5) * 0.20
+                + weatherExposure * 0.10;
+        return (distanceKm / Math.max(8.0, speedKmh)) * 60.0 * congestionFactor;
+    }
+
+    private double computeReachabilityHorizonMinutes(double trafficIntensity,
+                                                     WeatherProfile weather) {
+        double horizon = BASE_REACHABILITY_HORIZON_MINUTES;
+        horizon -= switch (weather) {
+            case CLEAR -> 0.0;
+            case LIGHT_RAIN -> 0.4;
+            case HEAVY_RAIN -> 1.6;
+            case STORM -> 2.4;
+        };
+        return Math.max(5.0, horizon);
+    }
+
+    private double computeClusterRadiusMeters() {
+        double radius = CLUSTER_RADIUS_METERS;
+        if (currentTrafficIntensity > 0.75) {
+            radius -= 200.0;
+        }
+        radius -= switch (currentWeather) {
+            case CLEAR -> 0.0;
+            case LIGHT_RAIN -> 80.0;
+            case HEAVY_RAIN -> 300.0;
+            case STORM -> 500.0;
+        };
+        return Math.max(650.0, radius);
+    }
+
+    private double estimateReadySlackMinutes(Order order, Instant currentTime) {
+        if (order.getPredictedReadyAt() == null) return 0.0;
+        long seconds = Duration.between(currentTime, order.getPredictedReadyAt()).getSeconds();
+        return Math.max(0.0, seconds / 60.0);
     }
 }

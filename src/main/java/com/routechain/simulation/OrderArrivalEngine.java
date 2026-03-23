@@ -5,6 +5,7 @@ import com.routechain.domain.GeoPoint;
 import com.routechain.domain.Order;
 import com.routechain.domain.Region;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -76,7 +77,8 @@ public class OrderArrivalEngine {
      * @param tick          current tick counter
      * @return list of newly created orders
      */
-    public List<Order> generateOrders(int simulatedHour, WeatherProfile weather, long tick) {
+    public List<Order> generateOrders(int simulatedHour, WeatherProfile weather,
+                                      long tick, Instant simulatedNow) {
         List<Order> newOrders = new ArrayList<>();
 
         // Phase 1: compute lambda per zone
@@ -97,7 +99,7 @@ public class OrderArrivalEngine {
             count = Math.min(count, 8); // hard cap per zone per tick
 
             for (int j = 0; j < count; j++) {
-                Order order = createOrder(regions.get(i), simulatedHour);
+                Order order = createOrder(regions.get(i), simulatedHour, simulatedNow);
                 if (order != null) {
                     newOrders.add(order);
                 }
@@ -183,7 +185,7 @@ public class OrderArrivalEngine {
     /**
      * Create a single order within a region.
      */
-    private Order createOrder(Region region, int simulatedHour) {
+    private Order createOrder(Region region, int simulatedHour, Instant createdAt) {
         GeoPoint pickup = randomPointInRegion(region);
         if (pickup == null) return null;
 
@@ -206,7 +208,7 @@ public class OrderArrivalEngine {
         String custId = "CUST-" + rng.nextInt(10000);
 
         return new Order(orderId, custId, region.getId(),
-                pickup, dropoff, dropRegion.getId(), fee, etaPromise);
+                pickup, dropoff, dropRegion.getId(), fee, etaPromise, createdAt);
     }
 
     private GeoPoint randomPointInRegion(Region region) {

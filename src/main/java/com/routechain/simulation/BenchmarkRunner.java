@@ -4,7 +4,7 @@ import com.routechain.simulation.config.SimulationConfigs;
 
 /**
  * Headless runner for benchmarking the Dispatch AI (Phase 3).
- * Simulates a full working hour (3600 ticks) and prints metrics.
+ * Simulates a long headless run and prints aggregate metrics.
  */
 public class BenchmarkRunner {
 
@@ -22,12 +22,14 @@ public class BenchmarkRunner {
         System.out.println("[Benchmark] Starting headless simulation...");
         long startTimeMs = System.currentTimeMillis();
 
-        // Run 3600 ticks (1 hour of simulated time) synchronously
+        // Run 3600 sub-ticks (~5 simulated hours) synchronously
         int numTicks = 3600;
         for (int i = 0; i < numTicks; i++) {
             engine.tickHeadless();
             if ((i + 1) % 600 == 0) {
-                System.out.println("  ... progress: " + (i + 1) / 60 + " simulated minutes.");
+                System.out.println("  ... progress: "
+                        + engine.getClock().getElapsedMinutes()
+                        + " simulated minutes.");
             }
         }
 

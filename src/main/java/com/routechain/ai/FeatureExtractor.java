@@ -63,13 +63,15 @@ public class FeatureExtractor {
 
         // 10: endZoneDemand10m
         GeoPoint endPt = plan.getEndZonePoint();
-        f[10] = field != null ? Math.min(1.0, field.getDemandAt(endPt) / 5.0) : 0.3;
+        f[10] = field != null ? Math.min(1.0, field.getForecastDemandAt(endPt, 10) / 5.0) : 0.3;
 
         // 11: endZoneDriverDensity
         f[11] = field != null ? Math.min(1.0, field.getDriverDensityAt(endPt) / 5.0) : 0.3;
 
         // 12: congestionExposure
-        f[12] = Math.min(1.0, trafficIntensity);
+        f[12] = field != null
+                ? Math.min(1.0, Math.max(trafficIntensity, field.getCongestionExposureAt(endPt)))
+                : Math.min(1.0, trafficIntensity);
 
         // 13: detourRatio
         double standaloneDist = computeStandaloneDistance(orders);
@@ -94,11 +96,11 @@ public class FeatureExtractor {
         double[] f = new double[10];
 
         f[0] = field != null ? Math.min(1.0, field.getDemandAt(endPos) / 3.0) : 0.3;
-        f[1] = field != null ? Math.min(1.0, field.getDemandAt(endPos) / 5.0) : 0.3; // 10m proxy
+        f[1] = field != null ? Math.min(1.0, field.getForecastDemandAt(endPos, 10) / 5.0) : 0.3;
         f[2] = field != null ? field.getSpikeAt(endPos) : 0.1;
         f[3] = field != null ? Math.min(1.0, field.getDriverDensityAt(endPos) / 5.0) : 0.3;
         f[4] = field != null ? field.getShortageAt(endPos) : 0.3;
-        f[5] = 0.3; // exit traffic penalty (placeholder, field can refine later)
+        f[5] = field != null ? field.getCongestionExposureAt(endPos) : 0.3;
         f[6] = endHour / 24.0;
         f[7] = weather.ordinal() / 3.0;
         f[8] = driver.getComputedUtilization();

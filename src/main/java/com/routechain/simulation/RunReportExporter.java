@@ -1,10 +1,15 @@
 package com.routechain.simulation;
 
-import com.routechain.domain.*;
-import com.routechain.domain.Enums.*;
+import com.routechain.domain.Driver;
+import com.routechain.domain.Order;
+import com.routechain.domain.Enums.OrderStatus;
+import com.routechain.domain.Enums.DriverState;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -17,10 +22,10 @@ public class RunReportExporter {
     private final long seed;
     private final Instant startTime;
 
-    public RunReportExporter(String scenarioName, long seed) {
+    public RunReportExporter(String scenarioName, long seed, Instant startTime) {
         this.scenarioName = scenarioName;
         this.seed = seed;
-        this.startTime = Instant.now();
+        this.startTime = startTime;
     }
 
     /**
@@ -41,25 +46,31 @@ public class RunReportExporter {
             int reDispatchCount,
             long totalTicks,
             int surgeEvents,
-            int shortageEvents) {
+            int shortageEvents,
+            Instant endTime) {
 
         String runId = "RUN-" + UUID.randomUUID().toString().substring(0, 8);
-        Instant endTime = Instant.now();
-
-        // ── Volume ──────────────────────────────────────────────────────
         int totalOrders = totalDelivered + cancelledOrders.size() + activeOrders.size();
         int totalDriverCount = drivers.size();
 
-        // ── Operations KPIs ─────────────────────────────────────────────
+        List<Order> allKnownOrders = new ArrayList<>(
+                completedOrders.size() + cancelledOrders.size() + activeOrders.size());
+        allKnownOrders.addAll(completedOrders);
+        allKnownOrders.addAll(cancelledOrders);
+        allKnownOrders.addAll(activeOrders);
+
         double completionRate = totalOrders > 0
                 ? (double) totalDelivered / totalOrders * 100 : 0;
         double onTimeRate = totalDelivered > 0
                 ? (double) (totalDelivered - totalLateDelivered) / totalDelivered * 100 : 100;
         double cancellationRate = totalOrders > 0
                 ? (double) cancelledOrders.size() / totalOrders * 100 : 0;
-        double failedOrderRate = 0; // TODO: track failed orders separately
+        long failedOrders = allKnownOrders.stream()
+                .filter(o -> o.getStatus() == OrderStatus.FAILED)
+                .count();
+        double failedOrderRate = totalOrders > 0
+                ? (double) failedOrders / totalOrders * 100 : 0;
 
-        // ── Driver efficiency KPIs ──────────────────────────────────────
         double avgUtilization = drivers.stream()
                 .filter(d -> d.getState() != DriverState.OFFLINE)
                 .mapToDouble(Driver::getComputedUtilization)
@@ -75,7 +86,7 @@ public class RunReportExporter {
                 .mapToDouble(Driver::getAvgEarningPerHour)
                 .average().orElse(0);
 
-        double totalDrivenKm = totalDeadheadKm + (totalDelivered * 3.0); // rough
+        double totalDrivenKm = totalDeadheadKm + (totalDelivered * 3.0);
         double deadheadDistRatio = totalDrivenKm > 0
                 ? totalDeadheadKm / totalDrivenKm * 100 : 0;
 
@@ -86,21 +97,18 @@ public class RunReportExporter {
         double deadheadTimeRatio = totalOnlineTicks > 0
                 ? totalIdleTicks / totalOnlineTicks * 100 : 0;
 
-        // ── Bundle / Route KPIs ─────────────────────────────────────────
         double bundleRate = totalOrders > 0
                 ? (double) totalBundled / totalOrders * 100 : 0;
-        double bundleSuccessRate = 95.0; // placeholder — need bundle-level tracking
+        double bundleSuccessRate = computeBundleSuccessRate(completedOrders, cancelledOrders);
 
-        // ── AI KPIs ─────────────────────────────────────────────────────
         double avgAssignLatency = totalAssignments > 0
                 ? (double) totalAssignmentLatencyMs / totalAssignments : 0;
-
-        double avgConfidence = 0.75; // placeholder — need per-assignment tracking
-
-        // ETA MAE: compare predicted vs actual for completed orders
+        double avgConfidence = allKnownOrders.stream()
+                .filter(o -> o.getPredictedAssignmentConfidence() > 0)
+                .mapToDouble(Order::getPredictedAssignmentConfidence)
+                .average().orElse(0.0);
         double etaMAE = computeEtaMAE(completedOrders);
 
-        // ── Avg fee ─────────────────────────────────────────────────────
         double avgFee = totalDelivered > 0
                 ? totalEarnings / totalDelivered : 0;
 
@@ -116,9 +124,6 @@ public class RunReportExporter {
         );
     }
 
-    /**
-     * Compute ETA Mean Absolute Error from completed orders.
-     */
     private double computeEtaMAE(List<Order> completedOrders) {
         if (completedOrders.isEmpty()) return 0;
 
@@ -126,13 +131,46 @@ public class RunReportExporter {
         int count = 0;
         for (Order order : completedOrders) {
             if (order.getDeliveredAt() != null && order.getCreatedAt() != null) {
-                long actualMinutes = java.time.Duration.between(
-                        order.getCreatedAt(), order.getDeliveredAt()).toMinutes();
-                double error = Math.abs(actualMinutes - order.getPromisedEtaMinutes());
-                totalError += error;
+                double actualMinutes = java.time.Duration.between(
+                        order.getCreatedAt(), order.getDeliveredAt()).toSeconds() / 60.0;
+                double predictedMinutes = order.getPredictedTravelTime() > 0
+                        ? order.getPredictedTravelTime()
+                        : order.getPromisedEtaMinutes();
+                totalError += Math.abs(actualMinutes - predictedMinutes);
                 count++;
             }
         }
         return count > 0 ? totalError / count : 0;
+    }
+
+    private double computeBundleSuccessRate(List<Order> completedOrders, List<Order> cancelledOrders) {
+        Map<String, List<Order>> bundleOrders = new HashMap<>();
+        for (Order order : completedOrders) {
+            addBundleOrder(bundleOrders, order);
+        }
+        for (Order order : cancelledOrders) {
+            addBundleOrder(bundleOrders, order);
+        }
+
+        int multiOrderBundles = 0;
+        int successfulBundles = 0;
+        for (List<Order> orders : bundleOrders.values()) {
+            if (orders.size() <= 1) continue;
+            multiOrderBundles++;
+            boolean success = orders.stream().allMatch(
+                    o -> o.getStatus() == OrderStatus.DELIVERED && !o.isLate());
+            if (success) {
+                successfulBundles++;
+            }
+        }
+        return multiOrderBundles > 0
+                ? successfulBundles * 100.0 / multiOrderBundles
+                : 0.0;
+    }
+
+    private void addBundleOrder(Map<String, List<Order>> bundleOrders, Order order) {
+        String bundleId = order.getBundleId();
+        if (bundleId == null || bundleId.isBlank()) return;
+        bundleOrders.computeIfAbsent(bundleId, k -> new ArrayList<>()).add(order);
     }
 }

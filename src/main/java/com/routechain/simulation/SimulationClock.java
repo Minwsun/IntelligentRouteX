@@ -1,5 +1,9 @@
 package com.routechain.simulation;
 
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+
 /**
  * SimulationClock — manages multi-resolution tick boundaries.
  *
@@ -11,6 +15,7 @@ package com.routechain.simulation;
  * All timing derives from a monotonically increasing subTickCounter.
  */
 public class SimulationClock {
+    private static final LocalDate SIMULATION_EPOCH_DATE = LocalDate.of(2026, 1, 1);
 
     /** Sub-tick duration in simulated seconds. */
     public static final int SUB_TICK_SECONDS = 5;
@@ -30,10 +35,12 @@ public class SimulationClock {
     private long subTickCounter = 0;
     private int startHour;
     private int startMinute;
+    private Instant baseInstant;
 
     public SimulationClock(int startHour, int startMinute) {
         this.startHour = startHour;
         this.startMinute = startMinute;
+        this.baseInstant = computeBaseInstant(startHour, startMinute);
     }
 
     /** Advance one sub-tick (5 simulated seconds). */
@@ -44,6 +51,16 @@ public class SimulationClock {
     /** Total elapsed simulated seconds. */
     public long getElapsedSeconds() {
         return subTickCounter * SUB_TICK_SECONDS;
+    }
+
+    /** Current simulated instant derived from the simulation clock only. */
+    public Instant currentInstant() {
+        return baseInstant.plusSeconds(getElapsedSeconds());
+    }
+
+    /** Simulated start instant for the current run configuration. */
+    public Instant startInstant() {
+        return baseInstant;
     }
 
     /** Total elapsed simulated minutes (floor). */
@@ -95,6 +112,7 @@ public class SimulationClock {
     /** Reset clock. */
     public void reset() {
         subTickCounter = 0;
+        baseInstant = computeBaseInstant(startHour, startMinute);
     }
 
     /** Reset clock with new start time. */
@@ -102,5 +120,12 @@ public class SimulationClock {
         this.startHour = startHour;
         this.startMinute = startMinute;
         this.subTickCounter = 0;
+        this.baseInstant = computeBaseInstant(startHour, startMinute);
+    }
+
+    private Instant computeBaseInstant(int hour, int minute) {
+        return SIMULATION_EPOCH_DATE
+                .atTime(hour, minute)
+                .toInstant(ZoneOffset.UTC);
     }
 }

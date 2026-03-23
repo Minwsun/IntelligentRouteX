@@ -50,6 +50,7 @@ public class Order {
     private volatile double predictedTravelTime;
     private volatile double predictedLateRisk;
     private volatile double predictedBundleFit;
+    private volatile double predictedAssignmentConfidence;
 
     // ── Merchant readiness (MerchantWaitEngine) ─────────────────────────
     private volatile String merchantId;
@@ -61,6 +62,13 @@ public class Order {
     public Order(String id, String customerId, String pickupRegionId,
                  GeoPoint pickupPoint, GeoPoint dropoffPoint, String dropoffRegionId,
                  double quotedFee, int promisedEtaMinutes) {
+        this(id, customerId, pickupRegionId, pickupPoint, dropoffPoint,
+                dropoffRegionId, quotedFee, promisedEtaMinutes, Instant.now());
+    }
+
+    public Order(String id, String customerId, String pickupRegionId,
+                 GeoPoint pickupPoint, GeoPoint dropoffPoint, String dropoffRegionId,
+                 double quotedFee, int promisedEtaMinutes, Instant createdAt) {
         this.id = id;
         this.customerId = customerId;
         this.correlationId = UUID.randomUUID().toString().substring(0, 8);
@@ -75,8 +83,8 @@ public class Order {
         this.actualFee = quotedFee;
         this.promisedEtaMinutes = promisedEtaMinutes;
         this.cancellationRisk = 0.0;
-        this.createdAt = Instant.now();
-        this.confirmedAt = Instant.now();
+        this.createdAt = createdAt;
+        this.confirmedAt = createdAt;
     }
 
     // ── Identity getters ────────────────────────────────────────────────
@@ -120,42 +128,71 @@ public class Order {
     public double getPredictedTravelTime() { return predictedTravelTime; }
     public double getPredictedLateRisk() { return predictedLateRisk; }
     public double getPredictedBundleFit() { return predictedBundleFit; }
+    public double getPredictedAssignmentConfidence() { return predictedAssignmentConfidence; }
 
     // ── Transitions ─────────────────────────────────────────────────────
     public void assignDriver(String driverId) {
+        assignDriver(driverId, Instant.now());
+    }
+
+    public void assignDriver(String driverId, Instant assignedAt) {
         this.assignedDriverId = driverId;
-        this.assignedAt = Instant.now();
+        this.assignedAt = assignedAt;
         this.status = OrderStatus.ASSIGNED;
     }
 
     public void markPickupStarted() {
-        this.pickupStartedAt = Instant.now();
+        markPickupStarted(Instant.now());
+    }
+
+    public void markPickupStarted(Instant pickupStartedAt) {
+        this.pickupStartedAt = pickupStartedAt;
         this.status = OrderStatus.PICKUP_EN_ROUTE;
     }
 
     public void markPickedUp() {
-        this.pickedUpAt = Instant.now();
+        markPickedUp(Instant.now());
+    }
+
+    public void markPickedUp(Instant pickedUpAt) {
+        this.pickedUpAt = pickedUpAt;
         this.status = OrderStatus.PICKED_UP;
     }
 
     public void markDropoffStarted() {
-        this.dropoffStartedAt = Instant.now();
+        markDropoffStarted(Instant.now());
+    }
+
+    public void markDropoffStarted(Instant dropoffStartedAt) {
+        this.dropoffStartedAt = dropoffStartedAt;
         this.status = OrderStatus.DROPOFF_EN_ROUTE;
     }
 
     public void markDelivered() {
-        this.deliveredAt = Instant.now();
+        markDelivered(Instant.now());
+    }
+
+    public void markDelivered(Instant deliveredAt) {
+        this.deliveredAt = deliveredAt;
         this.status = OrderStatus.DELIVERED;
     }
 
     public void markCancelled(String reason) {
-        this.cancelledAt = Instant.now();
+        markCancelled(reason, Instant.now());
+    }
+
+    public void markCancelled(String reason, Instant cancelledAt) {
+        this.cancelledAt = cancelledAt;
         this.cancellationReason = reason;
         this.status = OrderStatus.CANCELLED;
     }
 
     public void markFailed(String reason) {
-        this.failedAt = Instant.now();
+        markFailed(reason, Instant.now());
+    }
+
+    public void markFailed(String reason, Instant failedAt) {
+        this.failedAt = failedAt;
         this.failureReason = reason;
         this.status = OrderStatus.FAILED;
     }
@@ -183,6 +220,7 @@ public class Order {
     public void setPredictedTravelTime(double t) { this.predictedTravelTime = t; }
     public void setPredictedLateRisk(double r) { this.predictedLateRisk = r; }
     public void setPredictedBundleFit(double f) { this.predictedBundleFit = f; }
+    public void setPredictedAssignmentConfidence(double v) { this.predictedAssignmentConfidence = v; }
 
     // ── Merchant readiness getters/setters ───────────────────────────────
     public String getMerchantId() { return merchantId; }

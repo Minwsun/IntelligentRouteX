@@ -87,7 +87,13 @@ public class ConstraintEngine {
      * Deadhead distance must not exceed 6km.
      */
     public boolean isDeadheadAcceptable(DispatchPlan plan) {
-        return plan.getPredictedDeadheadKm() <= MAX_DEADHEAD_KM;
+        double limit = MAX_DEADHEAD_KM;
+        if (plan.getCongestionPenalty() > 0.90) {
+            limit = 3.2;
+        } else if (plan.getCongestionPenalty() > 0.78) {
+            limit = 4.2;
+        }
+        return plan.getPredictedDeadheadKm() <= limit;
     }
 
     /**
@@ -113,6 +119,12 @@ public class ConstraintEngine {
      * Cumulative merchant wait across all pickup stops must not exceed 8 minutes.
      */
     public boolean isMerchantWaitAcceptable(DispatchPlan plan) {
+        double maxMerchantWait = MAX_CUMULATIVE_MERCHANT_WAIT_MIN;
+        if (plan.getCongestionPenalty() > 0.90) {
+            maxMerchantWait = 8.0;
+        } else if (plan.getCongestionPenalty() > 0.78) {
+            maxMerchantWait = 10.0;
+        }
         double cumulativeWait = 0;
         List<Order> orders = plan.getOrders();
         if (orders.isEmpty()) return true;
@@ -134,7 +146,7 @@ public class ConstraintEngine {
                 }
             }
         }
-        return cumulativeWait <= MAX_CUMULATIVE_MERCHANT_WAIT_MIN;
+        return cumulativeWait <= maxMerchantWait;
     }
 
     /**
