@@ -252,6 +252,27 @@ public class Driver {
         }
     }
 
+    // ── AI Dispatch Sequence ────────────────────────────────────────────
+    private List<com.routechain.simulation.DispatchPlan.Stop> assignedSequence;
+    private int currentSequenceIndex = 0;
+
+    public void setAssignedSequence(List<com.routechain.simulation.DispatchPlan.Stop> sequence) {
+        this.assignedSequence = sequence != null ? List.copyOf(sequence) : null;
+        this.currentSequenceIndex = 0;
+    }
+
+    public List<com.routechain.simulation.DispatchPlan.Stop> getAssignedSequence() {
+        return assignedSequence;
+    }
+
+    public int getCurrentSequenceIndex() {
+        return currentSequenceIndex;
+    }
+
+    public void advanceSequenceIndex() {
+        this.currentSequenceIndex++;
+    }
+
     public boolean isAvailable() {
         return state == DriverState.ONLINE_IDLE && activeOrderIds.isEmpty();
     }

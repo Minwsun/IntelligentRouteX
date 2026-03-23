@@ -34,10 +34,10 @@ public class SimulationEngine {
     // Scenario parameters
     private volatile double trafficIntensity = 0.3;
     private volatile WeatherProfile weatherProfile = WeatherProfile.CLEAR;
-    private volatile double demandMultiplier = 1.0;
+    private volatile double demandMultiplier = 0.1; // 10% orders
     private volatile int simulatedHour = 12;
     private volatile int simulatedMinute = 0;
-    private volatile int initialDriverCount = 30;
+    private volatile int initialDriverCount = 5; // 5 drivers
     private final Random rng = new Random(42);
 
     // Timeline history buffer (last 1800 ticks = 30 simulated minutes)
@@ -437,6 +437,7 @@ public class SimulationEngine {
             if (plan.getOrders().isEmpty()) {
                 if (plan.getBundle().bundleId().startsWith("REPOS") && !plan.getSequence().isEmpty()) {
                      best.clearRouteWaypoints();
+                     best.setAssignedSequence(plan.getSequence());
                      best.setState(DriverState.REPOSITIONING);
                      best.setTargetLocation(plan.getSequence().get(0).location());
                      eventBus.publish(new DriverStateChanged(best.getId(),
@@ -461,8 +462,9 @@ public class SimulationEngine {
             }
 
             best.clearRouteWaypoints();
+            best.setAssignedSequence(plan.getSequence());
             best.setState(DriverState.PICKUP_EN_ROUTE);
-            best.setTargetLocation(plan.getOrders().get(0).getPickupPoint());
+            best.setTargetLocation(plan.getSequence().get(0).location());
             best.setActiveBundleId(plan.getBundle().bundleId());
             routingService.requestRouteAsync(best, best.getCurrentLocation(), best.getTargetLocation());
 
@@ -504,55 +506,83 @@ public class SimulationEngine {
 
     // ── Process deliveries (state transitions) ──────────────────────────
     private void processDeliveries() {
-        for (Order order : activeOrders) {
-            if (order.getAssignedDriverId() == null) continue;
-
-            Driver driver = drivers.stream()
-                    .filter(d -> d.getId().equals(order.getAssignedDriverId()))
-                    .findFirst().orElse(null);
-            if (driver == null) continue;
-
-            switch (order.getStatus()) {
-                case PICKUP_EN_ROUTE -> {
-                    if (driver.getTargetLocation() == null) {
-                        // Arrived at pickup
-                        order.markPickedUp();
-                        driver.setState(DriverState.DELIVERING);
-                        driver.setTargetLocation(order.getDropoffPoint());
-                        eventBus.publish(new OrderPickedUp(order.getId()));
-                    }
-                }
-                case PICKED_UP, DROPOFF_EN_ROUTE -> {
-                    order.markDropoffStarted();
-                    if (driver.getTargetLocation() == null) {
-                        // Arrived at dropoff
-                        order.markDelivered();
-                        driver.setState(DriverState.ONLINE_IDLE);
-                        driver.removeOrder(order.getId());
-                        driver.addEarning(order.getQuotedFee());
-                        driver.incrementCompletedOrders();
-                        totalDelivered++;
-                        if (order.isLate()) totalLateDelivered++;
-                        totalEarnings += order.getQuotedFee();
-                        completedOrders.add(order);
-                        eventBus.publish(new OrderDelivered(order.getId()));
-                        eventBus.publish(new DriverStateChanged(driver.getId(),
-                                DriverState.DELIVERING, DriverState.ONLINE_IDLE));
-
-                        // Omega learning callback
-                        double distKm = order.getPickupPoint().distanceTo(
-                                order.getDropoffPoint()) / 1000.0;
-                        double etaActual = distKm / Math.max(6, driver.getSpeedKmh()) * 60;
-                        omegaAgent.onOrderDelivered(order, driver,
-                                etaActual, order.isLate(), order.getQuotedFee(),
-                                trafficIntensity, weatherProfile, simulatedHour,
-                                tickCounter.get());
-                    }
-                }
-                default -> {}
+        for (Driver driver : drivers) {
+            List<DispatchPlan.Stop> seq = driver.getAssignedSequence();
+            if (seq == null || driver.getState() == DriverState.ONLINE_IDLE) {
+                continue;
             }
 
-            // Random cancellation risk
+            // If driver just arrived at target location (or target is null on initial pickup)
+            if (driver.getTargetLocation() == null) {
+                int idx = driver.getCurrentSequenceIndex();
+                if (idx < seq.size()) {
+                    DispatchPlan.Stop currentStop = seq.get(idx);
+                    Order order = null;
+                    if (currentStop.orderId() != null) {
+                        order = activeOrders.stream()
+                                .filter(o -> o.getId().equals(currentStop.orderId()))
+                                .findFirst().orElse(null);
+                    }
+
+                    if (order != null && order.getStatus() != OrderStatus.CANCELLED) {
+                        if (currentStop.type() == DispatchPlan.Stop.StopType.PICKUP) {
+                            order.markPickedUp();
+                            eventBus.publish(new OrderPickedUp(order.getId()));
+                        } else if (currentStop.type() == DispatchPlan.Stop.StopType.DROPOFF) {
+                            order.markDelivered();
+                            driver.removeOrder(order.getId());
+                            driver.addEarning(order.getQuotedFee());
+                            driver.incrementCompletedOrders();
+                            totalDelivered++;
+                            if (order.isLate()) totalLateDelivered++;
+                            totalEarnings += order.getQuotedFee();
+                            completedOrders.add(order);
+                            eventBus.publish(new OrderDelivered(order.getId()));
+
+                            double distKm = order.getPickupPoint().distanceTo(order.getDropoffPoint()) / 1000.0;
+                            double etaActual = distKm / Math.max(6, driver.getSpeedKmh()) * 60;
+                            omegaAgent.onOrderDelivered(order, driver, etaActual, order.isLate(),
+                                    order.getQuotedFee(), trafficIntensity, weatherProfile,
+                                    simulatedHour, tickCounter.get());
+                        }
+                    }
+                    driver.advanceSequenceIndex();
+                    idx++;
+                }
+
+                // Proceed to next stop in sequence, or finish
+                if (idx < seq.size()) {
+                    DispatchPlan.Stop nextStop = seq.get(idx);
+                    driver.setTargetLocation(nextStop.location());
+                    driver.setState(nextStop.type() == DispatchPlan.Stop.StopType.PICKUP ? 
+                            DriverState.PICKUP_EN_ROUTE : DriverState.DELIVERING);
+                    routingService.requestRouteAsync(driver, driver.getCurrentLocation(), driver.getTargetLocation());
+                    
+                    // Mark order status appropriately if picking up or delivering
+                    if (nextStop.orderId() != null) {
+                        Order nextOrder = activeOrders.stream()
+                                .filter(o -> o.getId().equals(nextStop.orderId()))
+                                .findFirst().orElse(null);
+                        if (nextOrder != null && nextOrder.getStatus() != OrderStatus.CANCELLED) {
+                            if (nextStop.type() == DispatchPlan.Stop.StopType.PICKUP && nextOrder.getStatus() == OrderStatus.PENDING_ASSIGNMENT) {
+                                 nextOrder.markPickupStarted();
+                            } else if (nextStop.type() == DispatchPlan.Stop.StopType.DROPOFF) {
+                                 nextOrder.markDropoffStarted();
+                            }
+                        }
+                    }
+                } else {
+                    DriverState oldState = driver.getState();
+                    driver.setState(DriverState.ONLINE_IDLE);
+                    driver.setAssignedSequence(null);
+                    eventBus.publish(new DriverStateChanged(driver.getId(),
+                                oldState, DriverState.ONLINE_IDLE));
+                }
+            }
+        }
+
+        // Random cancellation risk for active orders
+        for (Order order : activeOrders) {
             if (order.getStatus() != OrderStatus.DELIVERED
                     && order.getStatus() != OrderStatus.CANCELLED) {
                 double risk = trafficIntensity * 0.1
@@ -563,10 +593,22 @@ public class SimulationEngine {
                 if (rng.nextDouble() < risk * 0.01) { // very small chance per tick
                     order.markCancelled("customer_cancelled");
                     cancelledOrders.add(order);
-                    if (driver.getActiveOrderIds().contains(order.getId())) {
-                        driver.removeOrder(order.getId());
-                        driver.setState(DriverState.ONLINE_IDLE);
-                        driver.setTargetLocation(null);
+                    
+                    if (order.getAssignedDriverId() != null) {
+                        Driver driver = drivers.stream()
+                                .filter(d -> d.getId().equals(order.getAssignedDriverId()))
+                                .findFirst().orElse(null);
+                        if (driver != null && driver.getActiveOrderIds().contains(order.getId())) {
+                            driver.removeOrder(order.getId());
+                            // If sequence logic is used, cancelling breaks the sequence partially.
+                            // For simplicity, we just clear current routing and let redispatch or idle take over
+                            if (driver.getActiveOrderIds().isEmpty()) {
+                                driver.setState(DriverState.ONLINE_IDLE);
+                                driver.setTargetLocation(null);
+                                driver.setAssignedSequence(null);
+                                driver.clearRouteWaypoints();
+                            }
+                        }
                     }
                     eventBus.publish(new OrderCancelled(order.getId(), "customer_cancelled"));
 
