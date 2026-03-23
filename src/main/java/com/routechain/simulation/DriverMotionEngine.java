@@ -203,14 +203,15 @@ public class DriverMotionEngine {
         if (target == null) return;
 
         if (driver.hasRouteWaypoints()) {
-            List<GeoPoint> waypoints = driver.getRouteWaypoints();
-            while (remainingDist > 0 && !waypoints.isEmpty()) {
-                GeoPoint nextWp = waypoints.get(0);
+            while (remainingDist > 0 && driver.hasRouteWaypoints()) {
+                GeoPoint nextWp = driver.getCurrentWaypoint();
+                if (nextWp == null) break;
+
                 double wpDist = current.distanceTo(nextWp);
                 if (wpDist <= remainingDist) {
                     remainingDist -= wpDist;
                     current = nextWp;
-                    waypoints.remove(0);
+                    driver.advanceWaypoint();
                 } else {
                     current = current.moveTowards(nextWp, remainingDist);
                     remainingDist = 0;

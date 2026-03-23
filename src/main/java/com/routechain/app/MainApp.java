@@ -58,6 +58,7 @@ public class MainApp extends Application {
     private final StringProperty selectedDriverEta = new SimpleStringProperty("—");
     private final StringProperty selectedDriverDeadhead = new SimpleStringProperty("—");
     private final StringProperty selectedDriverEarnings = new SimpleStringProperty("—");
+    private String currentSelectedDriverId = null;
     private final VBox selectedDriverOrderSequence = new VBox(6);
 
     // Layer visibility
@@ -987,6 +988,12 @@ public class MainApp extends Application {
             // ── EVERY tick: driver positions (animation in JS handles smoothing) ──
             mapBridge.setDriverPositions(simEngine.getDrivers());
 
+            // Auto-refresh selected driver panel if open
+            if (showDriverPanel.get() && currentSelectedDriverId != null) {
+                // Must run on FX thread
+                Platform.runLater(() -> onDriverSelected(currentSelectedDriverId));
+            }
+
             // ── Routes are now handled dynamically in MapBridge.flushFrame() based on Driver waypoints ──
 
             // ── Every 15 ticks: traffic, weather, orders overlays ──
@@ -1042,6 +1049,7 @@ public class MainApp extends Application {
     // ═══════════════════════════════════════════════════════════════════
 
     private void onDriverSelected(String driverId) {
+        currentSelectedDriverId = driverId;
         Driver driver = simEngine.getDrivers().stream()
                 .filter(d -> d.getId().equals(driverId)).findFirst().orElse(null);
         if (driver == null) return;
