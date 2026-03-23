@@ -63,6 +63,10 @@ public class SimulationEngine {
     // Enhancements
     private final DriverSupplyEngine driverSupplyEngine = new DriverSupplyEngine();
     private final ScenarioShockEngine shockEngine = new ScenarioShockEngine();
+    private final SimulationClock clock;
+    private final OrderArrivalEngine orderArrivalEngine;
+    private final DriverMotionEngine driverMotionEngine;
+    private final MerchantWaitEngine merchantWaitEngine;
 
     public SimulationEngine() {
         this.regions = new ArrayList<>(HcmcCityData.createRegions());
@@ -71,6 +75,14 @@ public class SimulationEngine {
         for (var c : corridors) {
             corridorSeverity.put(c.id(), 0.0);
         }
+        this.clock = new SimulationClock(simulatedHour, simulatedMinute);
+        this.orderArrivalEngine = new OrderArrivalEngine(regions, shockEngine, rng);
+        
+        // Find intersection points (simple heuristic: centers of all regions)
+        List<GeoPoint> intersections = regions.stream().map(Region::getCenter).toList();
+        this.driverMotionEngine = new DriverMotionEngine(rng, intersections);
+        this.merchantWaitEngine = new MerchantWaitEngine(rng);
+        
         this.omegaAgent = new OmegaDispatchAgent(regions);
     }
 
@@ -140,6 +152,7 @@ public class SimulationEngine {
     public int getTotalDelivered() { return totalDelivered; }
     public int getTotalCancelled() { return cancelledOrders.size(); }
     public OmegaDispatchAgent getOmegaAgent() { return omegaAgent; }
+    public SimulationClock getClock() { return clock; }
 
     // ── Scenario config ─────────────────────────────────────────────────
     public void setTrafficIntensity(double v) { this.trafficIntensity = Math.max(0, Math.min(1, v)); }
@@ -204,35 +217,56 @@ public class SimulationEngine {
     // ── Core tick ───────────────────────────────────────────────────────
     private void tick() {
         try {
-            long tick = tickCounter.incrementAndGet();
-            long totalMinutes = 12 * 60 + tick; // start at noon, 1 tick = 1 simulated minute
-            simulatedHour = (int) ((totalMinutes / 60) % 24);
-            simulatedMinute = (int) (totalMinutes % 60);
-
-            evolveWeather();
-            evolveTraffic();
+            clock.advanceSubTick();
+            long subTick = clock.getSubTickCounter();
             
-            // Apply driver shifts & spawning
-            driverSupplyEngine.evaluateShifts(drivers, regions, (int)tick, simulatedHour, weatherProfile, demandMultiplier);
-            
-            generateOrders();
-            moveDrivers();
-            trackDriverProductivity();
-            checkReDispatch();
-            dispatchPendingOrders();
-            processDeliveries();
-            omegaAgent.onTick(tick, driverId -> {
-                return drivers.stream()
-                        .filter(d -> d.getId().equals(driverId))
-                        .findFirst()
-                        .map(Driver::getAvgEarningPerHour)
-                        .orElse(0.0);
-            });
-            detectSurges();
-            computeMetrics();
-            recordTimelineSnapshot(tick);
+            // 1. Movement Sub-tick (Every 5 simulated seconds)
+            if (clock.isMovementBoundary()) {
+                moveDrivers();
+                processDeliveries();
+                
+                // We record snapshot in movement ticks for smooth animation, 
+                // but compute heavy metrics in decision ticks
+                if (subTick % (SimulationClock.SUB_TICKS_PER_DECISION / 2) == 0) {
+                    recordTimelineSnapshot(subTick);
+                }
+            }
 
-            eventBus.publish(new SimulationTick(tick, Instant.now()));
+            // 2. Decision Tick (Every 30 simulated seconds)
+            if (clock.isDecisionBoundary()) {
+                simulatedHour = clock.getSimulatedHour();
+                simulatedMinute = clock.getSimulatedMinute();
+                long decTick = clock.getElapsedMinutes();
+
+                evolveWeather();
+                evolveTraffic();
+                
+                // Apply driver shifts & spawning
+                driverSupplyEngine.evaluateShifts(drivers, regions, clock, weatherProfile, demandMultiplier);
+                
+                generateOrders();
+                trackDriverProductivity();
+                checkReDispatch();
+                dispatchPendingOrders();
+                
+                omegaAgent.onTick(decTick, driverId -> {
+                    return drivers.stream()
+                            .filter(d -> d.getId().equals(driverId))
+                            .findFirst()
+                            .map(Driver::getAvgEarningPerHour)
+                            .orElse(0.0);
+                });
+                
+                detectSurges();
+                computeMetrics();
+            }
+
+            // Traffic refresh (Every 60 simulated seconds)
+            if (clock.isTrafficRefreshBoundary()) {
+                // Potential high-res traffic update here
+            }
+
+            eventBus.publish(new SimulationTick(subTick, Instant.now()));
         } catch (Exception e) {
             System.err.println("[SimEngine] Tick error: " + e.getMessage());
             e.printStackTrace();
@@ -296,40 +330,22 @@ public class SimulationEngine {
         }
     }
 
-    // ── Order generation (Negative Binomial) ────────────────────────────
+    // ── Order generation (Negative Binomial + Arrival Engine) ──────────
     private void generateOrders() {
-        Map<String, Double> baseRates = HcmcCityData.baseDemandRates();
-        double hourMult = HcmcCityData.hourlyMultiplier(simulatedHour);
-
-        for (Region region : regions) {
-            // Very roughly classify region type
-            String type = region.getId().equals("q1") || region.getId().equals("q3") ? "OFFICE" 
-                        : region.getId().equals("q7") || region.getId().equals("tb") ? "APARTMENT" : "MIXED";
-
-            double shockDemandMult = shockEngine.getDemandMultiplier(region.getId(), type, tickCounter.get());
+        List<Order> newOrders = orderArrivalEngine.generateOrders(
+                clock.getSimulatedHour(), weatherProfile, clock.getSubTickCounter());
+        
+        for (Order order : newOrders) {
+            // Assign merchant meta via MerchantWaitEngine
+            Region pickupRegion = regions.stream()
+                    .filter(r -> r.getId().equals(order.getPickupRegionId()))
+                    .findFirst().orElse(regions.get(0));
             
-            double weatherMult = switch (weatherProfile) {
-                case CLEAR -> 1.0;
-                case LIGHT_RAIN -> 1.3;
-                case HEAVY_RAIN -> 1.7;
-                case STORM -> type.equals("APARTMENT") ? 1.5 : 0.6; // Apartment users order more in storm
-            };
-
-            double lambda = baseRates.getOrDefault(region.getId(), 0.1)
-                    * hourMult * weatherMult * demandMultiplier * shockDemandMult;
-
-            // Cap lambda to prevent system crash (e.g. max 5.0 base Poisson mean)
-            lambda = Math.min(lambda, 5.0);
-
-            // Generate using Negative Binomial for variance (dispersion = 2.0 is quite bursty)
-            int numOrders = SimulationMath.nextNegativeBinomial(lambda, 2.0, rng);
+            merchantWaitEngine.assignMerchantTiming(order, pickupRegion);
             
-            for (int i = 0; i < numOrders; i++) {
-                Order order = createRandomOrder(region);
-                activeOrders.add(order);
-                region.setCurrentDemandPressure(region.getCurrentDemandPressure() + 1);
-                eventBus.publish(new OrderCreated(order));
-            }
+            activeOrders.add(order);
+            pickupRegion.setCurrentDemandPressure(pickupRegion.getCurrentDemandPressure() + 1);
+            eventBus.publish(new OrderCreated(order));
         }
     }
 
@@ -359,102 +375,13 @@ public class SimulationEngine {
         }
     }
 
-    // ── Driver movement ─────────────────────────────────────────────────
+    // ── Driver movement (Delegated to DriverMotionEngine) ──────────────
     private void moveDrivers() {
+        double globalTraffic = trafficIntensity;
         for (Driver driver : drivers) {
             if (driver.getState() == DriverState.OFFLINE) continue;
 
-            GeoPoint target = driver.getTargetLocation();
-            if (target == null) {
-                // Idle drivers wander slightly
-                if (driver.getState() == DriverState.ONLINE_IDLE) {
-                    double dx = (rng.nextGaussian() * 0.0004);
-                    double dy = (rng.nextGaussian() * 0.0004);
-                    GeoPoint newLoc = new GeoPoint(
-                            driver.getCurrentLocation().lat() + dx,
-                            driver.getCurrentLocation().lng() + dy
-                    );
-                    driver.setCurrentLocation(newLoc);
-                    driver.setSpeedKmh(5 + rng.nextDouble() * 10);
-                }
-            } else {
-                // Traffic light simulation (Red lights at intersections)
-                if (driver.getRedLightWaitTicks() > 0) {
-                    driver.decreaseRedLightWait();
-                    driver.setSpeedKmh(0);
-                    
-                    eventBus.publish(new DriverLocationUpdated(
-                            driver.getId(), driver.getCurrentLocation(), 0));
-                    continue; // Wait at light, do not move
-                }
-
-                if (rng.nextDouble() < 0.01) { // 1% chance per tick to hit a red light
-                    driver.setRedLightWaitTicks(5 + rng.nextInt(15)); // wait 5-20 ticks
-                    driver.setSpeedKmh(0);
-                    
-                    eventBus.publish(new DriverLocationUpdated(
-                            driver.getId(), driver.getCurrentLocation(), 0));
-                    continue;
-                }
-
-                // Speed limits (20-50 km/h)
-                double speedKmh = 20 + rng.nextDouble() * 30; // base 20-50 km/h
-                speedKmh *= (1.0 - trafficIntensity * 0.4);
-                if (weatherProfile == WeatherProfile.HEAVY_RAIN) speedKmh *= 0.7;
-                if (weatherProfile == WeatherProfile.STORM) speedKmh *= 0.4;
-                
-                speedKmh = Math.max(20, Math.min(50, speedKmh)); // strict clamp
-
-                double baseSpeedMps = speedKmh / 3.6;
-                double remainingDist = baseSpeedMps; // meters to travel this tick
-                GeoPoint currentPos = driver.getCurrentLocation();
-
-                if (driver.hasRouteWaypoints()) {
-                    // Follow waypoints: consume distance across multiple waypoints
-                    while (remainingDist > 0.5 && driver.hasRouteWaypoints()) {
-                        GeoPoint wp = driver.getCurrentWaypoint();
-                        if (wp == null) break;
-
-                        double distToWp = currentPos.distanceTo(wp);
-
-                        if (distToWp <= remainingDist) {
-                            // Reached this waypoint — snap to it and advance
-                            currentPos = wp;
-                            remainingDist -= distToWp;
-                            driver.advanceWaypoint();
-                        } else {
-                            // Move partially toward this waypoint
-                            currentPos = currentPos.moveTowards(wp, remainingDist);
-                            remainingDist = 0;
-                        }
-                    }
-
-                    // If waypoints exhausted but still have distance, move toward target
-                    // This covers the last few meters to snap exactly to the destination
-                    if (remainingDist > 0.5 && !driver.hasRouteWaypoints()) {
-                        currentPos = currentPos.moveTowards(target, remainingDist);
-                    }
-                } else {
-                    // No waypoints — wait for async GPS route (prevent straight-line flying)
-                    if (currentPos.distanceTo(target) < 100) {
-                        // Target is very close, fallback to straight line
-                        currentPos = currentPos.moveTowards(target, remainingDist);
-                    } else {
-                        // Wait for OSRM to load
-                        baseSpeedMps = 0;
-                        remainingDist = 0;
-                    }
-                }
-
-                driver.setCurrentLocation(currentPos);
-                driver.setSpeedKmh(baseSpeedMps * 3.6);
-
-                // Check if arrived at final destination
-                if (currentPos.distanceTo(target) < 30) {
-                    driver.setTargetLocation(null);
-                    driver.clearRouteWaypoints();
-                }
-            }
+            driverMotionEngine.moveDriver(driver, weatherProfile, globalTraffic, SimulationClock.SUB_TICK_SECONDS);
 
             eventBus.publish(new DriverLocationUpdated(
                     driver.getId(), driver.getCurrentLocation(), driver.getSpeedKmh()));

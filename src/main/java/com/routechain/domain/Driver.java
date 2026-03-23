@@ -11,6 +11,16 @@ import java.util.List;
  * Full productivity and economics tracking for KPI computation.
  */
 public class Driver {
+
+    // ── Enums for motion state machine ───────────────────────────────────
+    public enum MovementMode {
+        FREE_FLOW, APPROACH_INTERSECTION, QUEUED, MERCHANT_WAIT, STOP_GO
+    }
+
+    public enum DriverStyleProfile {
+        CAUTIOUS, NORMAL, AGGRESSIVE
+    }
+
     // ── Identity ────────────────────────────────────────────────────────
     private final String id;
     private final String name;
@@ -26,6 +36,17 @@ public class Driver {
     private volatile double heading;
     private volatile Instant lastSeenAt;
     private volatile int redLightWaitTicks = 0;
+
+    // ── Motion state machine (DriverMotionEngine) ───────────────────────
+    private volatile MovementMode movementMode = MovementMode.FREE_FLOW;
+    private volatile DriverStyleProfile driverStyleProfile = DriverStyleProfile.NORMAL;
+    private volatile String currentCorridorId;
+    private volatile double currentTrafficExposure = 0.0;
+    private volatile int microDelayTicksRemaining = 0;
+    private volatile int queueTicksRemaining = 0;
+    private volatile int merchantWaitTicksRemaining = 0;
+    private volatile double fatigueLevel = 0.0;
+    private volatile String preferredZoneType;
     private final List<String> activeOrderIds = new ArrayList<>();
 
     public int getRedLightWaitTicks() { return redLightWaitTicks; }
@@ -75,6 +96,11 @@ public class Driver {
         this.lastSeenAt = Instant.now();
         this.speedKmh = 0;
         this.heading = 0;
+
+        // Randomize driver style
+        double roll = Math.random();
+        this.driverStyleProfile = roll < 0.25 ? DriverStyleProfile.CAUTIOUS
+                : roll < 0.75 ? DriverStyleProfile.NORMAL : DriverStyleProfile.AGGRESSIVE;
     }
 
     // ── Identity getters ────────────────────────────────────────────────
@@ -280,6 +306,40 @@ public class Driver {
 
     public boolean isAvailable() {
         return state == DriverState.ONLINE_IDLE && activeOrderIds.isEmpty();
+    }
+
+    // ── Motion state machine getters/setters ────────────────────────────
+    public MovementMode getMovementMode() { return movementMode; }
+    public void setMovementMode(MovementMode mode) { this.movementMode = mode; }
+
+    public DriverStyleProfile getDriverStyleProfile() { return driverStyleProfile; }
+    public void setDriverStyleProfile(DriverStyleProfile profile) { this.driverStyleProfile = profile; }
+
+    public String getCurrentCorridorId() { return currentCorridorId; }
+    public void setCurrentCorridorId(String corridorId) { this.currentCorridorId = corridorId; }
+
+    public double getCurrentTrafficExposure() { return currentTrafficExposure; }
+    public void setCurrentTrafficExposure(double exposure) { this.currentTrafficExposure = exposure; }
+
+    public int getMicroDelayTicksRemaining() { return microDelayTicksRemaining; }
+    public void setMicroDelayTicksRemaining(int ticks) { this.microDelayTicksRemaining = ticks; }
+
+    public int getQueueTicksRemaining() { return queueTicksRemaining; }
+    public void setQueueTicksRemaining(int ticks) { this.queueTicksRemaining = ticks; }
+
+    public int getMerchantWaitTicksRemaining() { return merchantWaitTicksRemaining; }
+    public void setMerchantWaitTicksRemaining(int ticks) { this.merchantWaitTicksRemaining = ticks; }
+
+    public double getFatigueLevel() { return fatigueLevel; }
+    public void setFatigueLevel(double level) { this.fatigueLevel = Math.max(0, Math.min(1.0, level)); }
+
+    public String getPreferredZoneType() { return preferredZoneType; }
+    public void setPreferredZoneType(String type) { this.preferredZoneType = type; }
+
+    public List<GeoPoint> getRouteWaypoints() {
+        synchronized (routeWaypoints) {
+            return new ArrayList<>(routeWaypoints);
+        }
     }
 }
 

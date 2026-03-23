@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 /**
  * Manages driver shifts, online/offline behaviors, and archetypes.
@@ -55,16 +54,16 @@ public class DriverSupplyEngine {
     }
 
     /**
-     * Called every tick to evaluate driver online/offline shifts.
+     * Called at decision boundaries to evaluate driver online/offline shifts.
      */
     public void evaluateShifts(
             List<Driver> drivers,
             List<Region> regions,
-            int tick,
-            int simulatedHour,
+            SimulationClock clock,
             WeatherProfile weatherProfile,
             double baseDemandMultiplier
     ) {
+        int simulatedHour = clock.getSimulatedHour();
         // Shift arrivals typically happen on 15 or 30 min marks (or broadly distributed)
         // For simplicity, we process a probability per tick per driver
 
@@ -109,8 +108,9 @@ public class DriverSupplyEngine {
                      driver.setCurrentLocation(randomPointInRegion(targetRegion, rng));
                      driver.setState(DriverState.ONLINE_IDLE);
                      
-                     // Reset some daily counters if it's a new shift (for simulation MVP context, we just wake them)
-                     driver.setRedLightWaitTicks(0);
+                     // Reset some daily counters if it's a new shift
+                     driver.setMicroDelayTicksRemaining(0);
+                     driver.setQueueTicksRemaining(0);
                      
                      EventBus.getInstance().publish(new DriverStateChanged(driver.getId(), DriverState.OFFLINE, DriverState.ONLINE_IDLE));
                      EventBus.getInstance().publish(new DriverOnline(driver.getId()));

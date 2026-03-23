@@ -51,6 +51,13 @@ public class Order {
     private volatile double predictedLateRisk;
     private volatile double predictedBundleFit;
 
+    // ── Merchant readiness (MerchantWaitEngine) ─────────────────────────
+    private volatile String merchantId;
+    private volatile String pickupClusterId;
+    private volatile Instant predictedReadyAt;
+    private volatile Instant actualReadyAt;
+    private volatile double pickupDelayHazard;
+
     public Order(String id, String customerId, String pickupRegionId,
                  GeoPoint pickupPoint, GeoPoint dropoffPoint, String dropoffRegionId,
                  double quotedFee, int promisedEtaMinutes) {
@@ -176,4 +183,20 @@ public class Order {
     public void setPredictedTravelTime(double t) { this.predictedTravelTime = t; }
     public void setPredictedLateRisk(double r) { this.predictedLateRisk = r; }
     public void setPredictedBundleFit(double f) { this.predictedBundleFit = f; }
+
+    // ── Merchant readiness getters/setters ───────────────────────────────
+    public String getMerchantId() { return merchantId; }
+    public void setMerchantId(String id) { this.merchantId = id; }
+
+    public String getPickupClusterId() { return pickupClusterId; }
+    public void setPickupClusterId(String id) { this.pickupClusterId = id; }
+
+    public Instant getPredictedReadyAt() { return predictedReadyAt; }
+    public void setPredictedReadyAt(Instant t) { this.predictedReadyAt = t; }
+
+    public Instant getActualReadyAt() { return actualReadyAt; }
+    public void setActualReadyAt(Instant t) { this.actualReadyAt = t; }
+
+    public double getPickupDelayHazard() { return pickupDelayHazard; }
+    public void setPickupDelayHazard(double h) { this.pickupDelayHazard = h; }
 }
