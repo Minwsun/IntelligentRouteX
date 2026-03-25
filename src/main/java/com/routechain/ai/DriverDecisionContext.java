@@ -27,7 +27,19 @@ public record DriverDecisionContext(
         double currentAttractionScore,
         double estimatedIdleMinutes,
         int nearReadyOrders,
-        List<EndZoneCandidate> endZoneCandidates
+        double effectiveSlaSlackMinutes,
+        int nearReadySameMerchantCount,
+        int compactClusterCount,
+        int localReachableBacklog,
+        boolean harshWeatherStress,
+        double thirdOrderFeasibilityScore,
+        double threeOrderSlackBuffer,
+        double waveAssemblyPressure,
+        double deliveryDemandGradient,
+        double endZoneIdleRisk,
+        List<DropCorridorCandidate> dropCorridorCandidates,
+        List<EndZoneCandidate> endZoneCandidates,
+        StressRegime stressRegime
 ) {
 
     public record OrderCluster(
@@ -44,5 +56,14 @@ public record DriverDecisionContext(
             double distanceKm,
             double weatherExposure,
             double corridorExposure
+    ) {}
+
+    public record DropCorridorCandidate(
+            String corridorKey,
+            GeoPoint anchorPoint,
+            double corridorScore,
+            double demandSignal,
+            double congestionExposure,
+            double weatherExposure
     ) {}
 }

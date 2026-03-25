@@ -44,40 +44,148 @@ public class AssignmentSolver {
             List<DispatchPlan> driverPlans = entry.getValue();
             driverPlans.sort(Comparator.comparingDouble(
                     DispatchPlan::getTotalScore).reversed());
-            cappedPlans.addAll(driverPlans.subList(0,
-                    Math.min(MAX_PLANS_PER_DRIVER, driverPlans.size())));
+            LinkedHashSet<DispatchPlan> keptPlans = new LinkedHashSet<>();
+            boolean hardThreePolicy = driverPlans.stream()
+                    .anyMatch(DispatchPlan::isHardThreeOrderPolicyActive);
+            boolean hasVisibleWave = driverPlans.stream()
+                    .anyMatch(DispatchPlan::isWaveLaunchEligible);
+
+            if (hardThreePolicy && hasVisibleWave) {
+                driverPlans.stream()
+                        .filter(DispatchPlan::isWaveLaunchEligible)
+                        .limit(2)
+                        .forEach(keptPlans::add);
+            }
+
+            for (DispatchPlan plan : driverPlans) {
+                if (keptPlans.size() >= MAX_PLANS_PER_DRIVER) {
+                    break;
+                }
+                if (hardThreePolicy && hasVisibleWave && plan.isStressFallbackOnly()) {
+                    continue;
+                }
+                keptPlans.add(plan);
+            }
+
+            driverPlans.stream()
+                    .filter(plan -> !(hardThreePolicy && hasVisibleWave && plan.isStressFallbackOnly()))
+                    .filter(plan -> plan.getBundleSize() == 1)
+                    .findFirst()
+                    .ifPresent(keptPlans::add);
+
+            driverPlans.stream()
+                    .filter(plan -> !(hardThreePolicy && hasVisibleWave && plan.isStressFallbackOnly()))
+                    .filter(plan -> plan.getBundleSize() >= 4)
+                    .findFirst()
+                    .ifPresent(keptPlans::add);
+
+            driverPlans.stream()
+                    .filter(plan -> !(hardThreePolicy && hasVisibleWave && plan.isStressFallbackOnly()))
+                    .filter(plan -> plan.getBundleSize() == 3)
+                    .findFirst()
+                    .ifPresent(keptPlans::add);
+
+            driverPlans.stream()
+                    .filter(plan -> !(hardThreePolicy && hasVisibleWave && plan.isStressFallbackOnly()))
+                    .filter(plan -> plan.getBundleSize() >= 3)
+                    .findFirst()
+                    .ifPresent(keptPlans::add);
+
+            driverPlans.stream()
+                    .filter(plan -> !(hardThreePolicy && hasVisibleWave && plan.isStressFallbackOnly()))
+                    .filter(plan -> plan.getBundleSize() == 2)
+                    .findFirst()
+                    .ifPresent(keptPlans::add);
+
+            driverPlans.stream()
+                    .filter(DispatchPlan::isWaitingForThirdOrder)
+                    .findFirst()
+                    .ifPresent(keptPlans::add);
+
+            cappedPlans.addAll(keptPlans.stream()
+                    .limit(MAX_PLANS_PER_DRIVER + 4L)
+                    .toList());
         }
 
-        // Step 2: Partition into zone groups (by first pickup region)
-        Map<String, List<DispatchPlan>> zoneGroups = new LinkedHashMap<>();
-        for (DispatchPlan plan : cappedPlans) {
-            String zoneKey = getZoneKey(plan);
-            zoneGroups.computeIfAbsent(zoneKey, k -> new ArrayList<>()).add(plan);
-        }
+        List<DispatchPlan> actionablePlans = cappedPlans.stream()
+                .filter(plan -> !plan.getOrders().isEmpty())
+                .toList();
+        List<DispatchPlan> primaryActionablePlans = actionablePlans.stream()
+                .filter(this::isPrimaryActionablePlan)
+                .toList();
+        List<DispatchPlan> secondaryActionablePlans = actionablePlans.stream()
+                .filter(plan -> !isPrimaryActionablePlan(plan))
+                .toList();
+        List<DispatchPlan> holdPlans = cappedPlans.stream()
+                .filter(DispatchPlan::isWaitingForThirdOrder)
+                .sorted(Comparator.comparingDouble(DispatchPlan::getTotalScore).reversed())
+                .toList();
 
-        // Step 3: Run auction matching per zone group
+        // Step 2: Match actionable plans in two passes.
+        // Pass 1 favors launchable clean waves and non-fallback real plans.
+        // Pass 2 only considers secondary actionable plans for remaining capacity.
         Set<String> usedDrivers = new HashSet<>();
         Set<String> usedOrders = new HashSet<>();
         List<DispatchPlan> selected = new ArrayList<>();
+        matchZoneGroups(primaryActionablePlans, usedDrivers, usedOrders, selected);
+        matchZoneGroups(secondaryActionablePlans, usedDrivers, usedOrders, selected);
 
+        Map<String, DispatchPlan> bestHoldByDriver = new LinkedHashMap<>();
+        for (DispatchPlan holdPlan : holdPlans) {
+            String driverId = holdPlan.getDriver().getId();
+            if (usedDrivers.contains(driverId) || globalPlanExistsForDriver(actionablePlans, driverId)) {
+                continue;
+            }
+            bestHoldByDriver.merge(driverId, holdPlan,
+                    (current, candidate) -> candidate.getTotalScore() > current.getTotalScore() ? candidate : current);
+        }
+        selected.addAll(bestHoldByDriver.values());
+        return selected;
+    }
+
+    private void matchZoneGroups(List<DispatchPlan> plans,
+                                 Set<String> usedDrivers,
+                                 Set<String> usedOrders,
+                                 List<DispatchPlan> selected) {
+        if (plans.isEmpty()) {
+            return;
+        }
+        Map<String, List<DispatchPlan>> zoneGroups = new LinkedHashMap<>();
+        for (DispatchPlan plan : plans) {
+            String zoneKey = getZoneKey(plan);
+            zoneGroups.computeIfAbsent(zoneKey, k -> new ArrayList<>()).add(plan);
+        }
         for (List<DispatchPlan> groupPlans : zoneGroups.values()) {
-            // If group is too large, sub-partition
             List<List<DispatchPlan>> subGroups = partitionGroup(groupPlans);
-
             for (List<DispatchPlan> subGroup : subGroups) {
-                List<DispatchPlan> matched = auctionMatch(
-                        subGroup, usedDrivers, usedOrders);
+                List<DispatchPlan> matched = auctionMatch(subGroup, usedDrivers, usedOrders);
                 selected.addAll(matched);
                 for (DispatchPlan plan : matched) {
                     usedDrivers.add(plan.getDriver().getId());
-                    for (Order o : plan.getOrders()) {
-                        usedOrders.add(o.getId());
+                    for (Order order : plan.getOrders()) {
+                        usedOrders.add(order.getId());
                     }
                 }
             }
         }
+    }
 
-        return selected;
+    private boolean isPrimaryActionablePlan(DispatchPlan plan) {
+        if (plan == null || plan.getOrders().isEmpty()) {
+            return false;
+        }
+        if (plan.isWaveLaunchEligible()) {
+            return true;
+        }
+        if (plan.getBundleSize() >= 3) {
+            return true;
+        }
+        return !plan.isStressFallbackOnly();
+    }
+
+    private boolean globalPlanExistsForDriver(List<DispatchPlan> actionablePlans, String driverId) {
+        return actionablePlans.stream()
+                .anyMatch(plan -> plan.getDriver().getId().equals(driverId));
     }
 
     /**
@@ -97,7 +205,21 @@ public class AssignmentSolver {
                                              Set<String> globalUsedOrders) {
 
         // Sort by score descending
-        plans.sort(Comparator.comparingDouble(DispatchPlan::getTotalScore).reversed());
+        plans.sort((a, b) -> {
+            int waveCompare = Boolean.compare(b.isWaveLaunchEligible(), a.isWaveLaunchEligible());
+            if (waveCompare != 0) {
+                return waveCompare;
+            }
+            int fallbackCompare = Boolean.compare(a.isStressFallbackOnly(), b.isStressFallbackOnly());
+            if (fallbackCompare != 0) {
+                return fallbackCompare;
+            }
+            int bundleCompare = Integer.compare(b.getBundleSize(), a.getBundleSize());
+            if (bundleCompare != 0) {
+                return bundleCompare;
+            }
+            return Double.compare(b.getTotalScore(), a.getTotalScore());
+        });
 
         // Track local assignments: driverId -> best plan
         Map<String, DispatchPlan> driverAssignment = new LinkedHashMap<>();

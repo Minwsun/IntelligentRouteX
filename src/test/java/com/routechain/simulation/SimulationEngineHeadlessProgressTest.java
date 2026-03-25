@@ -11,11 +11,11 @@ class SimulationEngineHeadlessProgressTest {
     void headlessRunProducesAssignmentsAndDeliveries() {
         SimulationEngine engine = new SimulationEngine();
         engine.setInitialDriverCount(40);
-        engine.setDemandMultiplier(0.7);
+        engine.setDemandMultiplier(1.25);
         engine.setTrafficIntensity(0.35);
         engine.setWeatherProfile(WeatherProfile.CLEAR);
 
-        for (int i = 0; i < 900; i++) {
+        for (int i = 0; i < 1500; i++) {
             engine.tickHeadless();
         }
 

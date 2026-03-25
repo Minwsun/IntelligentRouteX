@@ -72,3 +72,17 @@ tasks.register<JavaExec>("omegaAblation") {
     classpath = sourceSets["main"].runtimeClasspath
     args("ablation")
 }
+
+tasks.register<JavaExec>("showcaseBatch") {
+    group = "application"
+    mainClass.set("com.routechain.simulation.ScenarioBatchRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("showcase")
+}
+
+tasks.register<JavaExec>("stressTuneBatch") {
+    group = "application"
+    mainClass.set("com.routechain.simulation.ScenarioBatchRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("stress")
+}

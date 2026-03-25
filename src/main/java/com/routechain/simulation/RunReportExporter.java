@@ -47,6 +47,23 @@ public class RunReportExporter {
             long totalTicks,
             int surgeEvents,
             int shortageEvents,
+            double totalDeliveryCorridorScore,
+            double totalLastDropLandingScore,
+            double totalExpectedPostCompletionEmptyKm,
+            double totalExpectedNextOrderIdleMinutes,
+            double totalZigZagPenalty,
+            int routeMetricPlanCount,
+            int lastDropGoodZoneCount,
+            int visibleBundleThreePlusCount,
+            int cleanRegimeOrderDecisionCount,
+            int cleanRegimeSubThreeSelectedCount,
+            int cleanRegimeWaveAssemblyHoldCount,
+            int cleanRegimeThirdOrderLaunchCount,
+            int stressDowngradeSelectionCount,
+            int totalSelectedOrderPlanCount,
+            int realAssignedPlanCount,
+            int holdOnlySelectionCount,
+            int prePickupAugmentationCount,
             Instant endTime) {
 
         String runId = "RUN-" + UUID.randomUUID().toString().substring(0, 8);
@@ -99,7 +116,11 @@ public class RunReportExporter {
 
         double bundleRate = totalOrders > 0
                 ? (double) totalBundled / totalOrders * 100 : 0;
-        double bundleSuccessRate = computeBundleSuccessRate(completedOrders, cancelledOrders);
+        Map<String, List<Order>> bundleOrders = groupOrdersByBundle(allKnownOrders);
+        double bundleSuccessRate = computeBundleSuccessRate(bundleOrders);
+        double avgObservedBundleSize = computeAverageObservedBundleSize(bundleOrders);
+        int maxObservedBundleSize = computeMaxObservedBundleSize(bundleOrders);
+        double bundleThreePlusRate = computeBundleThreePlusRate(bundleOrders);
 
         double avgAssignLatency = totalAssignments > 0
                 ? (double) totalAssignmentLatencyMs / totalAssignments : 0;
@@ -111,6 +132,40 @@ public class RunReportExporter {
 
         double avgFee = totalDelivered > 0
                 ? totalEarnings / totalDelivered : 0;
+        double visibleBundleThreePlusRate = routeMetricPlanCount > 0
+                ? visibleBundleThreePlusCount * 100.0 / routeMetricPlanCount : 0.0;
+        double lastDropGoodZoneRate = routeMetricPlanCount > 0
+                ? lastDropGoodZoneCount * 100.0 / routeMetricPlanCount : 0.0;
+        double expectedPostCompletionEmptyKm = routeMetricPlanCount > 0
+                ? totalExpectedPostCompletionEmptyKm / routeMetricPlanCount : 0.0;
+        double nextOrderIdleMinutes = routeMetricPlanCount > 0
+                ? totalExpectedNextOrderIdleMinutes / routeMetricPlanCount : 0.0;
+        double deliveryCorridorQuality = routeMetricPlanCount > 0
+                ? totalDeliveryCorridorScore / routeMetricPlanCount : 0.0;
+        double zigZagPenaltyAvg = routeMetricPlanCount > 0
+                ? totalZigZagPenalty / routeMetricPlanCount : 0.0;
+        int cleanRegimePolicyEvents = cleanRegimeOrderDecisionCount + cleanRegimeWaveAssemblyHoldCount;
+        double realAssignmentRate = totalSelectedOrderPlanCount > 0
+                ? realAssignedPlanCount * 100.0 / totalSelectedOrderPlanCount
+                : 0.0;
+        double selectedSubThreeRateInCleanRegime = cleanRegimeOrderDecisionCount > 0
+                ? cleanRegimeSubThreeSelectedCount * 100.0 / cleanRegimeOrderDecisionCount
+                : 0.0;
+        double waveAssemblyWaitRate = cleanRegimePolicyEvents > 0
+                ? cleanRegimeWaveAssemblyHoldCount * 100.0 / cleanRegimePolicyEvents
+                : 0.0;
+        double thirdOrderLaunchRate = cleanRegimePolicyEvents > 0
+                ? cleanRegimeThirdOrderLaunchCount * 100.0 / cleanRegimePolicyEvents
+                : 0.0;
+        double stressDowngradeRate = totalSelectedOrderPlanCount > 0
+                ? stressDowngradeSelectionCount * 100.0 / totalSelectedOrderPlanCount
+                : 0.0;
+        double prePickupAugmentRate = realAssignedPlanCount > 0
+                ? prePickupAugmentationCount * 100.0 / realAssignedPlanCount
+                : 0.0;
+        double holdOnlySelectionRate = totalSelectedOrderPlanCount > 0
+                ? holdOnlySelectionCount * 100.0 / totalSelectedOrderPlanCount
+                : 0.0;
 
         return new RunReport(
                 runId, scenarioName, seed, startTime, endTime, totalTicks,
@@ -118,9 +173,17 @@ public class RunReportExporter {
                 completionRate, onTimeRate, cancellationRate, failedOrderRate,
                 deadheadDistRatio, deadheadTimeRatio, avgUtilization,
                 avgOrdersPerHour, avgNetEarning,
-                bundleRate, bundleSuccessRate, reDispatchCount,
+                bundleRate, bundleSuccessRate, avgObservedBundleSize,
+                maxObservedBundleSize, bundleThreePlusRate, reDispatchCount,
                 avgAssignLatency, avgConfidence, etaMAE,
-                surgeEvents, shortageEvents, avgFee
+                surgeEvents, shortageEvents, avgFee,
+                visibleBundleThreePlusRate, lastDropGoodZoneRate,
+                expectedPostCompletionEmptyKm, nextOrderIdleMinutes,
+                deliveryCorridorQuality, zigZagPenaltyAvg,
+                realAssignmentRate,
+                selectedSubThreeRateInCleanRegime, waveAssemblyWaitRate,
+                thirdOrderLaunchRate, stressDowngradeRate,
+                prePickupAugmentRate, holdOnlySelectionRate
         );
     }
 
@@ -143,15 +206,7 @@ public class RunReportExporter {
         return count > 0 ? totalError / count : 0;
     }
 
-    private double computeBundleSuccessRate(List<Order> completedOrders, List<Order> cancelledOrders) {
-        Map<String, List<Order>> bundleOrders = new HashMap<>();
-        for (Order order : completedOrders) {
-            addBundleOrder(bundleOrders, order);
-        }
-        for (Order order : cancelledOrders) {
-            addBundleOrder(bundleOrders, order);
-        }
-
+    private double computeBundleSuccessRate(Map<String, List<Order>> bundleOrders) {
         int multiOrderBundles = 0;
         int successfulBundles = 0;
         for (List<Order> orders : bundleOrders.values()) {
@@ -166,6 +221,43 @@ public class RunReportExporter {
         return multiOrderBundles > 0
                 ? successfulBundles * 100.0 / multiOrderBundles
                 : 0.0;
+    }
+
+    private double computeAverageObservedBundleSize(Map<String, List<Order>> bundleOrders) {
+        return bundleOrders.values().stream()
+                .filter(orders -> orders.size() > 1)
+                .mapToInt(List::size)
+                .average()
+                .orElse(0.0);
+    }
+
+    private int computeMaxObservedBundleSize(Map<String, List<Order>> bundleOrders) {
+        return bundleOrders.values().stream()
+                .mapToInt(List::size)
+                .max()
+                .orElse(1);
+    }
+
+    private double computeBundleThreePlusRate(Map<String, List<Order>> bundleOrders) {
+        long multiOrderBundles = bundleOrders.values().stream()
+                .filter(orders -> orders.size() > 1)
+                .count();
+        if (multiOrderBundles == 0) {
+            return 0.0;
+        }
+
+        long threePlusBundles = bundleOrders.values().stream()
+                .filter(orders -> orders.size() >= 3)
+                .count();
+        return threePlusBundles * 100.0 / multiOrderBundles;
+    }
+
+    private Map<String, List<Order>> groupOrdersByBundle(List<Order> orders) {
+        Map<String, List<Order>> bundleOrders = new HashMap<>();
+        for (Order order : orders) {
+            addBundleOrder(bundleOrders, order);
+        }
+        return bundleOrders;
     }
 
     private void addBundleOrder(Map<String, List<Order>> bundleOrders, Order order) {

@@ -5,3 +5,6 @@ build/
 *.class
 *.log
 .DS_Store
+.gradle-user/
+.javac-deps/
+routechain.db

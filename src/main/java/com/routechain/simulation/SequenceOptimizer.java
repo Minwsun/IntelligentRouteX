@@ -1,43 +1,71 @@
 package com.routechain.simulation;
 
-import com.routechain.domain.*;
+import com.routechain.ai.DriverDecisionContext;
+import com.routechain.ai.DriverDecisionContext.DropCorridorCandidate;
+import com.routechain.ai.DriverDecisionContext.EndZoneCandidate;
+import com.routechain.ai.StressRegime;
+import com.routechain.domain.Driver;
+import com.routechain.domain.Enums;
+import com.routechain.domain.GeoPoint;
+import com.routechain.domain.Order;
 import com.routechain.simulation.DispatchPlan.Stop;
 import com.routechain.simulation.DispatchPlan.Stop.StopType;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 /**
- * Layer 4 — Sequence Optimizer.
- * Uses Constrained Cheapest Insertion + Local Improvement to determine
- * the optimal pickup/dropoff order for a bundle.
- *
- * Rules:
- * - Pickup must precede dropoff for each order
- * - Insertion cost minimized
- * - Late risk must not exceed threshold
- * - Pickup span ≤ 12 minutes
- * - Cumulative merchant wait ≤ 8 minutes
- * - Detour ratio ≤ 2.0
+ * Builds feasible pickup/dropoff sequences for driver-centric pickup waves.
  */
 public class SequenceOptimizer {
 
-    private static final double MAX_PICKUP_SPAN_MINUTES = 15.0;
-    private static final double MAX_MERCHANT_WAIT_MINUTES = 15.0;
-    private static final double MAX_DETOUR_RATIO = 3.0;
-    private static final double SLA_LATENESS_FACTOR = 0.7;
-
     private final double trafficIntensity;
     private final Enums.WeatherProfile weather;
+    private final boolean showcasePickupWave;
+    private final StressRegime stressRegime;
+    private final DriverDecisionContext context;
+
+    public record RouteObjectiveMetrics(
+            double remainingDropProximityScore,
+            double deliveryCorridorScore,
+            double lastDropLandingScore,
+            double expectedPostCompletionEmptyKm,
+            double deliveryZigZagPenalty,
+            double expectedNextOrderIdleMinutes
+    ) {}
 
     public SequenceOptimizer(double trafficIntensity, Enums.WeatherProfile weather) {
-        this.trafficIntensity = trafficIntensity;
-        this.weather = weather;
+        this(trafficIntensity, weather, false, StressRegime.NORMAL, null);
     }
 
-    /**
-     * Generate up to maxCandidates feasible stop sequences for a bundle.
-     * Includes a specific "Pickup-Wave" candidate for larger bundles.
-     */
+    public SequenceOptimizer(double trafficIntensity,
+                             Enums.WeatherProfile weather,
+                             boolean showcasePickupWave) {
+        this(trafficIntensity, weather, showcasePickupWave, StressRegime.NORMAL, null);
+    }
+
+    public SequenceOptimizer(double trafficIntensity,
+                             Enums.WeatherProfile weather,
+                             boolean showcasePickupWave,
+                             StressRegime stressRegime) {
+        this(trafficIntensity, weather, showcasePickupWave, stressRegime, null);
+    }
+
+    public SequenceOptimizer(double trafficIntensity,
+                             Enums.WeatherProfile weather,
+                             boolean showcasePickupWave,
+                             StressRegime stressRegime,
+                             DriverDecisionContext context) {
+        this.trafficIntensity = trafficIntensity;
+        this.weather = weather;
+        this.showcasePickupWave = showcasePickupWave;
+        this.stressRegime = stressRegime == null ? StressRegime.NORMAL : stressRegime;
+        this.context = context;
+    }
+
     public List<List<Stop>> generateFeasibleSequences(
             Driver driver, DispatchPlan.Bundle bundle, int maxCandidates) {
 
@@ -48,7 +76,6 @@ public class SequenceOptimizer {
 
         List<List<Stop>> candidates = new ArrayList<>();
 
-        // 1. Pickup-Wave sequence (All Pickups -> All Dropoffs)
         List<Stop> waveSequence = generatePickupWaveSequence(driver, orders);
         if (waveSequence != null) {
             computeArrivalTimes(driver.getCurrentLocation(), waveSequence, orders);
@@ -57,15 +84,29 @@ public class SequenceOptimizer {
             }
         }
 
-        // 2. Cheapest insertion sequence
+        List<Stop> corridorAware = generateCorridorAwareWaveSequence(driver, orders);
+        if (corridorAware != null) {
+            computeArrivalTimes(driver.getCurrentLocation(), corridorAware, orders);
+            if (isFeasible(corridorAware, orders) && !candidates.contains(corridorAware)) {
+                candidates.add(corridorAware);
+            }
+        }
+
+        List<Stop> landingAware = generateLandingAwareWaveSequence(driver, orders);
+        if (landingAware != null) {
+            computeArrivalTimes(driver.getCurrentLocation(), landingAware, orders);
+            if (isFeasible(landingAware, orders) && !candidates.contains(landingAware)) {
+                candidates.add(landingAware);
+            }
+        }
+
         List<Stop> baseSequence = buildInitialSequence(driver, orders);
         computeArrivalTimes(driver.getCurrentLocation(), baseSequence, orders);
         if (isFeasible(baseSequence, orders) && !candidates.contains(baseSequence)) {
             candidates.add(baseSequence);
         }
 
-        // 3. Local improvement variants
-        for (int i = 0; i < Math.min(orders.size() * 2, maxCandidates - candidates.size()); i++) {
+        for (int i = 0; i < Math.min(orders.size() * 3, maxCandidates - candidates.size()); i++) {
             List<Stop> variant = localImprovement(baseSequence, orders, i);
             if (variant != null) {
                 computeArrivalTimes(driver.getCurrentLocation(), variant, orders);
@@ -75,40 +116,55 @@ public class SequenceOptimizer {
             }
         }
 
-        // Sort by total route cost (distance + merchant wait penalty)
         candidates.sort(Comparator.comparingDouble(
                 s -> computeRouteCost(driver.getCurrentLocation(), s, orders)));
 
         return candidates.subList(0, Math.min(candidates.size(), maxCandidates));
     }
 
-    /**
-     * Generate a "Pickup-Wave" sequence: collect all items then deliver all.
-     * Order of pickups and dropoffs is determined by proximity.
-     */
-    private List<Stop> generatePickupWaveSequence(Driver driver, List<Order> orders) {
-        List<Stop> route = new ArrayList<>();
-        List<Order> remainingPickups = new ArrayList<>(orders);
-        GeoPoint current = driver.getCurrentLocation();
+    public RouteObjectiveMetrics evaluateRouteObjective(Driver driver,
+                                                        List<Stop> sequence,
+                                                        List<Order> orders) {
+        List<Stop> dropoffs = sequence.stream()
+                .filter(stop -> stop.type() == StopType.DROPOFF)
+                .toList();
+        double remainingDropProximityScore = computeRemainingDropProximityScore(dropoffs);
+        double deliveryZigZagPenalty = computeDeliveryZigZagPenalty(sequence);
+        double deliveryCorridorScore = computeDeliveryCorridorScore(dropoffs, orders,
+                remainingDropProximityScore, deliveryZigZagPenalty);
+        GeoPoint lastDrop = dropoffs.isEmpty()
+                ? driver.getCurrentLocation()
+                : dropoffs.get(dropoffs.size() - 1).location();
+        double lastDropLandingScore = computeLastDropLandingScore(lastDrop);
+        double expectedPostCompletionEmptyKm = computeExpectedPostCompletionEmptyKm(lastDrop);
+        double expectedNextOrderIdleMinutes = computeExpectedNextOrderIdleMinutes(
+                lastDropLandingScore, expectedPostCompletionEmptyKm);
+        return new RouteObjectiveMetrics(
+                remainingDropProximityScore,
+                deliveryCorridorScore,
+                lastDropLandingScore,
+                expectedPostCompletionEmptyKm,
+                deliveryZigZagPenalty,
+                expectedNextOrderIdleMinutes
+        );
+    }
 
-        // 1. Pickups wave — nearest-first
-        while (!remainingPickups.isEmpty()) {
-            final GeoPoint loc = current;
-            Order nearest = remainingPickups.stream()
-                    .min(Comparator.comparingDouble(o -> loc.distanceTo(o.getPickupPoint())))
-                    .get();
-            route.add(new Stop(nearest.getId(), nearest.getPickupPoint(), StopType.PICKUP, 0));
-            remainingPickups.remove(nearest);
-            current = nearest.getPickupPoint();
+    private List<Stop> generatePickupWaveSequence(Driver driver, List<Order> orders) {
+        List<Stop> route = buildPickupWavePrefix(driver, orders);
+        if (route.isEmpty()) {
+            return null;
         }
 
-        // 2. Dropoffs wave — nearest-first
         List<Order> remainingDropoffs = new ArrayList<>(orders);
+        GeoPoint current = route.get(route.size() - 1).location();
         while (!remainingDropoffs.isEmpty()) {
             final GeoPoint loc = current;
             Order nearest = remainingDropoffs.stream()
                     .min(Comparator.comparingDouble(o -> loc.distanceTo(o.getDropoffPoint())))
-                    .get();
+                    .orElse(null);
+            if (nearest == null) {
+                break;
+            }
             route.add(new Stop(nearest.getId(), nearest.getDropoffPoint(), StopType.DROPOFF, 0));
             remainingDropoffs.remove(nearest);
             current = nearest.getDropoffPoint();
@@ -117,7 +173,75 @@ public class SequenceOptimizer {
         return route;
     }
 
-    // ── Cheapest insertion ──────────────────────────────────────────────
+    private List<Stop> generateCorridorAwareWaveSequence(Driver driver, List<Order> orders) {
+        List<Stop> route = buildPickupWavePrefix(driver, orders);
+        if (route.isEmpty()) {
+            return null;
+        }
+
+        List<Order> remainingDropoffs = new ArrayList<>(orders);
+        GeoPoint current = route.get(route.size() - 1).location();
+        while (!remainingDropoffs.isEmpty()) {
+            final GeoPoint origin = current;
+            Order next = remainingDropoffs.stream()
+                    .max(Comparator.comparingDouble(order ->
+                            scoreDropCandidate(origin, order, remainingDropoffs)))
+                    .orElse(null);
+            if (next == null) {
+                break;
+            }
+            route.add(new Stop(next.getId(), next.getDropoffPoint(), StopType.DROPOFF, 0));
+            remainingDropoffs.remove(next);
+            current = next.getDropoffPoint();
+        }
+        return route;
+    }
+
+    private List<Stop> generateLandingAwareWaveSequence(Driver driver, List<Order> orders) {
+        if (orders.size() <= 1) {
+            return generatePickupWaveSequence(driver, orders);
+        }
+
+        List<Stop> route = buildPickupWavePrefix(driver, orders);
+        if (route.isEmpty()) {
+            return null;
+        }
+
+        GeoPoint startDropPoint = route.get(route.size() - 1).location();
+        Order finalDrop = orders.stream()
+                .max(Comparator.comparingDouble(order ->
+                        computeLandingPotential(order.getDropoffPoint())
+                                - startDropPoint.distanceTo(order.getDropoffPoint()) / 3000.0))
+                .orElse(null);
+        if (finalDrop == null) {
+            return null;
+        }
+
+        List<Order> remaining = new ArrayList<>(orders);
+        remaining.remove(finalDrop);
+        GeoPoint current = startDropPoint;
+        while (!remaining.isEmpty()) {
+            final GeoPoint origin = current;
+            final GeoPoint finalDropPoint = finalDrop.getDropoffPoint();
+            Order next = remaining.stream()
+                    .max(Comparator.comparingDouble(order -> {
+                        double distPenalty = origin.distanceTo(order.getDropoffPoint()) / 1000.0;
+                        double towardFinal = 1.0 / (1.0 + order.getDropoffPoint().distanceTo(finalDropPoint) / 1200.0);
+                        return towardFinal * 0.55 - distPenalty * 0.25
+                                + computeCorridorAffinity(order.getDropoffPoint()) * 0.20;
+                    }))
+                    .orElse(null);
+            if (next == null) {
+                break;
+            }
+            route.add(new Stop(next.getId(), next.getDropoffPoint(), StopType.DROPOFF, 0));
+            remaining.remove(next);
+            current = next.getDropoffPoint();
+        }
+
+        route.add(new Stop(finalDrop.getId(), finalDrop.getDropoffPoint(), StopType.DROPOFF, 0));
+        return route;
+    }
 
     private List<Stop> buildInitialSequence(Driver driver, List<Order> orders) {
         List<Stop> route = new ArrayList<>();
@@ -127,11 +251,106 @@ public class SequenceOptimizer {
         route.add(new Stop(first.getId(), first.getDropoffPoint(), StopType.DROPOFF, 0));
 
         for (int i = 1; i < orders.size(); i++) {
-            Order order = orders.get(i);
-            insertCheapest(route, order, driver.getCurrentLocation());
+            insertCheapest(route, orders.get(i), driver.getCurrentLocation());
         }
 
         return route;
+    }
+
+    private List<Stop> buildPickupWavePrefix(Driver driver, List<Order> orders) {
+        List<Stop> route = new ArrayList<>();
+        List<Order> remainingPickups = new ArrayList<>(orders);
+        GeoPoint current = driver.getCurrentLocation();
+        Order lockedFirst = resolveLockedFirstPickup(driver, remainingPickups);
+        GeoPoint routeAnchor = resolvePrePickupRouteAnchor(driver);
+
+        if (lockedFirst != null) {
+            route.add(new Stop(lockedFirst.getId(), lockedFirst.getPickupPoint(), StopType.PICKUP, 0));
+            remainingPickups.remove(lockedFirst);
+            current = lockedFirst.getPickupPoint();
+        }
+
+        while (!remainingPickups.isEmpty()) {
+            final GeoPoint loc = current;
+            final GeoPoint anchor = routeAnchor;
+            Order nearest = remainingPickups.stream()
+                    .max(Comparator.comparingDouble(o -> scorePickupCandidate(loc, anchor, o)))
+                    .orElse(null);
+            if (nearest == null) {
+                break;
+            }
+            route.add(new Stop(nearest.getId(), nearest.getPickupPoint(), StopType.PICKUP, 0));
+            remainingPickups.remove(nearest);
+            current = nearest.getPickupPoint();
+        }
+        return route;
+    }
+
+    private Order resolveLockedFirstPickup(Driver driver, List<Order> remainingPickups) {
+        if (driver == null || remainingPickups == null || remainingPickups.isEmpty()
+                || !driver.isPrePickupAugmentable()) {
+            return null;
+        }
+        List<Stop> assignedSequence = driver.getAssignedSequence();
+        if (assignedSequence == null || assignedSequence.isEmpty()) {
+            return null;
+        }
+        int index = Math.max(0, Math.min(driver.getCurrentSequenceIndex(), assignedSequence.size() - 1));
+        Stop nextStop = assignedSequence.get(index);
+        if (nextStop.type() != StopType.PICKUP) {
+            return null;
+        }
+        return remainingPickups.stream()
+                .filter(order -> order.getId().equals(nextStop.orderId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private GeoPoint resolvePrePickupRouteAnchor(Driver driver) {
+        if (driver == null || !driver.isPrePickupAugmentable()) {
+            return null;
+        }
+        if (driver.getPendingTargetLocation() != null) {
+            return driver.getPendingTargetLocation();
+        }
+        if (driver.getTargetLocation() != null) {
+            return driver.getTargetLocation();
+        }
+        List<Stop> assignedSequence = driver.getAssignedSequence();
+        if (assignedSequence == null || assignedSequence.isEmpty()) {
+            return null;
+        }
+        int index = Math.max(0, Math.min(driver.getCurrentSequenceIndex(), assignedSequence.size() - 1));
+        return assignedSequence.get(index).location();
+    }
+
+    private double scorePickupCandidate(GeoPoint current,
+                                        GeoPoint routeAnchor,
+                                        Order order) {
+        double distanceKm = current.distanceTo(order.getPickupPoint()) / 1000.0;
+        double readinessScore = Math.max(0.0, 1.0 - order.getPickupDelayHazard());
+        double onRouteScore = 0.0;
+        if (routeAnchor != null) {
+            double detourKm = estimateDetourKm(current, routeAnchor, order.getPickupPoint());
+            onRouteScore = 1.0 / (1.0 + detourKm / 0.55);
+        }
+        return readinessScore * 0.28
+                + onRouteScore * 0.32
+                + computeCorridorAffinity(order.getDropoffPoint()) * 0.16
+                + computeLandingPotential(order.getDropoffPoint()) * 0.10
+                - distanceKm * 0.22;
+    }
+
+    private double estimateDetourKm(GeoPoint origin, GeoPoint anchor, GeoPoint pickup) {
+        if (origin == null || anchor == null || pickup == null) {
+            return Double.MAX_VALUE;
+        }
+        double directMeters = origin.distanceTo(anchor);
+        if (directMeters <= 0.0) {
+            return origin.distanceTo(pickup) / 1000.0;
+        }
+        double viaMeters = origin.distanceTo(pickup) + pickup.distanceTo(anchor);
+        return Math.max(0.0, (viaMeters - directMeters) / 1000.0);
     }
 
     private void insertCheapest(List<Stop> route, Order order, GeoPoint driverPos) {
@@ -142,19 +361,21 @@ public class SequenceOptimizer {
         int bestPickupPos = -1;
         int bestDropoffPos = -1;
 
-        for (int pPos = 0; pPos <= route.size(); pPos++) {
-            for (int dPos = pPos + 1; dPos <= route.size() + 1; dPos++) {
+        for (int pickupPos = 0; pickupPos <= route.size(); pickupPos++) {
+            for (int dropPos = pickupPos + 1; dropPos <= route.size() + 1; dropPos++) {
                 List<Stop> trial = new ArrayList<>(route);
-                trial.add(pPos, pickup);
-                trial.add(dPos, dropoff);
+                trial.add(pickupPos, pickup);
+                trial.add(dropPos, dropoff);
 
-                if (!isOrderConstraintSatisfied(trial)) continue;
+                if (!isOrderConstraintSatisfied(trial)) {
+                    continue;
+                }
 
                 double cost = computeDistanceOnly(driverPos, trial);
                 if (cost < bestCost) {
                     bestCost = cost;
-                    bestPickupPos = pPos;
-                    bestDropoffPos = dPos;
+                    bestPickupPos = pickupPos;
+                    bestDropoffPos = dropPos;
                 }
             }
         }
@@ -168,11 +389,11 @@ public class SequenceOptimizer {
         }
     }
 
-    // ── Local improvement ───────────────────────────────────────────────
-
     private List<Stop> localImprovement(List<Stop> base, List<Order> orders, int iteration) {
         List<Stop> improved = new ArrayList<>(base);
-        if (improved.size() < 4) return null;
+        if (improved.size() < 4) {
+            return null;
+        }
 
         int swapIdx = (iteration * 2 + 1) % (improved.size() - 1);
         if (swapIdx > 0 && swapIdx < improved.size() - 1) {
@@ -184,8 +405,6 @@ public class SequenceOptimizer {
                 improved.set(swapIdx + 1, a);
 
                 if (!isOrderConstraintSatisfied(improved)) {
-                    improved.set(swapIdx, a);
-                    improved.set(swapIdx + 1, b);
                     return null;
                 }
             }
@@ -193,20 +412,11 @@ public class SequenceOptimizer {
         return improved;
     }
 
-    // ── Feasibility — REAL hard constraints ──────────────────────────────
-
-    /**
-     * Validates a sequence against all hard constraints:
-     * 1. Pickup-before-dropoff ordering
-     * 2. Pickup span ≤ 12 minutes
-     * 3. First-order lateness ≤ SLA * 0.7
-     * 4. Cumulative merchant wait ≤ 8 minutes
-     * 5. Detour ratio ≤ 2.0
-     */
     private boolean isFeasible(List<Stop> sequence, List<Order> orders) {
-        if (!isOrderConstraintSatisfied(sequence)) return false;
+        if (!isOrderConstraintSatisfied(sequence)) {
+            return false;
+        }
 
-        // Constraint 2: Pickup span — time from first pickup to last pickup ≤ 12 min
         double firstPickupTime = Double.MAX_VALUE;
         double lastPickupTime = 0;
         for (Stop stop : sequence) {
@@ -216,34 +426,39 @@ public class SequenceOptimizer {
             }
         }
         double pickupSpan = lastPickupTime - firstPickupTime;
-        if (pickupSpan > MAX_PICKUP_SPAN_MINUTES) return false;
+        if (pickupSpan > maxPickupSpanMinutes(orders)) {
+            return false;
+        }
 
-        // Constraint 3: First-order lateness — earliest order's dropoff must not exceed SLA*0.7
         if (!orders.isEmpty()) {
             Order firstOrder = orders.stream()
                     .min(Comparator.comparing(Order::getCreatedAt))
                     .orElse(orders.get(0));
             for (Stop stop : sequence) {
                 if (stop.type() == StopType.DROPOFF && stop.orderId().equals(firstOrder.getId())) {
-                    double maxAllowed = firstOrder.getPromisedEtaMinutes() * SLA_LATENESS_FACTOR;
-                    if (stop.estimatedArrivalMinutes() > maxAllowed) return false;
+                    double maxAllowed = firstOrder.getPromisedEtaMinutes() * slaLatenessFactor(orders);
+                    if (stop.estimatedArrivalMinutes() > maxAllowed) {
+                        return false;
+                    }
                     break;
                 }
             }
         }
 
-        // Constraint 4: Cumulative merchant wait ≤ 8 min
         double cumulativeMerchantWait = computeCumulativeMerchantWait(sequence, orders);
-        if (cumulativeMerchantWait > MAX_MERCHANT_WAIT_MINUTES) return false;
+        if (cumulativeMerchantWait > maxMerchantWaitMinutes(orders)) {
+            return false;
+        }
 
-        // Constraint 5: Detour ratio ≤ 2.0
         double standaloneDistKm = orders.stream()
                 .mapToDouble(o -> o.getPickupPoint().distanceTo(o.getDropoffPoint()) / 1000.0)
                 .sum();
         double totalRouteDistKm = computeSequenceDistanceKm(sequence);
         if (standaloneDistKm > 0) {
             double detourRatio = totalRouteDistKm / standaloneDistKm;
-            if (detourRatio > MAX_DETOUR_RATIO) return false;
+            if (detourRatio > maxDetourRatio(orders)) {
+                return false;
+            }
         }
 
         return true;
@@ -254,30 +469,48 @@ public class SequenceOptimizer {
         for (Stop stop : sequence) {
             if (stop.type() == StopType.PICKUP) {
                 pickedUp.add(stop.orderId());
-            } else if (stop.type() == StopType.DROPOFF) {
-                if (!pickedUp.contains(stop.orderId())) return false;
+            } else if (stop.type() == StopType.DROPOFF && !pickedUp.contains(stop.orderId())) {
+                return false;
             }
         }
         return true;
     }
 
-    // ── Cost computation ────────────────────────────────────────────────
-
-    /**
-     * Route cost = travel distance (km) + merchant wait penalty.
-     * Merchant wait penalty: if driver arrives before merchant is ready,
-     * the idle time incurs a cost proportional to the wait.
-     */
     private double computeRouteCost(GeoPoint start, List<Stop> sequence, List<Order> orders) {
         double totalDistKm = computeDistanceOnly(start, sequence);
         double merchantWaitPenalty = computeCumulativeMerchantWait(sequence, orders);
-        // Weight merchant wait: 1 minute wait ~ 0.5 km penalty
-        return totalDistKm + merchantWaitPenalty * 0.5;
+        boolean cleanThreeOrderWindow = isCleanThreeOrderWindow(orders);
+        boolean trafficOnlyStressWindow = isTrafficOnlyStressWindow(orders);
+        double stressPenalty = stressRegime == StressRegime.SEVERE_STRESS ? 0.9
+                : stressRegime == StressRegime.STRESS ? 0.7 : 0.5;
+        if (trafficOnlyStressWindow) {
+            stressPenalty = 0.58;
+        }
+        RouteObjectiveMetrics metrics = evaluateRouteObjectiveFromSequence(start, sequence, orders);
+        double dropTransitionCost = (1.0 - metrics.remainingDropProximityScore()) * 1.6;
+        double corridorDeviationCost = metrics.deliveryZigZagPenalty() * 1.4
+                + (1.0 - metrics.deliveryCorridorScore()) * 0.9;
+        double lastDropLandingCost = (1.0 - metrics.lastDropLandingScore()) * 1.8;
+        double returnToDemandCost = Math.min(4.0, metrics.expectedPostCompletionEmptyKm()) * 0.7;
+        if (cleanThreeOrderWindow) {
+            corridorDeviationCost *= 0.84;
+            lastDropLandingCost *= 0.88;
+            returnToDemandCost *= 0.82;
+        }
+        if (trafficOnlyStressWindow) {
+            dropTransitionCost *= 0.88;
+            corridorDeviationCost *= 0.72;
+            lastDropLandingCost *= 0.78;
+            returnToDemandCost *= 0.72;
+        }
+        return totalDistKm
+                + merchantWaitPenalty * stressPenalty
+                + dropTransitionCost
+                + corridorDeviationCost
+                + lastDropLandingCost
+                + returnToDemandCost;
     }
 
-    /**
-     * Pure distance cost (km) without penalties — used for cheapest insertion.
-     */
     private double computeDistanceOnly(GeoPoint start, List<Stop> sequence) {
         double totalDist = 0;
         GeoPoint prev = start;
@@ -288,9 +521,6 @@ public class SequenceOptimizer {
         return totalDist / 1000.0;
     }
 
-    /**
-     * Total route distance in km from sequence stops only.
-     */
     private double computeSequenceDistanceKm(List<Stop> sequence) {
         double dist = 0;
         for (int i = 1; i < sequence.size(); i++) {
@@ -299,37 +529,28 @@ public class SequenceOptimizer {
         return dist / 1000.0;
     }
 
-    /**
-     * Calculate cumulative merchant wait across all pickup stops.
-     * If driver arrives before merchantReadyAt, the difference is wait time.
-     */
     private double computeCumulativeMerchantWait(List<Stop> sequence, List<Order> orders) {
         double totalWait = 0;
         for (Stop stop : sequence) {
-            if (stop.type() == StopType.PICKUP) {
-                Order order = orders.stream()
-                        .filter(o -> o.getId().equals(stop.orderId()))
-                        .findFirst().orElse(null);
-                if (order != null && order.getPredictedReadyAt() != null && order.getCreatedAt() != null) {
-                    // Merchant ready time in minutes since order creation
-                    double merchantReadyMin = java.time.Duration.between(
-                            order.getCreatedAt(), order.getPredictedReadyAt()).toSeconds() / 60.0;
-                    double driverArrivalMin = stop.estimatedArrivalMinutes();
-                    if (driverArrivalMin < merchantReadyMin) {
-                        totalWait += (merchantReadyMin - driverArrivalMin);
-                    }
+            if (stop.type() != StopType.PICKUP) {
+                continue;
+            }
+            Order order = orders.stream()
+                    .filter(o -> o.getId().equals(stop.orderId()))
+                    .findFirst()
+                    .orElse(null);
+            if (order != null && order.getPredictedReadyAt() != null && order.getCreatedAt() != null) {
+                double merchantReadyMin = java.time.Duration.between(
+                        order.getCreatedAt(), order.getPredictedReadyAt()).toSeconds() / 60.0;
+                double driverArrivalMin = stop.estimatedArrivalMinutes();
+                if (driverArrivalMin < merchantReadyMin) {
+                    totalWait += merchantReadyMin - driverArrivalMin;
                 }
             }
         }
         return totalWait;
     }
 
-    /**
-     * Compute arrival times for each stop, incorporating:
-     * - Travel time based on speed
-     * - Merchant wait time: if driver arrives before merchant is ready,
-     *   elapsed advances to merchant ready time
-     */
     private void computeArrivalTimes(GeoPoint driverPos, List<Stop> sequence, List<Order> orders) {
         double speedKmh = estimateSpeed();
         double elapsed = 0;
@@ -338,19 +559,18 @@ public class SequenceOptimizer {
         List<Stop> updated = new ArrayList<>();
         for (Stop stop : sequence) {
             double distKm = prev.distanceTo(stop.location()) / 1000.0;
-            double travelTime = (distKm / speedKmh) * 60.0;
-            elapsed += travelTime;
+            elapsed += (distKm / speedKmh) * 60.0;
 
-            // Merchant readiness integration: if pickup and driver arrives early, wait
             if (stop.type() == StopType.PICKUP) {
                 Order order = orders.stream()
                         .filter(o -> o.getId().equals(stop.orderId()))
-                        .findFirst().orElse(null);
+                        .findFirst()
+                        .orElse(null);
                 if (order != null && order.getPredictedReadyAt() != null && order.getCreatedAt() != null) {
                     double merchantReadyMin = java.time.Duration.between(
                             order.getCreatedAt(), order.getPredictedReadyAt()).toSeconds() / 60.0;
                     if (elapsed < merchantReadyMin) {
-                        elapsed = merchantReadyMin; // Wait for merchant
+                        elapsed = merchantReadyMin;
                     }
                 }
             }
@@ -365,9 +585,416 @@ public class SequenceOptimizer {
 
     private double estimateSpeed() {
         double speedKmh = 25.0 * (1.0 - trafficIntensity * 0.5);
-        if (weather == Enums.WeatherProfile.HEAVY_RAIN) speedKmh *= 0.7;
-        if (weather == Enums.WeatherProfile.STORM) speedKmh *= 0.4;
+        if (weather == Enums.WeatherProfile.HEAVY_RAIN) {
+            speedKmh *= 0.7;
+        }
+        if (weather == Enums.WeatherProfile.STORM) {
+            speedKmh *= 0.4;
+        }
         return Math.max(8.0, speedKmh);
+    }
+
+    private double maxPickupSpanMinutes(List<Order> orders) {
+        boolean cleanThreeOrderWindow = isCleanThreeOrderWindow(orders);
+        boolean trafficOnlyStressWindow = isTrafficOnlyStressWindow(orders);
+        if (stressRegime == StressRegime.SEVERE_STRESS) {
+            return 8.0;
+        }
+        if (stressRegime == StressRegime.STRESS) {
+            boolean harshWeather = weather == Enums.WeatherProfile.HEAVY_RAIN
+                    || weather == Enums.WeatherProfile.STORM;
+            if (trafficOnlyStressWindow) {
+                return showcasePickupWave ? 24.0 : 17.5;
+            }
+            if (!harshWeather && cleanThreeOrderWindow) {
+                return showcasePickupWave ? 22.0 : 15.5;
+            }
+            return harshWeather
+                    ? (showcasePickupWave ? 18.0 : 11.0)
+                    : (showcasePickupWave ? 20.0 : 13.5);
+        }
+        if (cleanThreeOrderWindow) {
+            return showcasePickupWave ? 28.0 : 17.0;
+        }
+        return showcasePickupWave ? 28.0 : 15.0;
+    }
+
+    private double maxMerchantWaitMinutes(List<Order> orders) {
+        boolean cleanThreeOrderWindow = isCleanThreeOrderWindow(orders);
+        boolean trafficOnlyStressWindow = isTrafficOnlyStressWindow(orders);
+        if (stressRegime == StressRegime.SEVERE_STRESS) {
+            return 5.0;
+        }
+        if (stressRegime == StressRegime.STRESS) {
+            boolean harshWeather = weather == Enums.WeatherProfile.HEAVY_RAIN
+                    || weather == Enums.WeatherProfile.STORM;
+            if (trafficOnlyStressWindow) {
+                return showcasePickupWave ? 14.0 : 11.5;
+            }
+            if (!harshWeather && cleanThreeOrderWindow) {
+                return showcasePickupWave ? 13.0 : 10.5;
+            }
+            return harshWeather
+                    ? (showcasePickupWave ? 10.0 : 7.0)
+                    : (showcasePickupWave ? 12.0 : 9.0);
+        }
+        if (cleanThreeOrderWindow) {
+            return showcasePickupWave ? 22.0 : 17.0;
+        }
+        return showcasePickupWave ? 22.0 : 15.0;
+    }
+
+    private double maxDetourRatio(List<Order> orders) {
+        boolean cleanThreeOrderWindow = isCleanThreeOrderWindow(orders);
+        boolean trafficOnlyStressWindow = isTrafficOnlyStressWindow(orders);
+        if (stressRegime == StressRegime.SEVERE_STRESS) {
+            return 1.8;
+        }
+        if (stressRegime == StressRegime.STRESS) {
+            boolean harshWeather = weather == Enums.WeatherProfile.HEAVY_RAIN
+                    || weather == Enums.WeatherProfile.STORM;
+            if (trafficOnlyStressWindow) {
+                return showcasePickupWave ? 2.95 : 2.75;
+            }
+            if (!harshWeather && cleanThreeOrderWindow) {
+                return showcasePickupWave ? 2.75 : 2.55;
+            }
+            return harshWeather
+                    ? (showcasePickupWave ? 2.4 : 2.2)
+                    : (showcasePickupWave ? 2.6 : 2.35);
+        }
+        if (cleanThreeOrderWindow) {
+            return showcasePickupWave ? 4.2 : 3.15;
+        }
+        return showcasePickupWave ? 4.2 : 3.0;
+    }
+
+    private double slaLatenessFactor(List<Order> orders) {
+        boolean cleanThreeOrderWindow = isCleanThreeOrderWindow(orders);
+        boolean trafficOnlyStressWindow = isTrafficOnlyStressWindow(orders);
+        if (stressRegime == StressRegime.SEVERE_STRESS) {
+            return 0.58;
+        }
+        if (stressRegime == StressRegime.STRESS) {
+            boolean harshWeather = weather == Enums.WeatherProfile.HEAVY_RAIN
+                    || weather == Enums.WeatherProfile.STORM;
+            if (trafficOnlyStressWindow) {
+                return showcasePickupWave ? 0.80 : 0.76;
+            }
+            if (!harshWeather && cleanThreeOrderWindow) {
+                return showcasePickupWave ? 0.78 : 0.74;
+            }
+            return harshWeather
+                    ? (showcasePickupWave ? 0.72 : 0.64)
+                    : (showcasePickupWave ? 0.76 : 0.70);
+        }
+        if (cleanThreeOrderWindow) {
+            return showcasePickupWave ? 0.88 : 0.74;
+        }
+        return showcasePickupWave ? 0.88 : 0.7;
+    }
+
+    private double scoreDropCandidate(GeoPoint current,
+                                      Order candidate,
+                                      List<Order> remainingDropoffs) {
+        List<Order> futureRemaining = new ArrayList<>(remainingDropoffs);
+        futureRemaining.remove(candidate);
+        double distancePenalty = current.distanceTo(candidate.getDropoffPoint()) / 1000.0;
+        double corridorAffinity = computeCorridorAffinity(candidate.getDropoffPoint());
+        double remainingProgress = computeRemainingProgress(candidate.getDropoffPoint(), futureRemaining);
+        double landingPotential = futureRemaining.isEmpty()
+                ? computeLandingPotential(candidate.getDropoffPoint())
+                : computeLandingPotentialOfFuture(futureRemaining);
+        return corridorAffinity * 0.32
+                + remainingProgress * 0.28
+                + landingPotential * 0.18
+                - distancePenalty * 0.22;
+    }
+
+    private double computeRemainingProgress(GeoPoint currentDrop, List<Order> remaining) {
+        if (remaining.isEmpty()) {
+            return 1.0;
+        }
+        double lat = 0.0;
+        double lng = 0.0;
+        for (Order order : remaining) {
+            lat += order.getDropoffPoint().lat();
+            lng += order.getDropoffPoint().lng();
+        }
+        GeoPoint centroid = new GeoPoint(lat / remaining.size(), lng / remaining.size());
+        double distKm = currentDrop.distanceTo(centroid) / 1000.0;
+        return clamp01(1.0 / (1.0 + distKm / 1.4));
+    }
+
+    private double computeLandingPotentialOfFuture(List<Order> remaining) {
+        return remaining.stream()
+                .mapToDouble(order -> computeLandingPotential(order.getDropoffPoint()))
+                .max()
+                .orElse(0.4);
+    }
+
+    private RouteObjectiveMetrics evaluateRouteObjectiveFromSequence(GeoPoint start,
+                                                                     List<Stop> sequence,
+                                                                     List<Order> orders) {
+        Driver syntheticDriver = new Driver("SEQ-EVAL", "seq-eval", start, "synthetic", Enums.VehicleType.MOTORBIKE);
+        return evaluateRouteObjective(syntheticDriver, sequence, orders);
+    }
+
+    private double computeRemainingDropProximityScore(List<Stop> dropoffs) {
+        if (dropoffs.size() <= 1) {
+            return 1.0;
+        }
+
+        double total = 0.0;
+        int count = 0;
+        for (int i = 0; i < dropoffs.size() - 1; i++) {
+            double lat = 0.0;
+            double lng = 0.0;
+            int remaining = 0;
+            for (int j = i + 1; j < dropoffs.size(); j++) {
+                lat += dropoffs.get(j).location().lat();
+                lng += dropoffs.get(j).location().lng();
+                remaining++;
+            }
+            GeoPoint centroid = new GeoPoint(lat / remaining, lng / remaining);
+            double distKm = dropoffs.get(i).location().distanceTo(centroid) / 1000.0;
+            total += clamp01(1.0 / (1.0 + distKm / 1.6));
+            count++;
+        }
+        return count > 0 ? total / count : 0.6;
+    }
+
+    private double computeDeliveryZigZagPenalty(List<Stop> sequence) {
+        List<GeoPoint> deliveryPath = new ArrayList<>();
+        Stop lastPickup = null;
+        for (Stop stop : sequence) {
+            if (stop.type() == StopType.PICKUP) {
+                lastPickup = stop;
+            }
+        }
+        if (lastPickup != null) {
+            deliveryPath.add(lastPickup.location());
+        }
+        sequence.stream()
+                .filter(stop -> stop.type() == StopType.DROPOFF)
+                .map(Stop::location)
+                .forEach(deliveryPath::add);
+
+        if (deliveryPath.size() <= 2) {
+            return 0.0;
+        }
+
+        double totalPenalty = 0.0;
+        int turns = 0;
+        for (int i = 2; i < deliveryPath.size(); i++) {
+            GeoPoint a = deliveryPath.get(i - 2);
+            GeoPoint b = deliveryPath.get(i - 1);
+            GeoPoint c = deliveryPath.get(i);
+            double v1x = b.lng() - a.lng();
+            double v1y = b.lat() - a.lat();
+            double v2x = c.lng() - b.lng();
+            double v2y = c.lat() - b.lat();
+            double dot = v1x * v2x + v1y * v2y;
+            double mag = Math.sqrt(v1x * v1x + v1y * v1y) * Math.sqrt(v2x * v2x + v2y * v2y);
+            if (mag <= 1e-9) {
+                continue;
+            }
+            double cos = Math.max(-1.0, Math.min(1.0, dot / mag));
+            double turnRadians = Math.acos(cos);
+            totalPenalty += clamp01(turnRadians / Math.PI);
+            turns++;
+        }
+        return turns > 0 ? totalPenalty / turns : 0.0;
+    }
+
+    private double computeDeliveryCorridorScore(List<Stop> dropoffs,
+                                                List<Order> orders,
+                                                double remainingDropProximityScore,
+                                                double zigZagPenalty) {
+        double coherence = computeDropoffCoherence(orders);
+        double corridorAffinity = 0.0;
+        if (context != null) {
+            for (Stop stop : dropoffs) {
+                corridorAffinity += computeCorridorAffinity(stop.location());
+            }
+            corridorAffinity = dropoffs.isEmpty() ? 0.0 : corridorAffinity / dropoffs.size();
+        }
+        return clamp01(
+                coherence * 0.42
+                        + remainingDropProximityScore * 0.24
+                        + corridorAffinity * 0.24
+                        + (1.0 - zigZagPenalty) * 0.10);
+    }
+
+    private double computeLastDropLandingScore(GeoPoint lastDrop) {
+        if (context == null || context.endZoneCandidates().isEmpty()) {
+            return clamp01(0.45 + (context != null ? context.deliveryDemandGradient() * 0.10 : 0.0));
+        }
+
+        double bestScore = 0.0;
+        for (EndZoneCandidate candidate : context.endZoneCandidates()) {
+            double distKm = lastDrop.distanceTo(candidate.position()) / 1000.0;
+            double proximity = 1.0 / (1.0 + distKm / 1.2);
+            double score = candidate.attractionScore() * 0.60
+                    + proximity * 0.25
+                    + (1.0 - candidate.corridorExposure()) * 0.10
+                    + (1.0 - candidate.weatherExposure()) * 0.05;
+            bestScore = Math.max(bestScore, score);
+        }
+        return clamp01(bestScore / 1.4);
+    }
+
+    private double computeExpectedPostCompletionEmptyKm(GeoPoint lastDrop) {
+        if (context == null || context.endZoneCandidates().isEmpty()) {
+            return 1.5;
+        }
+
+        double bestWeightedKm = Double.MAX_VALUE;
+        for (EndZoneCandidate candidate : context.endZoneCandidates()) {
+            double distKm = lastDrop.distanceTo(candidate.position()) / 1000.0;
+            double weightedKm = distKm / Math.max(0.35, candidate.attractionScore());
+            bestWeightedKm = Math.min(bestWeightedKm, weightedKm);
+        }
+        if (bestWeightedKm == Double.MAX_VALUE) {
+            return 1.5;
+        }
+        return Math.max(0.1, bestWeightedKm);
+    }
+
+    private double computeExpectedNextOrderIdleMinutes(double lastDropLandingScore,
+                                                       double expectedPostCompletionEmptyKm) {
+        if (context == null) {
+            return 4.0;
+        }
+
+        double adjusted = context.estimatedIdleMinutes() * (1.0 - lastDropLandingScore * 0.55)
+                + expectedPostCompletionEmptyKm * 0.85
+                + context.endZoneIdleRisk() * 2.0
+                - context.deliveryDemandGradient() * 0.60;
+        return Math.max(0.5, adjusted);
+    }
+
+    private double computeCorridorAffinity(GeoPoint point) {
+        if (context == null || context.dropCorridorCandidates().isEmpty()) {
+            return 0.5;
+        }
+
+        double best = 0.0;
+        for (DropCorridorCandidate candidate : context.dropCorridorCandidates()) {
+            double distKm = point.distanceTo(candidate.anchorPoint()) / 1000.0;
+            double proximity = 1.0 / (1.0 + distKm / 1.4);
+            double score = candidate.corridorScore() * 0.65
+                    + proximity * 0.20
+                    + Math.min(1.0, candidate.demandSignal() / 2.5) * 0.10
+                    + (1.0 - candidate.congestionExposure()) * 0.05;
+            best = Math.max(best, score);
+        }
+        return clamp01(best);
+    }
+
+    private double computeLandingPotential(GeoPoint point) {
+        if (context == null) {
+            return 0.4;
+        }
+        double corridorAffinity = computeCorridorAffinity(point);
+        double endZoneScore = computeLastDropLandingScore(point);
+        return clamp01(corridorAffinity * 0.45 + endZoneScore * 0.55);
+    }
+
+    private double computeDropoffCoherence(List<Order> orders) {
+        if (orders.size() <= 1) {
+            return 1.0;
+        }
+
+        double centroidLat = 0.0;
+        double centroidLng = 0.0;
+        for (Order order : orders) {
+            centroidLat += order.getDropoffPoint().lat();
+            centroidLng += order.getDropoffPoint().lng();
+        }
+        centroidLat /= orders.size();
+        centroidLng /= orders.size();
+
+        double total = 0.0;
+        int pairs = 0;
+        for (int i = 0; i < orders.size(); i++) {
+            double dx1 = orders.get(i).getDropoffPoint().lng() - centroidLng;
+            double dy1 = orders.get(i).getDropoffPoint().lat() - centroidLat;
+            for (int j = i + 1; j < orders.size(); j++) {
+                double dx2 = orders.get(j).getDropoffPoint().lng() - centroidLng;
+                double dy2 = orders.get(j).getDropoffPoint().lat() - centroidLat;
+                double dot = dx1 * dx2 + dy1 * dy2;
+                double mag = Math.sqrt(dx1 * dx1 + dy1 * dy1) * Math.sqrt(dx2 * dx2 + dy2 * dy2);
+                total += mag > 1e-9 ? (dot / mag + 1.0) / 2.0 : 0.5;
+                pairs++;
+            }
+        }
+        return pairs > 0 ? total / pairs : 0.5;
+    }
+
+    private double clamp01(double value) {
+        return Math.max(0.0, Math.min(1.0, value));
+    }
+
+    private boolean isCleanThreeOrderWindow(List<Order> orders) {
+        if (orders.size() < 3) {
+            return false;
+        }
+        boolean harshWeather = weather == Enums.WeatherProfile.HEAVY_RAIN
+                || weather == Enums.WeatherProfile.STORM
+                || (context != null && context.harshWeatherStress());
+        if (harshWeather) {
+            return false;
+        }
+        if (context != null) {
+            return context.thirdOrderFeasibilityScore() >= 0.42
+                    && context.threeOrderSlackBuffer() >= 1.4
+                    && averagePickupDelayHazard(orders) <= 0.30
+                    && computePickupSpreadKm(orders) <= 1.2;
+        }
+        return averagePickupDelayHazard(orders) <= 0.24
+                && computePickupSpreadKm(orders) <= 0.9
+                && computeDropoffCoherence(orders) >= 0.34;
+    }
+
+    private boolean isTrafficOnlyStressWindow(List<Order> orders) {
+        if (orders.size() < 3 || stressRegime != StressRegime.STRESS) {
+            return false;
+        }
+        boolean harshWeather = weather == Enums.WeatherProfile.HEAVY_RAIN
+                || weather == Enums.WeatherProfile.STORM
+                || (context != null && context.harshWeatherStress());
+        if (harshWeather
+                || (weather != Enums.WeatherProfile.CLEAR && weather != Enums.WeatherProfile.LIGHT_RAIN)) {
+            return false;
+        }
+        if (context != null) {
+            return context.thirdOrderFeasibilityScore() >= 0.40
+                    && context.threeOrderSlackBuffer() >= 1.2;
+        }
+        return averagePickupDelayHazard(orders) <= 0.28
+                && computePickupSpreadKm(orders) <= 1.1;
+    }
+
+    private double averagePickupDelayHazard(List<Order> orders) {
+        return orders.stream()
+                .mapToDouble(Order::getPickupDelayHazard)
+                .average()
+                .orElse(1.0);
+    }
+
+    private double computePickupSpreadKm(List<Order> orders) {
+        if (orders.size() <= 1) {
+            return 0.0;
+        }
+        double maxSpreadMeters = 0.0;
+        for (int i = 0; i < orders.size(); i++) {
+            for (int j = i + 1; j < orders.size(); j++) {
+                maxSpreadMeters = Math.max(maxSpreadMeters,
+                        orders.get(i).getPickupPoint().distanceTo(orders.get(j).getPickupPoint()));
+            }
+        }
+        return maxSpreadMeters / 1000.0;
     }
 
     private List<Stop> singleOrderSequence(Driver driver, Order order) {

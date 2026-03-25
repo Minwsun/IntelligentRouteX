@@ -1,39 +1,41 @@
 package com.routechain.ai;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 /**
- * Decision journal — logs every dispatch decision with context, features, and outcome.
- * Used for:
- * - Model training (offline batch retrain)
- * - Replay analysis (what if we chose differently)
- * - Policy evaluation (which policy profile performed best)
- *
- * Ring-buffer capped at MAX_ENTRIES to bound memory.
+ * Decision journal for dispatch decisions.
  */
 public class DecisionLog {
 
     private static final int MAX_ENTRIES = 10_000;
 
-    /**
-     * A single decision entry in the log.
-     */
     public record DecisionEntry(
-            long tick,                   // when decision was made
-            double[] contextFeatures,    // city state at decision time (8D)
-            double[] planFeatures,       // chosen plan features (15D)
-            double predictedUtility,     // what model predicted
-            double actualReward,         // what happened (-1 = pending)
-            String policyUsed,           // which policy profile was active
-            String traceId,              // unique decision trace ID
-            long completionTick          // when outcome was recorded (-1 = pending)
+            long tick,
+            double[] contextFeatures,
+            double[] planFeatures,
+            double predictedUtility,
+            double actualReward,
+            String policyUsed,
+            String traceId,
+            String explanation,
+            long completionTick
     ) {
-        /**
-         * Create a copy with updated actual reward and completion tick.
-         */
         public DecisionEntry withOutcome(double reward, long completedAt) {
-            return new DecisionEntry(tick, contextFeatures, planFeatures,
-                    predictedUtility, reward, policyUsed, traceId, completedAt);
+            return new DecisionEntry(
+                    tick,
+                    contextFeatures,
+                    planFeatures,
+                    predictedUtility,
+                    reward,
+                    policyUsed,
+                    traceId,
+                    explanation,
+                    completedAt
+            );
         }
 
         public boolean isCompleted() {
@@ -44,60 +46,64 @@ public class DecisionLog {
     private final List<DecisionEntry> entries = new ArrayList<>();
     private final Map<String, Integer> traceIdIndex = new HashMap<>();
 
-    // ── Logging ─────────────────────────────────────────────────────────
+    public synchronized void log(long tick,
+                                 double[] contextFeatures,
+                                 double[] planFeatures,
+                                 double predictedUtility,
+                                 String policyUsed,
+                                 String traceId) {
+        log(tick, contextFeatures, planFeatures, predictedUtility, policyUsed, traceId, "");
+    }
 
-    /**
-     * Log a new dispatch decision.
-     */
-    public synchronized void log(long tick, double[] contextFeatures, double[] planFeatures,
-                                  double predictedUtility, String policyUsed, String traceId) {
+    public synchronized void log(long tick,
+                                 double[] contextFeatures,
+                                 double[] planFeatures,
+                                 double predictedUtility,
+                                 String policyUsed,
+                                 String traceId,
+                                 String explanation) {
         DecisionEntry entry = new DecisionEntry(
-                tick, contextFeatures.clone(), planFeatures.clone(),
-                predictedUtility, -1.0, policyUsed, traceId, -1);
+                tick,
+                contextFeatures.clone(),
+                planFeatures.clone(),
+                predictedUtility,
+                -1.0,
+                policyUsed,
+                traceId,
+                explanation,
+                -1
+        );
 
         if (entries.size() >= MAX_ENTRIES) {
-            // Remove oldest and update index
             DecisionEntry removed = entries.remove(0);
             traceIdIndex.remove(removed.traceId());
-            // Shift all indices down by 1
-            traceIdIndex.replaceAll((k, v) -> v - 1);
+            traceIdIndex.replaceAll((key, value) -> value - 1);
         }
 
         entries.add(entry);
         traceIdIndex.put(traceId, entries.size() - 1);
     }
 
-    /**
-     * Record outcome when a plan completes (or fails).
-     *
-     * @param traceId     the decision trace ID
-     * @param actualReward actual utility (e.g., profit, on-time bonus minus penalties)
-     * @param completionTick tick when outcome was observed
-     */
     public synchronized void recordOutcome(String traceId, double actualReward, long completionTick) {
         Integer idx = traceIdIndex.get(traceId);
-        if (idx == null || idx >= entries.size()) return;
+        if (idx == null || idx >= entries.size()) {
+            return;
+        }
 
         DecisionEntry old = entries.get(idx);
-        if (old.isCompleted()) return; // already recorded
+        if (old.isCompleted()) {
+            return;
+        }
 
         entries.set(idx, old.withOutcome(actualReward, completionTick));
     }
 
-    // ── Queries ─────────────────────────────────────────────────────────
-
-    /**
-     * Get all entries where outcome has been recorded.
-     */
     public synchronized List<DecisionEntry> getCompletedEntries() {
         return entries.stream()
                 .filter(DecisionEntry::isCompleted)
                 .toList();
     }
 
-    /**
-     * Get training pairs: (planFeatures, actualReward) from completed entries.
-     */
     public synchronized TrainingData getTrainingData() {
         List<DecisionEntry> completed = getCompletedEntries();
         double[][] features = new double[completed.size()][];
@@ -110,69 +116,221 @@ public class DecisionLog {
         return new TrainingData(features, targets);
     }
 
-    /**
-     * Get training pairs for policy selector: (contextFeatures, policyReward) per policy.
-     */
     public synchronized Map<String, TrainingData> getPolicyTrainingData() {
         Map<String, List<double[]>> featuresByPolicy = new HashMap<>();
         Map<String, List<Double>> targetsByPolicy = new HashMap<>();
 
-        for (DecisionEntry e : entries) {
-            if (!e.isCompleted()) continue;
-            featuresByPolicy.computeIfAbsent(e.policyUsed(), k -> new ArrayList<>())
-                    .add(e.contextFeatures());
-            targetsByPolicy.computeIfAbsent(e.policyUsed(), k -> new ArrayList<>())
-                    .add(e.actualReward());
+        for (DecisionEntry entry : entries) {
+            if (!entry.isCompleted()) {
+                continue;
+            }
+            featuresByPolicy.computeIfAbsent(entry.policyUsed(), key -> new ArrayList<>())
+                    .add(entry.contextFeatures());
+            targetsByPolicy.computeIfAbsent(entry.policyUsed(), key -> new ArrayList<>())
+                    .add(entry.actualReward());
         }
 
         Map<String, TrainingData> result = new HashMap<>();
         for (String policy : featuresByPolicy.keySet()) {
-            List<double[]> fList = featuresByPolicy.get(policy);
-            List<Double> tList = targetsByPolicy.get(policy);
-            double[][] fArr = fList.toArray(new double[0][]);
-            double[] tArr = tList.stream().mapToDouble(Double::doubleValue).toArray();
-            result.put(policy, new TrainingData(fArr, tArr));
+            List<double[]> featureList = featuresByPolicy.get(policy);
+            List<Double> targetList = targetsByPolicy.get(policy);
+            result.put(
+                    policy,
+                    new TrainingData(
+                            featureList.toArray(new double[0][]),
+                            targetList.stream().mapToDouble(Double::doubleValue).toArray()
+                    )
+            );
         }
         return result;
     }
 
-    /**
-     * Get prediction error stats (MAE, RMSE) for model quality monitoring.
-     */
     public synchronized ModelErrorStats getErrorStats() {
         List<DecisionEntry> completed = getCompletedEntries();
-        if (completed.isEmpty()) return new ModelErrorStats(0, 0, 0);
+        if (completed.isEmpty()) {
+            return new ModelErrorStats(0, 0, 0);
+        }
 
-        double sumAbsError = 0;
-        double sumSqError = 0;
-        for (DecisionEntry e : completed) {
-            double error = e.predictedUtility() - e.actualReward();
+        double sumAbsError = 0.0;
+        double sumSqError = 0.0;
+        for (DecisionEntry entry : completed) {
+            double error = entry.predictedUtility() - entry.actualReward();
             sumAbsError += Math.abs(error);
             sumSqError += error * error;
         }
-        int n = completed.size();
+        int sampleCount = completed.size();
         return new ModelErrorStats(
-                sumAbsError / n,
-                Math.sqrt(sumSqError / n),
-                n);
+                sumAbsError / sampleCount,
+                Math.sqrt(sumSqError / sampleCount),
+                sampleCount
+        );
     }
 
-    // ── Accessors ───────────────────────────────────────────────────────
+    public synchronized BehaviorStats getBehaviorStats() {
+        int holdCount = 0;
+        int launchCount = 0;
+        int downgradeCount = 0;
+        int augmentCount = 0;
+        int realAssignmentCount = 0;
+        int completedAssignmentCount = 0;
+        int recoveredAssignmentCount = 0;
+        int completedAugmentCount = 0;
+        int recoveredAugmentCount = 0;
 
-    public synchronized int size() { return entries.size(); }
-    public synchronized int completedCount() { return (int) entries.stream().filter(DecisionEntry::isCompleted).count(); }
+        for (DecisionEntry entry : entries) {
+            if (isHoldBehavior(entry)) {
+                holdCount++;
+                continue;
+            }
+
+            if (isRealAssignment(entry)) {
+                realAssignmentCount++;
+                if (isLaunchBehavior(entry)) {
+                    launchCount++;
+                }
+                if (isDowngradeBehavior(entry)) {
+                    downgradeCount++;
+                }
+                if (isAugmentBehavior(entry)) {
+                    augmentCount++;
+                }
+                if (entry.isCompleted()) {
+                    completedAssignmentCount++;
+                    if (entry.actualReward() >= 0.0) {
+                        recoveredAssignmentCount++;
+                    }
+                    if (isAugmentBehavior(entry)) {
+                        completedAugmentCount++;
+                        if (entry.actualReward() >= 0.0) {
+                            recoveredAugmentCount++;
+                        }
+                    }
+                }
+            }
+        }
+
+        int totalDecisionCount = entries.size();
+        return new BehaviorStats(
+                totalDecisionCount,
+                realAssignmentCount,
+                holdCount,
+                launchCount,
+                downgradeCount,
+                augmentCount,
+                completedAssignmentCount,
+                recoveredAssignmentCount,
+                completedAugmentCount,
+                recoveredAugmentCount,
+                rate(realAssignmentCount, totalDecisionCount),
+                rate(holdCount, totalDecisionCount),
+                rate(launchCount, totalDecisionCount),
+                rate(downgradeCount, totalDecisionCount),
+                rate(augmentCount, totalDecisionCount),
+                rate(recoveredAssignmentCount, completedAssignmentCount),
+                rate(recoveredAugmentCount, completedAugmentCount)
+        );
+    }
+
+    public synchronized int size() {
+        return entries.size();
+    }
+
+    public synchronized int completedCount() {
+        return (int) entries.stream().filter(DecisionEntry::isCompleted).count();
+    }
+
+    public synchronized List<DecisionEntry> getRecentEntries(int limit) {
+        if (limit <= 0 || entries.isEmpty()) {
+            return List.of();
+        }
+        int fromIndex = Math.max(0, entries.size() - limit);
+        return List.copyOf(entries.subList(fromIndex, entries.size()));
+    }
 
     public synchronized void clear() {
         entries.clear();
         traceIdIndex.clear();
     }
 
-    // ── Data classes ────────────────────────────────────────────────────
+    private boolean isRealAssignment(DecisionEntry entry) {
+        return !isHoldBehavior(entry) && entry.planFeatures().length > 0;
+    }
+
+    private boolean isHoldBehavior(DecisionEntry entry) {
+        return containsExplanation(entry, "held for third order");
+    }
+
+    private boolean isLaunchBehavior(DecisionEntry entry) {
+        return containsExplanation(entry, "launched clean 3-wave");
+    }
+
+    private boolean isDowngradeBehavior(DecisionEntry entry) {
+        return containsExplanation(entry, "downgraded due to severe stress");
+    }
+
+    private boolean isAugmentBehavior(DecisionEntry entry) {
+        if (entry.traceId() != null && entry.traceId().contains("-AUG")) {
+            return true;
+        }
+        return containsExplanation(entry, "augment")
+                || containsExplanation(entry, "extended to 4 on-route")
+                || containsExplanation(entry, "extended to 5 on-route");
+    }
+
+    private boolean containsExplanation(DecisionEntry entry, String token) {
+        return entry.explanation() != null
+                && entry.explanation().toLowerCase(Locale.ROOT).contains(token);
+    }
+
+    private double rate(int numerator, int denominator) {
+        if (denominator <= 0) {
+            return 0.0;
+        }
+        return numerator * 100.0 / denominator;
+    }
 
     public record TrainingData(double[][] features, double[] targets) {
-        public int size() { return targets.length; }
-        public boolean isEmpty() { return targets.length == 0; }
+        public int size() {
+            return targets.length;
+        }
+
+        public boolean isEmpty() {
+            return targets.length == 0;
+        }
     }
 
     public record ModelErrorStats(double mae, double rmse, int sampleCount) {}
+
+    public record BehaviorStats(
+            int totalDecisionCount,
+            int realAssignmentCount,
+            int holdCount,
+            int launchCount,
+            int downgradeCount,
+            int augmentCount,
+            int completedAssignmentCount,
+            int recoveredAssignmentCount,
+            int completedAugmentCount,
+            int recoveredAugmentCount,
+            double realAssignmentRate,
+            double holdRate,
+            double launchRate,
+            double downgradeRate,
+            double augmentRate,
+            double recoveryRate,
+            double augmentRecoveryRate
+    ) {
+        public String toSummary() {
+            return String.format(
+                    "realAssign=%.1f%% hold=%.1f%% launch=%.1f%% downgrade=%.1f%% augment=%.1f%% recover=%.1f%% augmentRecover=%.1f%%",
+                    realAssignmentRate,
+                    holdRate,
+                    launchRate,
+                    downgradeRate,
+                    augmentRate,
+                    recoveryRate,
+                    augmentRecoveryRate
+            );
+        }
+    }
 }

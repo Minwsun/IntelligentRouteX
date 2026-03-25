@@ -56,6 +56,14 @@ public class Driver {
     // ── Route waypoints ─────────────────────────────────────────────────
     private final List<GeoPoint> routeWaypoints = new ArrayList<>();
     private volatile int currentWaypointIndex = 0;
+    private volatile String routeRequestId;
+    private volatile int routeLatencyTicksRemaining = 0;
+    private volatile GeoPoint pendingTargetLocation;
+    private volatile DriverState pendingRouteState;
+    private volatile int pendingSequenceIndex = -1;
+    private volatile int activeRouteSequenceIndex = -1;
+    private volatile boolean firstPickupCompleted = false;
+    private volatile boolean routeLockedAfterFirstPickup = false;
 
     // ── Productivity accumulators ────────────────────────────────────────
     private volatile long onlineTicks = 0;
@@ -114,11 +122,18 @@ public class Driver {
     public DriverState getState() { return state; }
     public String getActiveBundleId() { return activeBundleId; }
     public GeoPoint getTargetLocation() { return targetLocation; }
+    public GeoPoint getPendingTargetLocation() { return pendingTargetLocation; }
     public double getSpeedKmh() { return speedKmh; }
     public double getHeading() { return heading; }
     public Instant getLastSeenAt() { return lastSeenAt; }
     public List<String> getActiveOrderIds() { return List.copyOf(activeOrderIds); }
     public int getCurrentOrderCount() { return activeOrderIds.size(); }
+    public String getRouteRequestId() { return routeRequestId; }
+    public int getRouteLatencyTicksRemaining() { return routeLatencyTicksRemaining; }
+    public DriverState getPendingRouteState() { return pendingRouteState; }
+    public int getPendingSequenceIndex() { return pendingSequenceIndex; }
+    public int getActiveRouteSequenceIndex() { return activeRouteSequenceIndex; }
+    public boolean hasCompletedFirstPickup() { return firstPickupCompleted; }
 
     // ── Productivity getters ────────────────────────────────────────────
     public long getOnlineTicks() { return onlineTicks; }
@@ -178,11 +193,23 @@ public class Driver {
         this.lastSeenAt = Instant.now();
     }
     public void setTargetLocation(GeoPoint target) { this.targetLocation = target; }
+    public void setPendingTargetLocation(GeoPoint target) { this.pendingTargetLocation = target; }
     public void setSpeedKmh(double speed) { this.speedKmh = speed; }
     public void setHeading(double heading) { this.heading = heading; }
-    public void addOrder(String orderId) { activeOrderIds.add(orderId); }
+    public void addOrder(String orderId) {
+        if (orderId != null && !activeOrderIds.contains(orderId)) {
+            activeOrderIds.add(orderId);
+        }
+    }
     public void removeOrder(String orderId) { activeOrderIds.remove(orderId); }
     public void setActiveBundleId(String bundleId) { this.activeBundleId = bundleId; }
+    public void setRouteRequestId(String routeRequestId) { this.routeRequestId = routeRequestId; }
+    public void setRouteLatencyTicksRemaining(int routeLatencyTicksRemaining) {
+        this.routeLatencyTicksRemaining = Math.max(0, routeLatencyTicksRemaining);
+    }
+    public void setPendingRouteState(DriverState pendingRouteState) {
+        this.pendingRouteState = pendingRouteState;
+    }
 
     // ── Productivity updates ────────────────────────────────────────────
     /** Call once per tick to accumulate time-based productivity metrics. */
@@ -288,8 +315,25 @@ public class Driver {
     private int currentSequenceIndex = 0;
 
     public void setAssignedSequence(List<com.routechain.simulation.DispatchPlan.Stop> sequence) {
+        setAssignedSequence(sequence, true);
+    }
+
+    public void replaceAssignedSequenceBeforeFirstPickup(List<com.routechain.simulation.DispatchPlan.Stop> sequence) {
+        setAssignedSequence(sequence, !routeLockedAfterFirstPickup);
+    }
+
+    private void setAssignedSequence(List<com.routechain.simulation.DispatchPlan.Stop> sequence,
+                                     boolean resetPickupProgress) {
         this.assignedSequence = sequence != null ? List.copyOf(sequence) : null;
         this.currentSequenceIndex = 0;
+        if (resetPickupProgress) {
+            this.firstPickupCompleted = false;
+            this.routeLockedAfterFirstPickup = false;
+        }
+        this.activeRouteSequenceIndex = -1;
+        if (sequence == null) {
+            clearPendingRoute();
+        }
     }
 
     public List<com.routechain.simulation.DispatchPlan.Stop> getAssignedSequence() {
@@ -306,6 +350,84 @@ public class Driver {
 
     public boolean isAvailable() {
         return state == DriverState.ONLINE_IDLE && activeOrderIds.isEmpty();
+    }
+
+    public boolean isPrePickupAugmentable() {
+        if (assignedSequence == null || assignedSequence.isEmpty()) {
+            return false;
+        }
+        if (routeLockedAfterFirstPickup || currentSequenceIndex > 0) {
+            return false;
+        }
+        return !activeOrderIds.isEmpty()
+                && (state == DriverState.ROUTE_PENDING || state == DriverState.PICKUP_EN_ROUTE);
+    }
+
+    public boolean isRouteLockedAfterFirstPickup() {
+        return routeLockedAfterFirstPickup;
+    }
+
+    public void prepareRouteRequest(String requestId,
+                                    GeoPoint pendingTargetLocation,
+                                    DriverState pendingRouteState,
+                                    int latencyTicks) {
+        prepareRouteRequest(requestId, pendingTargetLocation, pendingRouteState, latencyTicks, -1);
+    }
+
+    public void prepareRouteRequest(String requestId,
+                                    GeoPoint pendingTargetLocation,
+                                    DriverState pendingRouteState,
+                                    int latencyTicks,
+                                    int sequenceIndex) {
+        clearRouteWaypoints();
+        this.targetLocation = null;
+        this.routeRequestId = requestId;
+        this.pendingTargetLocation = pendingTargetLocation;
+        this.pendingRouteState = pendingRouteState;
+        this.routeLatencyTicksRemaining = Math.max(0, latencyTicks);
+        this.pendingSequenceIndex = sequenceIndex;
+        this.activeRouteSequenceIndex = -1;
+    }
+
+    public void tickRouteLatency() {
+        if (routeLatencyTicksRemaining > 0) {
+            routeLatencyTicksRemaining--;
+        }
+    }
+
+    public boolean isRouteReadyForActivation() {
+        return pendingTargetLocation != null
+                && pendingRouteState != null
+                && routeLatencyTicksRemaining <= 0
+                && hasRouteWaypoints();
+    }
+
+    public DriverState activatePendingRoute() {
+        DriverState targetState = pendingRouteState;
+        this.targetLocation = pendingTargetLocation;
+        this.activeRouteSequenceIndex = pendingSequenceIndex;
+        this.pendingTargetLocation = null;
+        this.pendingRouteState = null;
+        this.routeLatencyTicksRemaining = 0;
+        this.routeRequestId = null;
+        this.pendingSequenceIndex = -1;
+        return targetState;
+    }
+
+    public void clearPendingRoute() {
+        this.routeRequestId = null;
+        this.routeLatencyTicksRemaining = 0;
+        this.pendingTargetLocation = null;
+        this.pendingRouteState = null;
+        this.pendingSequenceIndex = -1;
+        this.activeRouteSequenceIndex = -1;
+    }
+
+    public void markFirstPickupCompleted() {
+        if (!firstPickupCompleted) {
+            this.firstPickupCompleted = true;
+            this.routeLockedAfterFirstPickup = true;
+        }
     }
 
     // ── Motion state machine getters/setters ────────────────────────────
@@ -342,4 +464,3 @@ public class Driver {
         }
     }
 }
-

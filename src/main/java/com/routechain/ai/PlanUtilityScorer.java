@@ -28,6 +28,10 @@ public class PlanUtilityScorer {
     private static final double W_END_STATE = 0.07;
     private static final double W_NEXT_ORDER = 0.06;
     private static final double W_FUTURE_ZONE_LANDING = 0.08;
+    private static final double W_REMAINING_DROP_PROXIMITY = 0.07;
+    private static final double W_DELIVERY_CORRIDOR = 0.10;
+    private static final double W_LAST_DROP_LANDING = 0.12;
+    private static final double W_VISIBLE_CLEAN_WAVE = 0.14;
 
     private static final double P_DEADHEAD = 0.24;
     private static final double P_MERCHANT_WAIT = 0.06;
@@ -35,31 +39,47 @@ public class PlanUtilityScorer {
     private static final double P_LATE_RISK = 0.24;
     private static final double P_CANCEL_RISK = 0.14;
     private static final double P_OVERLOAD = 0.03;
+    private static final double P_POST_COMPLETION_EMPTY = 0.10;
+    private static final double P_ZIGZAG = 0.08;
 
     private static final double PROFIT_NORM = 50000.0;
     private static final double DEADHEAD_THRESHOLD_KM = 5.0;
     private static final double MERCHANT_WAIT_THRESHOLD_MIN = 8.0;
 
     public double score(DispatchPlan plan) {
+        return score(plan, StressRegime.NORMAL);
+    }
+
+    public double score(DispatchPlan plan, StressRegime stressRegime) {
+        double positiveWeight = positiveWeightFactor(stressRegime);
+        double futureWeight = futureWeightFactor(stressRegime);
+        double penaltyWeight = penaltyWeightFactor(stressRegime);
         double utility = 0.0;
 
-        utility += W_ON_TIME * clamp01(plan.getOnTimeProbability());
+        utility += W_ON_TIME * positiveWeight * clamp01(plan.getOnTimeProbability());
         utility += W_PROFIT * clamp01(plan.getDriverProfit() / PROFIT_NORM);
-        utility += W_PICKUP_WAVE * computePickupWaveEfficiency(plan.getSequence());
-        utility += W_PICKUP_COMPACTNESS * computePickupWaveCompactness(plan.getSequence());
-        utility += W_MERCHANT_ALIGNMENT * computeMerchantReadinessAlignment(plan);
-        utility += W_DROP_EFFICIENCY * clamp01(plan.getBundleEfficiency());
-        utility += W_FIRST_ORDER_PROTECTION * computeFirstOrderProtection(plan);
-        utility += W_END_STATE * clamp01(plan.getEndZoneOpportunity());
-        utility += W_NEXT_ORDER * clamp01(plan.getNextOrderAcquisitionScore());
-        utility += W_FUTURE_ZONE_LANDING * computeFutureZoneLandingScore(plan);
+        utility += W_PICKUP_WAVE * futureWeight * computePickupWaveEfficiency(plan.getSequence());
+        utility += W_PICKUP_COMPACTNESS * positiveWeight * computePickupWaveCompactness(plan.getSequence());
+        utility += W_MERCHANT_ALIGNMENT * positiveWeight * computeMerchantReadinessAlignment(plan);
+        utility += W_DROP_EFFICIENCY * futureWeight * clamp01(plan.getBundleEfficiency());
+        utility += W_FIRST_ORDER_PROTECTION * positiveWeight * computeFirstOrderProtection(plan);
+        utility += W_END_STATE * futureWeight * clamp01(plan.getEndZoneOpportunity());
+        utility += W_NEXT_ORDER * futureWeight * clamp01(plan.getNextOrderAcquisitionScore());
+        utility += W_FUTURE_ZONE_LANDING * futureWeight * computeFutureZoneLandingScore(plan);
+        utility += W_REMAINING_DROP_PROXIMITY * futureWeight * clamp01(plan.getRemainingDropProximityScore());
+        utility += W_DELIVERY_CORRIDOR * positiveWeight * clamp01(plan.getDeliveryCorridorScore());
+        utility += W_LAST_DROP_LANDING * futureWeight * clamp01(plan.getLastDropLandingScore());
+        utility += W_VISIBLE_CLEAN_WAVE * futureWeight * computeVisibleCleanWaveBonus(plan, stressRegime);
 
-        utility -= P_DEADHEAD * clamp01(plan.getPredictedDeadheadKm() / DEADHEAD_THRESHOLD_KM);
-        utility -= P_MERCHANT_WAIT * computeMerchantWaitPenalty(plan);
-        utility -= P_CONGESTION * clamp01(plan.getCongestionPenalty());
-        utility -= P_LATE_RISK * square(clamp01(plan.getLateRisk()));
-        utility -= P_CANCEL_RISK * clamp01(plan.getCancellationRisk());
-        utility -= P_OVERLOAD * computeOverloadPenalty(plan.getBundleSize());
+        utility -= P_DEADHEAD * penaltyWeight * clamp01(plan.getPredictedDeadheadKm() / DEADHEAD_THRESHOLD_KM);
+        utility -= P_MERCHANT_WAIT * positiveWeight * computeMerchantWaitPenalty(plan);
+        utility -= P_CONGESTION * penaltyWeight * clamp01(plan.getCongestionPenalty());
+        utility -= P_LATE_RISK * penaltyWeight * square(clamp01(plan.getLateRisk()));
+        utility -= P_CANCEL_RISK * penaltyWeight * clamp01(plan.getCancellationRisk());
+        utility -= P_OVERLOAD * penaltyWeight * computeOverloadPenalty(plan.getBundleSize(), stressRegime);
+        utility -= P_POST_COMPLETION_EMPTY * penaltyWeight
+                * clamp01(plan.getExpectedPostCompletionEmptyKm() / 3.0);
+        utility -= P_ZIGZAG * penaltyWeight * clamp01(plan.getDeliveryZigZagPenalty());
 
         return Math.max(0.001, utility);
     }
@@ -153,11 +173,16 @@ public class PlanUtilityScorer {
     }
 
     private double computeFutureZoneLandingScore(DispatchPlan plan) {
-        double landingValue = clamp01(plan.getEndZoneOpportunity()) * 0.55
-                + clamp01(plan.getNextOrderAcquisitionScore()) * 0.45;
+        double landingValue = clamp01(plan.getEndZoneOpportunity()) * 0.32
+                + clamp01(plan.getNextOrderAcquisitionScore()) * 0.20
+                + clamp01(plan.getLastDropLandingScore()) * 0.28
+                + clamp01(plan.getDeliveryCorridorScore()) * 0.12
+                + clamp01(plan.getRemainingDropProximityScore()) * 0.08;
         double riskPenalty = clamp01(plan.getCongestionPenalty()) * 0.50
-                + clamp01(plan.getCancellationRisk()) * 0.15;
-        return clamp01(landingValue * (1.0 - riskPenalty));
+                + clamp01(plan.getCancellationRisk()) * 0.15
+                + clamp01(plan.getDeliveryZigZagPenalty()) * 0.20
+                + clamp01(plan.getExpectedPostCompletionEmptyKm() / 3.0) * 0.15;
+        return clamp01(landingValue * (1.0 - Math.min(0.85, riskPenalty)));
     }
 
     private double computeMerchantWaitPenalty(DispatchPlan plan) {
@@ -181,9 +206,59 @@ public class PlanUtilityScorer {
         return clamp01(totalWaitMinutes / (MERCHANT_WAIT_THRESHOLD_MIN * Math.max(1, plan.getOrders().size())));
     }
 
-    private double computeOverloadPenalty(int bundleSize) {
-        double overloadPenalty = bundleSize > 3 ? (bundleSize - 3) * 0.3 : 0.0;
+    private double computeOverloadPenalty(int bundleSize, StressRegime stressRegime) {
+        if (bundleSize == 3 && stressRegime != StressRegime.SEVERE_STRESS) {
+            return 0.0;
+        }
+        int overloadStart = stressRegime == StressRegime.NORMAL ? 3 : 2;
+        double overloadPenalty = bundleSize > overloadStart
+                ? (bundleSize - overloadStart) * (stressRegime == StressRegime.SEVERE_STRESS ? 0.5 : 0.35)
+                : 0.0;
         return clamp01(overloadPenalty);
+    }
+
+    private double computeVisibleCleanWaveBonus(DispatchPlan plan, StressRegime stressRegime) {
+        if (plan.getBundleSize() < 3) {
+            return 0.0;
+        }
+        double compactness = computePickupWaveCompactness(plan.getSequence());
+        double readiness = computeMerchantReadinessAlignment(plan);
+        double corridor = clamp01(plan.getDeliveryCorridorScore());
+        double landing = clamp01(plan.getLastDropLandingScore());
+        double firstOrderProtection = computeFirstOrderProtection(plan);
+        double base = compactness * 0.24
+                + readiness * 0.20
+                + corridor * 0.24
+                + landing * 0.18
+                + firstOrderProtection * 0.14;
+        if (stressRegime == StressRegime.SEVERE_STRESS) {
+            return base * 0.35;
+        }
+        return base;
+    }
+
+    private double positiveWeightFactor(StressRegime stressRegime) {
+        return switch (stressRegime) {
+            case NORMAL -> 1.0;
+            case STRESS -> 1.25;
+            case SEVERE_STRESS -> 1.45;
+        };
+    }
+
+    private double futureWeightFactor(StressRegime stressRegime) {
+        return switch (stressRegime) {
+            case NORMAL -> 1.0;
+            case STRESS -> 0.72;
+            case SEVERE_STRESS -> 0.48;
+        };
+    }
+
+    private double penaltyWeightFactor(StressRegime stressRegime) {
+        return switch (stressRegime) {
+            case NORMAL -> 1.0;
+            case STRESS -> 1.28;
+            case SEVERE_STRESS -> 1.55;
+        };
     }
 
     private Stop findStop(List<Stop> sequence, String orderId, StopType type) {

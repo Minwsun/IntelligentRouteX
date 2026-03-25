@@ -66,6 +66,11 @@ public class DriverMotionEngine {
      */
     public void moveDriver(Driver driver, WeatherProfile weather,
                            double globalTrafficIntensity, int subTickSeconds) {
+        if (driver.getState() == com.routechain.domain.Enums.DriverState.ROUTE_PENDING) {
+            driver.setSpeedKmh(0);
+            return;
+        }
+
         // Handle delay states first
         if (driver.getMicroDelayTicksRemaining() > 0) {
             driver.setMicroDelayTicksRemaining(driver.getMicroDelayTicksRemaining() - 1);
@@ -218,13 +223,9 @@ public class DriverMotionEngine {
                 }
             }
         } else {
-            // Direct movement toward target if no waypoints
-            double dist = current.distanceTo(target);
-            if (dist <= remainingDist) {
-                current = target;
-            } else {
-                current = current.moveTowards(target, remainingDist);
-            }
+            // Routed states must wait for actual waypoints instead of cutting direct lines.
+            driver.setSpeedKmh(0);
+            return;
         }
         driver.setCurrentLocation(current);
         

@@ -13,7 +13,7 @@ public final class Enums {
     }
 
     public enum DriverState {
-        OFFLINE, ONLINE_IDLE, RESERVED, PICKUP_EN_ROUTE,
+        OFFLINE, ONLINE_IDLE, RESERVED, ROUTE_PENDING, PICKUP_EN_ROUTE,
         WAITING_PICKUP, DELIVERING, REPOSITIONING
     }
 

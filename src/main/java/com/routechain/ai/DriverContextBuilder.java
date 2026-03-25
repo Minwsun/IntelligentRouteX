@@ -1,6 +1,7 @@
 package com.routechain.ai;
 
 import com.routechain.ai.DriverDecisionContext.EndZoneCandidate;
+import com.routechain.ai.DriverDecisionContext.DropCorridorCandidate;
 import com.routechain.ai.DriverDecisionContext.OrderCluster;
 import com.routechain.domain.Driver;
 import com.routechain.domain.Enums.WeatherProfile;
@@ -27,7 +28,7 @@ import java.util.UUID;
 public class DriverContextBuilder {
 
     /** Maximum minutes a driver is willing to travel for pickup. */
-    private static final double BASE_REACHABILITY_HORIZON_MINUTES = 8.0;
+    private static final double BASE_REACHABILITY_HORIZON_MINUTES = 9.0;
 
     /** Maximum distance (meters) between pickups to be in the same cluster. */
     private static final double CLUSTER_RADIUS_METERS = 1500.0;
@@ -37,9 +38,6 @@ public class DriverContextBuilder {
 
     /** Number of top end-zone candidates to include in context. */
     private static final int TOP_END_ZONES = 3;
-
-    /** Minimum synergy threshold for cluster inclusion. */
-    private static final double SYNERGY_THRESHOLD = 0.35;
 
     private final NearbyOrderIndexer orderIndex;
     private final SpatiotemporalField field;
@@ -110,15 +108,52 @@ public class DriverContextBuilder {
         int nearReadyOrders = (int) reachable.stream()
                 .filter(o -> estimateReadySlackMinutes(o, currentTime) <= 1.5)
                 .count();
+        double effectiveSlaSlackMinutes = computeEffectiveSlaSlackMinutes(
+                pos, reachable, currentTime, speedKmh, trafficIntensity);
+        int nearReadySameMerchantCount = computeNearReadySameMerchantCount(reachable, currentTime);
+        int compactClusterCount = (int) clusters.stream()
+                .filter(cluster -> cluster.spreadMeters() <= 350.0)
+                .count();
+        int localReachableBacklog = reachable.size();
+        boolean harshWeatherStress = isHarshWeatherStress(weather, localWeatherExposure, localCorridorExposure);
+        double thirdOrderFeasibilityScore = computeThirdOrderFeasibilityScore(
+                localReachableBacklog,
+                compactClusterCount,
+                nearReadyOrders,
+                nearReadySameMerchantCount,
+                effectiveSlaSlackMinutes,
+                localWeatherExposure,
+                localCorridorExposure,
+                localSpike);
+        double threeOrderSlackBuffer = computeThreeOrderSlackBuffer(
+                effectiveSlaSlackMinutes,
+                localWeatherExposure,
+                localCorridorExposure,
+                currentWeather);
+        double waveAssemblyPressure = computeWaveAssemblyPressure(
+                localReachableBacklog,
+                forecast5m,
+                forecast10m,
+                localSpike,
+                localShortage,
+                compactClusterCount,
+                nearReadyOrders);
 
         // 4. Estimate local traffic
         double localTraffic = estimateLocalTraffic(pos, trafficIntensity);
 
         // 5. End-zone candidates
         List<EndZoneCandidate> endZones = findTopEndZones(pos);
+        List<DropCorridorCandidate> dropCorridors = buildDropCorridorCandidates(pos, reachable);
+        double deliveryDemandGradient = computeDeliveryDemandGradient(
+                localDemand, dropCorridors, endZones);
+        double endZoneIdleRisk = computeEndZoneIdleRisk(endZones, localShortage, localDensity);
 
         // 6. Estimated idle time
         double idleMinutes = estimateIdleTime(localDemand, localShortage);
+        StressRegime stressRegime = deriveStressRegime(
+                localTraffic, weather, localWeatherExposure,
+                localCorridorExposure, localShortage, localReachableBacklog);
 
         return new DriverDecisionContext(
                 driver, reachable, clusters,
@@ -127,7 +162,13 @@ public class DriverContextBuilder {
                 localShortage,
                 localDensity, localSpike,
                 localWeatherExposure, localCorridorExposure,
-                localAttraction, idleMinutes, nearReadyOrders, endZones
+                localAttraction, idleMinutes, nearReadyOrders,
+                effectiveSlaSlackMinutes, nearReadySameMerchantCount,
+                compactClusterCount, localReachableBacklog,
+                harshWeatherStress, thirdOrderFeasibilityScore,
+                threeOrderSlackBuffer, waveAssemblyPressure,
+                deliveryDemandGradient, endZoneIdleRisk, dropCorridors,
+                endZones, stressRegime
         );
     }
 
@@ -162,7 +203,7 @@ public class DriverContextBuilder {
                 double dist = centroid.distanceTo(sorted.get(j).getPickupPoint());
                 if (dist <= computeClusterRadiusMeters()) {
                     double synergy = computeSynergy(sorted.get(i), sorted.get(j));
-                    if (synergy > SYNERGY_THRESHOLD) {
+                    if (synergy > computeSynergyThreshold()) {
                         members.add(sorted.get(j));
                         assigned[j] = true;
                         centroid = recomputeCentroid(members);
@@ -300,6 +341,152 @@ public class DriverContextBuilder {
         return maxDist;
     }
 
+    private double computeEffectiveSlaSlackMinutes(GeoPoint driverPos,
+                                                   List<Order> reachable,
+                                                   Instant currentTime,
+                                                   double speedKmh,
+                                                   double trafficIntensity) {
+        if (reachable.isEmpty()) {
+            return 15.0;
+        }
+
+        double minSlack = Double.POSITIVE_INFINITY;
+        for (Order order : reachable) {
+            double elapsedMinutes = Duration.between(order.getCreatedAt(), currentTime)
+                    .toSeconds() / 60.0;
+            double travelMinutes = estimateTravelMinutes(driverPos, order, speedKmh, trafficIntensity);
+            double readySlackMinutes = Math.max(0.0, estimateReadySlackMinutes(order, currentTime));
+            double slack = order.getPromisedEtaMinutes()
+                    - elapsedMinutes
+                    - travelMinutes
+                    - Math.min(4.0, readySlackMinutes);
+            minSlack = Math.min(minSlack, slack);
+        }
+        return minSlack == Double.POSITIVE_INFINITY ? 15.0 : minSlack;
+    }
+
+    private int computeNearReadySameMerchantCount(List<Order> reachable, Instant currentTime) {
+        java.util.Map<String, Integer> merchantCounts = new java.util.HashMap<>();
+        for (Order order : reachable) {
+            if (estimateReadySlackMinutes(order, currentTime) > 1.5) {
+                continue;
+            }
+            String merchantId = order.getMerchantId();
+            if (merchantId == null || merchantId.isBlank()) {
+                continue;
+            }
+            merchantCounts.merge(merchantId, 1, Integer::sum);
+        }
+
+        int total = 0;
+        for (Order order : reachable) {
+            if (estimateReadySlackMinutes(order, currentTime) > 1.5) {
+                continue;
+            }
+            String merchantId = order.getMerchantId();
+            if (merchantId == null || merchantId.isBlank()) {
+                continue;
+            }
+            if (merchantCounts.getOrDefault(merchantId, 0) >= 2) {
+                total++;
+            }
+        }
+        return total;
+    }
+
+    private StressRegime deriveStressRegime(double localTraffic,
+                                            WeatherProfile weather,
+                                            double localWeatherExposure,
+                                            double localCorridorExposure,
+                                            double localShortage,
+                                            int localReachableBacklog) {
+        double backlogPressure = Math.min(1.0, localReachableBacklog / 8.0);
+        double stressScore = localTraffic * 0.28
+                + localWeatherExposure * 0.24
+                + localCorridorExposure * 0.20
+                + Math.min(1.0, localShortage) * 0.18
+                + backlogPressure * 0.10;
+
+        if (weather == WeatherProfile.STORM
+                || localWeatherExposure >= 0.92
+                || localCorridorExposure >= 0.93
+                || stressScore >= 0.84) {
+            return StressRegime.SEVERE_STRESS;
+        }
+        if (weather == WeatherProfile.HEAVY_RAIN
+                || localTraffic >= 0.58
+                || localCorridorExposure >= 0.68
+                || stressScore >= 0.60) {
+            return StressRegime.STRESS;
+        }
+        return StressRegime.NORMAL;
+    }
+
+    private boolean isHarshWeatherStress(WeatherProfile weather,
+                                         double localWeatherExposure,
+                                         double localCorridorExposure) {
+        return weather == WeatherProfile.HEAVY_RAIN
+                || weather == WeatherProfile.STORM
+                || localWeatherExposure >= 0.74
+                || (localWeatherExposure >= 0.62 && localCorridorExposure >= 0.82);
+    }
+
+    private double computeThirdOrderFeasibilityScore(int localReachableBacklog,
+                                                     int compactClusterCount,
+                                                     int nearReadyOrders,
+                                                     int nearReadySameMerchantCount,
+                                                     double effectiveSlaSlackMinutes,
+                                                     double localWeatherExposure,
+                                                     double localCorridorExposure,
+                                                     double localSpike) {
+        double backlogScore = clamp01(localReachableBacklog / 4.0);
+        double clusterScore = clamp01(compactClusterCount / 2.0);
+        double readinessScore = clamp01((nearReadyOrders + nearReadySameMerchantCount) / 5.0);
+        double slackScore = clamp01(effectiveSlaSlackMinutes / 10.0);
+        double spikeScore = clamp01(localSpike * 1.2);
+        double exposurePenalty = localWeatherExposure * 0.32 + localCorridorExposure * 0.24;
+        return clamp01(
+                backlogScore * 0.28
+                        + clusterScore * 0.22
+                        + readinessScore * 0.20
+                        + slackScore * 0.20
+                        + spikeScore * 0.10
+                        - exposurePenalty);
+    }
+
+    private double computeThreeOrderSlackBuffer(double effectiveSlaSlackMinutes,
+                                                double localWeatherExposure,
+                                                double localCorridorExposure,
+                                                WeatherProfile weather) {
+        double weatherPenalty = switch (weather) {
+            case CLEAR -> 0.0;
+            case LIGHT_RAIN -> 0.6;
+            case HEAVY_RAIN -> 1.8;
+            case STORM -> 2.8;
+        };
+        return effectiveSlaSlackMinutes
+                - localWeatherExposure * 3.2
+                - localCorridorExposure * 2.2
+                - weatherPenalty;
+    }
+
+    private double computeWaveAssemblyPressure(int localReachableBacklog,
+                                               double forecast5m,
+                                               double forecast10m,
+                                               double localSpike,
+                                               double localShortage,
+                                               int compactClusterCount,
+                                               int nearReadyOrders) {
+        return clamp01(
+                Math.min(1.0, localReachableBacklog / 4.0) * 0.28
+                        + Math.min(1.0, forecast5m / 2.0) * 0.20
+                        + Math.min(1.0, forecast10m / 2.0) * 0.12
+                        + Math.min(1.0, localSpike * 1.2) * 0.14
+                        + Math.min(1.0, localShortage) * 0.08
+                        + Math.min(1.0, compactClusterCount / 2.0) * 0.10
+                        + Math.min(1.0, nearReadyOrders / 4.0) * 0.08);
+    }
+
     // ── End-zone discovery ──────────────────────────────────────────────
 
     private List<EndZoneCandidate> findTopEndZones(GeoPoint driverPos) {
@@ -330,6 +517,71 @@ public class DriverContextBuilder {
                 b.attractionScore(), a.attractionScore()));
         return candidates.subList(0,
                 Math.min(candidates.size(), TOP_END_ZONES));
+    }
+
+    private List<DropCorridorCandidate> buildDropCorridorCandidates(GeoPoint driverPos,
+                                                                    List<Order> reachable) {
+        java.util.Map<String, List<Order>> corridorGroups = new java.util.LinkedHashMap<>();
+        for (Order order : reachable) {
+            String regionId = order.getDropoffRegionId() == null ? "UNK" : order.getDropoffRegionId();
+            String directionBucket = dropDirectionBucket(driverPos, order.getDropoffPoint());
+            corridorGroups.computeIfAbsent(regionId + ":" + directionBucket, ignored -> new ArrayList<>())
+                    .add(order);
+        }
+
+        List<DropCorridorCandidate> candidates = new ArrayList<>();
+        for (java.util.Map.Entry<String, List<Order>> entry : corridorGroups.entrySet()) {
+            List<Order> orders = entry.getValue();
+            GeoPoint anchor = computeDropoffCentroid(orders);
+            double coherence = computeDropDirectionCoherence(driverPos, orders);
+            double demandSignal = field.getForecastDemandAt(anchor, 10) * 0.45
+                    + field.getForecastDemandAt(anchor, 15) * 0.25
+                    + field.getForecastDemandAt(anchor, 30) * 0.10
+                    + field.getShortageAt(anchor) * 0.20;
+            double congestionExposure = field.getCongestionExposureAt(anchor);
+            double weatherExposure = field.getWeatherExposureAt(anchor);
+            double corridorScore = clamp01(
+                    coherence * 0.40
+                            + Math.min(1.0, orders.size() / 3.0) * 0.20
+                            + Math.min(1.0, demandSignal / 2.5) * 0.25
+                            - congestionExposure * 0.10
+                            - weatherExposure * 0.05);
+            candidates.add(new DropCorridorCandidate(
+                    entry.getKey(),
+                    anchor,
+                    corridorScore,
+                    demandSignal,
+                    congestionExposure,
+                    weatherExposure));
+        }
+
+        candidates.sort((a, b) -> Double.compare(b.corridorScore(), a.corridorScore()));
+        return candidates.subList(0, Math.min(4, candidates.size()));
+    }
+
+    private double computeDeliveryDemandGradient(double localDemand,
+                                                 List<DropCorridorCandidate> dropCorridors,
+                                                 List<EndZoneCandidate> endZones) {
+        double bestDropSignal = dropCorridors.stream()
+                .mapToDouble(DropCorridorCandidate::demandSignal)
+                .max()
+                .orElse(0.0);
+        double bestEndSignal = endZones.stream()
+                .mapToDouble(EndZoneCandidate::attractionScore)
+                .max()
+                .orElse(0.0);
+        return Math.max(0.0, Math.max(bestDropSignal, bestEndSignal) - localDemand);
+    }
+
+    private double computeEndZoneIdleRisk(List<EndZoneCandidate> endZones,
+                                          double localShortage,
+                                          double localDensity) {
+        double bestLanding = endZones.stream()
+                .mapToDouble(EndZoneCandidate::attractionScore)
+                .max()
+                .orElse(0.0);
+        double densityPenalty = Math.min(0.4, localDensity / 15.0);
+        return clamp01(1.0 - Math.min(1.0, bestLanding / 2.0) + densityPenalty - localShortage * 0.15);
     }
 
     // ── Estimation helpers ──────────────────────────────────────────────
@@ -371,17 +623,22 @@ public class DriverContextBuilder {
     private double computeReachabilityHorizonMinutes(double trafficIntensity,
                                                      WeatherProfile weather) {
         double horizon = BASE_REACHABILITY_HORIZON_MINUTES;
-        horizon -= switch (weather) {
-            case CLEAR -> 0.0;
-            case LIGHT_RAIN -> 0.4;
-            case HEAVY_RAIN -> 1.6;
-            case STORM -> 2.4;
+        horizon += switch (weather) {
+            case CLEAR -> 0.8;
+            case LIGHT_RAIN -> 0.2;
+            case HEAVY_RAIN -> -1.6;
+            case STORM -> -2.4;
         };
         return Math.max(5.0, horizon);
     }
 
     private double computeClusterRadiusMeters() {
         double radius = CLUSTER_RADIUS_METERS;
+        if (currentWeather == WeatherProfile.CLEAR) {
+            radius += 180.0;
+        } else if (currentWeather == WeatherProfile.LIGHT_RAIN) {
+            radius += 80.0;
+        }
         if (currentTrafficIntensity > 0.75) {
             radius -= 200.0;
         }
@@ -392,6 +649,62 @@ public class DriverContextBuilder {
             case STORM -> 500.0;
         };
         return Math.max(650.0, radius);
+    }
+
+    private String dropDirectionBucket(GeoPoint origin, GeoPoint dropoff) {
+        double angle = Math.atan2(dropoff.lat() - origin.lat(), dropoff.lng() - origin.lng());
+        double normalized = angle < 0 ? angle + Math.PI * 2 : angle;
+        int bucket = (int) Math.floor(normalized / (Math.PI / 4.0));
+        return "DIR-" + bucket;
+    }
+
+    private GeoPoint computeDropoffCentroid(List<Order> orders) {
+        double lat = 0.0;
+        double lng = 0.0;
+        for (Order order : orders) {
+            lat += order.getDropoffPoint().lat();
+            lng += order.getDropoffPoint().lng();
+        }
+        return new GeoPoint(lat / Math.max(1, orders.size()), lng / Math.max(1, orders.size()));
+    }
+
+    private double computeDropDirectionCoherence(GeoPoint origin, List<Order> orders) {
+        if (orders.size() <= 1) {
+            return 1.0;
+        }
+
+        double total = 0.0;
+        int pairs = 0;
+        for (int i = 0; i < orders.size(); i++) {
+            double dx1 = orders.get(i).getDropoffPoint().lng() - origin.lng();
+            double dy1 = orders.get(i).getDropoffPoint().lat() - origin.lat();
+            for (int j = i + 1; j < orders.size(); j++) {
+                double dx2 = orders.get(j).getDropoffPoint().lng() - origin.lng();
+                double dy2 = orders.get(j).getDropoffPoint().lat() - origin.lat();
+                double dot = dx1 * dx2 + dy1 * dy2;
+                double mag = Math.sqrt(dx1 * dx1 + dy1 * dy1) * Math.sqrt(dx2 * dx2 + dy2 * dy2);
+                total += mag > 1e-9 ? (dot / mag + 1.0) / 2.0 : 0.5;
+                pairs++;
+            }
+        }
+        return pairs > 0 ? total / pairs : 0.5;
+    }
+
+    private double clamp01(double value) {
+        return Math.max(0.0, Math.min(1.0, value));
+    }
+
+    private double computeSynergyThreshold() {
+        double threshold = switch (currentWeather) {
+            case CLEAR -> 0.26;
+            case LIGHT_RAIN -> 0.28;
+            case HEAVY_RAIN -> 0.35;
+            case STORM -> 0.40;
+        };
+        if (currentTrafficIntensity > 0.65) {
+            threshold += 0.02;
+        }
+        return Math.min(0.42, threshold);
     }
 
     private double estimateReadySlackMinutes(Order order, Instant currentTime) {

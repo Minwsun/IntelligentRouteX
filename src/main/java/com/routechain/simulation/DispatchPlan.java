@@ -1,5 +1,6 @@
 package com.routechain.simulation;
 
+import com.routechain.ai.StressRegime;
 import com.routechain.domain.*;
 
 import java.util.*;
@@ -26,6 +27,18 @@ public class DispatchPlan {
     private double nextOrderAcquisitionScore;
     private double congestionPenalty;
     private double repositionPenalty;
+    private double deliveryCorridorScore;
+    private double lastDropLandingScore;
+    private double expectedPostCompletionEmptyKm;
+    private double remainingDropProximityScore;
+    private double deliveryZigZagPenalty;
+    private double expectedNextOrderIdleMinutes;
+    private boolean stressFallbackOnly;
+    private boolean waveLaunchEligible;
+    private boolean waitingForThirdOrder;
+    private boolean hardThreeOrderPolicyActive;
+    private boolean harshWeatherStress;
+    private StressRegime stressRegime = StressRegime.NORMAL;
 
     // ── Final scoring ───────────────────────────────────────────────────
     private double totalScore;
@@ -68,6 +81,18 @@ public class DispatchPlan {
     public double getNextOrderAcquisitionScore() { return nextOrderAcquisitionScore; }
     public double getCongestionPenalty() { return congestionPenalty; }
     public double getRepositionPenalty() { return repositionPenalty; }
+    public double getDeliveryCorridorScore() { return deliveryCorridorScore; }
+    public double getLastDropLandingScore() { return lastDropLandingScore; }
+    public double getExpectedPostCompletionEmptyKm() { return expectedPostCompletionEmptyKm; }
+    public double getRemainingDropProximityScore() { return remainingDropProximityScore; }
+    public double getDeliveryZigZagPenalty() { return deliveryZigZagPenalty; }
+    public double getExpectedNextOrderIdleMinutes() { return expectedNextOrderIdleMinutes; }
+    public boolean isStressFallbackOnly() { return stressFallbackOnly; }
+    public boolean isWaveLaunchEligible() { return waveLaunchEligible; }
+    public boolean isWaitingForThirdOrder() { return waitingForThirdOrder; }
+    public boolean isHardThreeOrderPolicyActive() { return hardThreeOrderPolicyActive; }
+    public boolean isHarshWeatherStress() { return harshWeatherStress; }
+    public StressRegime getStressRegime() { return stressRegime; }
     public double getTotalScore() { return totalScore; }
     public double getConfidence() { return confidence; }
     public String getTraceId() { return traceId; }
@@ -95,6 +120,20 @@ public class DispatchPlan {
     public void setNextOrderAcquisitionScore(double v) { this.nextOrderAcquisitionScore = v; }
     public void setCongestionPenalty(double v) { this.congestionPenalty = v; }
     public void setRepositionPenalty(double v) { this.repositionPenalty = v; }
+    public void setDeliveryCorridorScore(double v) { this.deliveryCorridorScore = v; }
+    public void setLastDropLandingScore(double v) { this.lastDropLandingScore = v; }
+    public void setExpectedPostCompletionEmptyKm(double v) { this.expectedPostCompletionEmptyKm = v; }
+    public void setRemainingDropProximityScore(double v) { this.remainingDropProximityScore = v; }
+    public void setDeliveryZigZagPenalty(double v) { this.deliveryZigZagPenalty = v; }
+    public void setExpectedNextOrderIdleMinutes(double v) { this.expectedNextOrderIdleMinutes = v; }
+    public void setStressFallbackOnly(boolean v) { this.stressFallbackOnly = v; }
+    public void setWaveLaunchEligible(boolean v) { this.waveLaunchEligible = v; }
+    public void setWaitingForThirdOrder(boolean v) { this.waitingForThirdOrder = v; }
+    public void setHardThreeOrderPolicyActive(boolean v) { this.hardThreeOrderPolicyActive = v; }
+    public void setHarshWeatherStress(boolean v) { this.harshWeatherStress = v; }
+    public void setStressRegime(StressRegime v) {
+        this.stressRegime = v == null ? StressRegime.NORMAL : v;
+    }
     public void setTotalScore(double v) { this.totalScore = v; }
     public void setConfidence(double v) { this.confidence = v; }
     public void setTraceId(String v) { this.traceId = v; }
