@@ -63,8 +63,21 @@ public record RunReport(
         double thirdOrderLaunchRate,
         double stressDowngradeRate,
         double prePickupAugmentRate,
-        double holdOnlySelectionRate
+        double holdOnlySelectionRate,
+        double avgAssignedDeadheadKm,
+        double deadheadPerCompletedOrderKm,
+        double deadheadPerAssignedOrderKm,
+        double borrowedDeadheadPerExecutedOrderKm,
+        double fallbackDeadheadPerExecutedOrderKm,
+        double waveDeadheadPerExecutedOrderKm,
+        DispatchRecoveryDecomposition recovery
 ) {
+    public RunReport {
+        if (recovery == null) {
+            recovery = DispatchRecoveryDecomposition.empty();
+        }
+    }
+
     public double holdBehaviorRate() {
         return clampPercent(holdOnlySelectionRate);
     }
@@ -99,6 +112,22 @@ public record RunReport(
         );
     }
 
+    public double waveExec() {
+        return recovery.waveExecutionRate();
+    }
+
+    public double holdConv() {
+        return recovery.holdConversionRate();
+    }
+
+    public double fallbackDirect() {
+        return recovery.fallbackDirectRate();
+    }
+
+    public double borrowedExec() {
+        return recovery.borrowedSelectionRate();
+    }
+
     /** Generate a compact summary string for logging. */
     public String toSummary() {
         return String.format(
@@ -108,6 +137,7 @@ public record RunReport(
                 "bundleRate=%.1f%% avgBundle=%.2f maxBundle=%d 3plus=%.1f%% reDispatch=%d | " +
                 "corridor=%.2f goodLast=%.1f%% emptyKm=%.2f | " +
                 "realAssign=%.1f%% steadyAssign=%.1f%% cleanSub3=%.1f%% wait3=%.1f%% launch3=%.1f%% downgrade=%.1f%% augment=%.1f%% holdOnly=%.1f%% | " +
+                "dh/assigned=%.2fkm dh/completed=%.2fkm waveExec=%.1f%% holdConv=%.1f%% fallbackDirect=%.1f%% borrowedExec=%.1f%% | " +
                 "recover3=%.1f%% | " +
                 "assignLatency=%.0fms confidence=%.2f",
                 runId, scenarioName, totalOrders, totalDrivers,
@@ -118,6 +148,11 @@ public record RunReport(
                 deliveryCorridorQuality, lastDropGoodZoneRate, expectedPostCompletionEmptyKm,
                 realAssignmentRate, nonDowngradedRealAssignmentRate(), selectedSubThreeRateInCleanRegime, waveAssemblyWaitRate,
                 thirdOrderLaunchRate, stressDowngradeRate, prePickupAugmentRate, holdOnlySelectionRate,
+                deadheadPerAssignedOrderKm, deadheadPerCompletedOrderKm,
+                recovery == null ? 0.0 : recovery.waveExecutionRate(),
+                recovery == null ? 0.0 : recovery.holdConversionRate(),
+                recovery == null ? 0.0 : recovery.fallbackDirectRate(),
+                recovery == null ? 0.0 : recovery.borrowedSelectionRate(),
                 cleanWaveRecoveryRate(),
                 avgAssignmentLatencyMs, avgConfidence
         );

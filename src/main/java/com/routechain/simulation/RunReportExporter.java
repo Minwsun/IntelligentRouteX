@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * Collects data from the simulation engine and produces a RunReport.
@@ -18,11 +17,13 @@ import java.util.UUID;
  */
 public class RunReportExporter {
 
+    private final String runId;
     private final String scenarioName;
     private final long seed;
     private final Instant startTime;
 
-    public RunReportExporter(String scenarioName, long seed, Instant startTime) {
+    public RunReportExporter(String runId, String scenarioName, long seed, Instant startTime) {
+        this.runId = runId == null || runId.isBlank() ? "RUN-UNKNOWN" : runId;
         this.scenarioName = scenarioName;
         this.seed = seed;
         this.startTime = startTime;
@@ -64,9 +65,12 @@ public class RunReportExporter {
             int realAssignedPlanCount,
             int holdOnlySelectionCount,
             int prePickupAugmentationCount,
+            double borrowedExecutedDeadheadKm,
+            double fallbackExecutedDeadheadKm,
+            double waveExecutedDeadheadKm,
+            DispatchRecoveryDecomposition recovery,
             Instant endTime) {
 
-        String runId = "RUN-" + UUID.randomUUID().toString().substring(0, 8);
         int totalOrders = totalDelivered + cancelledOrders.size() + activeOrders.size();
         int totalDriverCount = drivers.size();
 
@@ -166,6 +170,24 @@ public class RunReportExporter {
         double holdOnlySelectionRate = totalSelectedOrderPlanCount > 0
                 ? holdOnlySelectionCount * 100.0 / totalSelectedOrderPlanCount
                 : 0.0;
+        DispatchRecoveryDecomposition safeRecovery = recovery == null
+                ? DispatchRecoveryDecomposition.empty()
+                : recovery;
+        double avgAssignedDeadheadKm = realAssignedPlanCount > 0
+                ? totalDeadheadKm / realAssignedPlanCount : 0.0;
+        double deadheadPerCompletedOrderKm = totalDelivered > 0
+                ? totalDeadheadKm / totalDelivered : 0.0;
+        double deadheadPerAssignedOrderKm = totalAssignments > 0
+                ? totalDeadheadKm / totalAssignments : 0.0;
+        int borrowedExecutedCount = Math.max(0, safeRecovery.executedBorrowedCount());
+        int fallbackExecutedCount = Math.max(0, safeRecovery.executedFallbackCount());
+        int waveExecutedCount = Math.max(0, safeRecovery.executedWaveCount() + safeRecovery.executedExtensionCount());
+        double borrowedDeadheadPerExecutedOrderKm = borrowedExecutedCount > 0
+                ? borrowedExecutedDeadheadKm / borrowedExecutedCount : 0.0;
+        double fallbackDeadheadPerExecutedOrderKm = fallbackExecutedCount > 0
+                ? fallbackExecutedDeadheadKm / fallbackExecutedCount : 0.0;
+        double waveDeadheadPerExecutedOrderKm = waveExecutedCount > 0
+                ? waveExecutedDeadheadKm / waveExecutedCount : 0.0;
 
         return new RunReport(
                 runId, scenarioName, seed, startTime, endTime, totalTicks,
@@ -183,7 +205,14 @@ public class RunReportExporter {
                 realAssignmentRate,
                 selectedSubThreeRateInCleanRegime, waveAssemblyWaitRate,
                 thirdOrderLaunchRate, stressDowngradeRate,
-                prePickupAugmentRate, holdOnlySelectionRate
+                prePickupAugmentRate, holdOnlySelectionRate,
+                avgAssignedDeadheadKm,
+                deadheadPerCompletedOrderKm,
+                deadheadPerAssignedOrderKm,
+                borrowedDeadheadPerExecutedOrderKm,
+                fallbackDeadheadPerExecutedOrderKm,
+                waveDeadheadPerExecutedOrderKm,
+                safeRecovery
         );
     }
 

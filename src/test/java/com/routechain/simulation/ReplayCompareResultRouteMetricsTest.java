@@ -76,7 +76,14 @@ class ReplayCompareResultRouteMetricsTest {
                 82.0,
                 6.0,
                 4.0,
-                18.0
+                18.0,
+                1.15,
+                1.75,
+                1.28,
+                1.02,
+                1.10,
+                0.96,
+                DispatchRecoveryDecomposition.empty()
         );
     }
 }

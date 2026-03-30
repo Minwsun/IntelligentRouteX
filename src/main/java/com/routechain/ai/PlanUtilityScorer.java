@@ -25,22 +25,24 @@ public class PlanUtilityScorer {
     private static final double W_MERCHANT_ALIGNMENT = 0.08;
     private static final double W_DROP_EFFICIENCY = 0.14;
     private static final double W_FIRST_ORDER_PROTECTION = 0.08;
-    private static final double W_END_STATE = 0.07;
-    private static final double W_NEXT_ORDER = 0.06;
-    private static final double W_FUTURE_ZONE_LANDING = 0.08;
+    private static final double W_END_STATE = 0.04;
+    private static final double W_NEXT_ORDER = 0.04;
+    private static final double W_FUTURE_ZONE_LANDING = 0.05;
     private static final double W_REMAINING_DROP_PROXIMITY = 0.07;
-    private static final double W_DELIVERY_CORRIDOR = 0.10;
-    private static final double W_LAST_DROP_LANDING = 0.12;
+    private static final double W_DELIVERY_CORRIDOR = 0.08;
+    private static final double W_LAST_DROP_LANDING = 0.10;
     private static final double W_VISIBLE_CLEAN_WAVE = 0.14;
 
-    private static final double P_DEADHEAD = 0.24;
+    private static final double P_DEADHEAD = 0.30;
     private static final double P_MERCHANT_WAIT = 0.06;
     private static final double P_CONGESTION = 0.08;
-    private static final double P_LATE_RISK = 0.24;
+    private static final double P_LATE_RISK = 0.28;
     private static final double P_CANCEL_RISK = 0.14;
     private static final double P_OVERLOAD = 0.03;
-    private static final double P_POST_COMPLETION_EMPTY = 0.10;
+    private static final double P_POST_COMPLETION_EMPTY = 0.16;
     private static final double P_ZIGZAG = 0.08;
+    private static final double P_BORROWED_DEPENDENCY = 0.12;
+    private static final double P_EMPTY_RISK = 0.10;
 
     private static final double PROFIT_NORM = 50000.0;
     private static final double DEADHEAD_THRESHOLD_KM = 5.0;
@@ -71,7 +73,7 @@ public class PlanUtilityScorer {
         utility += W_LAST_DROP_LANDING * futureWeight * clamp01(plan.getLastDropLandingScore());
         utility += W_VISIBLE_CLEAN_WAVE * futureWeight * computeVisibleCleanWaveBonus(plan, stressRegime);
 
-        utility -= P_DEADHEAD * penaltyWeight * clamp01(plan.getPredictedDeadheadKm() / DEADHEAD_THRESHOLD_KM);
+        utility -= P_DEADHEAD * penaltyWeight * piecewiseDeadheadPenalty(plan.getPredictedDeadheadKm());
         utility -= P_MERCHANT_WAIT * positiveWeight * computeMerchantWaitPenalty(plan);
         utility -= P_CONGESTION * penaltyWeight * clamp01(plan.getCongestionPenalty());
         utility -= P_LATE_RISK * penaltyWeight * square(clamp01(plan.getLateRisk()));
@@ -80,6 +82,8 @@ public class PlanUtilityScorer {
         utility -= P_POST_COMPLETION_EMPTY * penaltyWeight
                 * clamp01(plan.getExpectedPostCompletionEmptyKm() / 3.0);
         utility -= P_ZIGZAG * penaltyWeight * clamp01(plan.getDeliveryZigZagPenalty());
+        utility -= P_BORROWED_DEPENDENCY * penaltyWeight * clamp01(plan.getBorrowedDependencyScore());
+        utility -= P_EMPTY_RISK * penaltyWeight * clamp01(plan.getEmptyRiskAfter());
 
         return Math.max(0.001, utility);
     }
@@ -235,6 +239,16 @@ public class PlanUtilityScorer {
             return base * 0.35;
         }
         return base;
+    }
+
+    private double piecewiseDeadheadPenalty(double deadheadKm) {
+        if (deadheadKm <= 1.5) {
+            return clamp01(deadheadKm / 2.8);
+        }
+        if (deadheadKm <= 3.0) {
+            return clamp01(0.55 + (deadheadKm - 1.5) / 1.5 * 0.30);
+        }
+        return clamp01(0.85 + (deadheadKm - 3.0) / 2.0 * 0.25);
     }
 
     private double positiveWeightFactor(StressRegime stressRegime) {

@@ -7,6 +7,7 @@ import com.routechain.domain.Enums.WeatherProfile;
 import com.routechain.domain.GeoPoint;
 import com.routechain.domain.Order;
 import com.routechain.simulation.DispatchPlan;
+import com.routechain.simulation.SelectionBucket;
 import com.routechain.simulation.DispatchPlan.Bundle;
 import com.routechain.simulation.DispatchPlan.Stop;
 import com.routechain.simulation.DispatchPlan.Stop.StopType;
@@ -71,18 +72,18 @@ public class DriverPlanGenerator {
         if (ctx.stressRegime() == StressRegime.SEVERE_STRESS || ctx.harshWeatherStress()) {
             return false;
         }
-        if (ctx.localReachableBacklog() != 2) {
+        if (ctx.localReachableBacklog() < 2 || ctx.localReachableBacklog() > 3) {
             return false;
         }
         boolean clusterSignal = ctx.nearReadySameMerchantCount() >= 2 || ctx.compactClusterCount() >= 1;
         boolean readinessSignal = ctx.nearReadyOrders() >= 2;
-        double demandLift = ctx.localDemandForecast5m() / Math.max(0.55, ctx.localDemandIntensity());
-        return (clusterSignal || readinessSignal)
-                && ctx.thirdOrderFeasibilityScore() >= 0.65
-                && ctx.effectiveSlaSlackMinutes() > 0.0
+        return clusterSignal
+                && readinessSignal
+                && ctx.thirdOrderFeasibilityScore() >= 0.62
+                && ctx.waveAssemblyPressure() >= 0.38
+                && ctx.effectiveSlaSlackMinutes() > 2.0
                 && ctx.threeOrderSlackBuffer() >= 0.0
-                && ctx.localCorridorExposure() <= 0.40
-                && demandLift >= 1.10;
+                && ctx.localCorridorExposure() <= 0.55;
     }
 
     static boolean requiresHardThreeOrderLaunch(OmegaDispatchAgent.ExecutionProfile executionProfile,
@@ -158,7 +159,7 @@ public class DriverPlanGenerator {
                 || hasWaveExtensionOpportunity(driver, stretchMultiOrder);
         boolean likelyThirdOrder = shouldWaitForLikelyThirdOrder(ctx);
 
-        boolean allowStrategicHold = !hasActionableOrderPlans;
+        boolean allowStrategicHold = !hasActionableOrderPlans && likelyThirdOrder;
         if (!allowStrategicHold && !hasEffectiveThreePlusPath && likelyThirdOrder) {
             allowStrategicHold = true;
         }
@@ -883,8 +884,17 @@ public class DriverPlanGenerator {
                     + Math.min(0.05, ctx.thirdOrderFeasibilityScore() * 0.05);
         }
 
+        double waveReadiness = Math.max(0.0, Math.min(1.0,
+                ctx.thirdOrderFeasibilityScore() * 0.45
+                        + ctx.waveAssemblyPressure() * 0.35
+                        + Math.min(1.0, ctx.nearReadyOrders() / 3.0) * 0.20
+                        - ctx.localCorridorExposure() * 0.10));
+
         plan.setTotalScore(Math.max(0.01, Math.min(0.12, holdScore)));
         plan.setConfidence(0.3);
+        plan.setWaveReadinessScore(waveReadiness);
+        plan.setMarginalDeadheadPerAddedOrder(0.0);
+        plan.setPickupSpreadKm(0.0);
         plan.setTraceId(waitingForThirdOrder
                 ? "HOLD-THIRD-" + UUID.randomUUID().toString().substring(0, 6)
                 : "HOLD");
@@ -1472,7 +1482,11 @@ public class DriverPlanGenerator {
                     int projectedSize = augmentable
                             ? currentCommittedOrders + plan.getBundleSize()
                             : plan.getBundleSize();
-                    return projectedSize >= 3;
+                    return projectedSize >= 3
+                            && plan.getPredictedDeadheadKm() <= 3.6
+                            && plan.getOnTimeProbability() >= 0.60
+                            && plan.getDeliveryCorridorScore() >= 0.30
+                            && plan.getLastDropLandingScore() >= 0.18;
                 });
     }
 
@@ -1514,6 +1528,26 @@ public class DriverPlanGenerator {
                 && (plan.getBundleSize() >= 3 || prePickupExtensionEligible)
                 && (!cleanThreeLaunch || cleanWaveEligible || prePickupExtensionEligible);
         plan.setWaveLaunchEligible(waveLaunchEligible);
+        if (waitingForThirdOrder) {
+            plan.setSelectionBucket(SelectionBucket.HOLD_WAIT3);
+            plan.setHoldRemainingCycles(regime == StressRegime.NORMAL ? 2
+                    : regime == StressRegime.STRESS ? 1 : 0);
+            plan.setHoldReason("wait_for_third_order");
+            plan.setHoldAnchorZoneId(plan.getDriver() == null ? null : plan.getDriver().getRegionId());
+        } else if (waveLaunchEligible) {
+            if (plan.getBundleSize() >= 3) {
+                plan.setSelectionBucket(SelectionBucket.WAVE_LOCAL);
+            } else {
+                plan.setSelectionBucket(SelectionBucket.EXTENSION_LOCAL);
+            }
+            plan.setHoldRemainingCycles(0);
+        } else if (!plan.getOrders().isEmpty()) {
+            plan.setSelectionBucket(SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD);
+            plan.setHoldRemainingCycles(0);
+        } else {
+            plan.setSelectionBucket(SelectionBucket.EMERGENCY_COVERAGE);
+            plan.setHoldRemainingCycles(0);
+        }
     }
 
     public void setHoldPlansEnabled(boolean holdPlansEnabled) {

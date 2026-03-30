@@ -18,6 +18,7 @@ public interface DispatchFactSink {
 
     record DecisionFact(
             String traceId,
+            String runId,
             long tick,
             String driverId,
             String policyUsed,
@@ -36,12 +37,16 @@ public interface DispatchFactSink {
             String llmQuotaDecision,
             String llmFallbackChain,
             String llmFinalMode,
+            String selectionBucket,
+            int holdTtlRemaining,
+            double marginalDeadheadPerAddedOrder,
             LLMAdvisorResponse llmShadow,
             Instant recordedAt
     ) {}
 
     record OutcomeFact(
             String traceId,
+            String runId,
             long completionTick,
             double actualReward,
             boolean cancelled,

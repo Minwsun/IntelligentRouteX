@@ -360,7 +360,9 @@ public class Driver {
             return false;
         }
         return !activeOrderIds.isEmpty()
-                && (state == DriverState.ROUTE_PENDING || state == DriverState.PICKUP_EN_ROUTE);
+                && (state == DriverState.ROUTE_PENDING
+                || state == DriverState.PICKUP_EN_ROUTE
+                || state == DriverState.WAITING_PICKUP);
     }
 
     public boolean isRouteLockedAfterFirstPickup() {

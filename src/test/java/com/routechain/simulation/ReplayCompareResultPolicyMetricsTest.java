@@ -91,7 +91,14 @@ class ReplayCompareResultPolicyMetricsTest {
                 launchRate,
                 downgradeRate,
                 augmentRate,
-                holdOnlyRate
+                holdOnlyRate,
+                1.20,
+                1.80,
+                1.30,
+                1.05,
+                1.15,
+                0.98,
+                DispatchRecoveryDecomposition.empty()
         );
     }
 }

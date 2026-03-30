@@ -1,431 +1,181 @@
-# RouteChain Handoff Summary
-
-## 1. Mục tiêu tổng thể đã làm tới đâu
-
-Repo này đã được đẩy từ simulator/dispatch monolith lên một nền `RouteChain Apex` theo hướng:
-
-- `OmegaDispatchAgent` là dispatch brain chính
-- có route realism (`ROUTE_PENDING`, simulated async route latency, không chạy thẳng khi chưa có route)
-- có multi-order/pickup-wave, delivery-corridor, soft-landing logic
-- có data-plane local-first cho replay/benchmark/control-plane
-- có `DispatchBrainAgent` + tool descriptors
-- có `LLM shadow/advisory plane`
-- vừa bổ sung **Groq quota-aware shadow brain** cho free-tier
-
-Quan trọng: hệ thống hiện **đã compile được** và **smoke batch vẫn chạy**, nhưng **business KPI của Omega vẫn đang yếu** ở `normal/rush_hour/demand_spike/heavy_rain/shortage`. Phần yếu này đến từ dispatch policy/tuning của các phase trước, **không phải** do lớp Groq/Big Data mới.
-
-## 2. Kiến trúc hiện tại
-
-### 2.1 Runtime boundaries
-
-Theo `docs/routechain-apex-architecture.md`:
-
-- `routechain-core`
-  - simulator
-  - Omega hot path
-  - routing
-  - matching
-- `routechain-event-bridge`
-  - canonical event tape
-  - replay facts
-- `routechain-control-plane`
-  - admin/system health/query
-- `routechain-llm-advisor`
-  - shadow/advisory/critic plane
-  - offline fallback
-
-### 2.2 Big Data / platform slice đã có
-
-Các lớp/platform mới đáng chú ý:
-
-- `src/main/java/com/routechain/infra/PlatformRuntimeBootstrap.java`
-- `src/main/java/com/routechain/infra/AdminQueryService.java`
-- `src/main/java/com/routechain/infra/LocalAdminQueryService.java`
-- `src/main/java/com/routechain/infra/FeatureStore.java`
-- `src/main/java/com/routechain/infra/InMemoryFeatureStore.java`
-- `src/main/java/com/routechain/infra/DispatchFactSink.java`
-- `src/main/java/com/routechain/infra/JsonlDispatchFactSink.java`
-- `src/main/java/com/routechain/infra/CanonicalEventPublisher.java`
-- `src/main/java/com/routechain/infra/JsonlCanonicalEventPublisher.java`
-- `src/main/java/com/routechain/simulation/BenchmarkArtifactWriter.java`
-
-Artifacts hiện được đẩy ra:
-
-- `build/routechain-apex/event-tape`
-- `build/routechain-apex/facts`
-- `build/routechain-apex/benchmarks`
-
-Docker/local infra scaffold đã có:
-
-- `docker-compose.yml`
-- `.env.example`
-
-## 3. Dispatch/Omega structure hiện tại
-
-### 3.1 Brain contract
-
-`OmegaDispatchAgent` hiện implement `DispatchBrainAgent`.
-
-Tool descriptors hiện có:
-
-- `ForecastTool`
-- `ContextTool`
-- `RouteCacheTool`
-- `WaveAssemblyTool`
-- `SequenceTool`
-- `MatchingTool`
-- `ReDispatchTool`
-- `FeatureStoreTool`
-- `ModelInferenceTool`
-- `PolicyTool`
-
-Các file chính:
-
-- `src/main/java/com/routechain/ai/OmegaDispatchAgent.java`
-- `src/main/java/com/routechain/ai/DriverContextBuilder.java`
-- `src/main/java/com/routechain/ai/DriverPlanGenerator.java`
-- `src/main/java/com/routechain/simulation/SequenceOptimizer.java`
-- `src/main/java/com/routechain/simulation/AssignmentSolver.java`
-- `src/main/java/com/routechain/ai/PlanUtilityScorer.java`
-- `src/main/java/com/routechain/ai/ConstraintEngine.java`
-
-### 3.2 Runtime movement realism
-
-Các thay đổi lớn từ phase trước vẫn đang tồn tại:
-
-- `DriverState` có `ROUTE_PENDING`
-- route latency mô phỏng async
-- headless mode không còn “set target là chạy ngay”
-- stale route response không được overwrite route mới
-- route chỉ khóa hẳn sau pickup đầu tiên
-
-File chính:
-
-- `src/main/java/com/routechain/simulation/SimulationEngine.java`
-- `src/main/java/com/routechain/simulation/OsrmRoutingService.java`
-- `src/main/java/com/routechain/simulation/DriverMotionEngine.java`
-- `src/main/java/com/routechain/domain/Driver.java`
-
-### 3.3 Dispatch policy hiện tại
-
-Mainline hiện đã đi qua nhiều phase tuning. Trạng thái gần nhất:
-
-- không còn nhánh `hard 3+ -> hold-only` kiểu collapse như trước
-- đã có recovery path `launch target 3 + sparse/off-route downgrade + pre-pickup augmentation`
-- nhưng thực tế benchmark vẫn cho thấy:
-  - downgrade còn quá nhiều
-  - deadhead còn cao
-  - `augment` gần như chưa convert được trong batch
-
-## 4. LLM/Groq integration vừa thêm
-
-### 4.1 Contract hiện tại
-
-Các file chính:
-
-- `src/main/java/com/routechain/ai/LLMAdvisorClient.java`
-- `src/main/java/com/routechain/ai/LLMEscalationGate.java`
-- `src/main/java/com/routechain/ai/DefaultLLMEscalationGate.java`
-- `src/main/java/com/routechain/ai/LLMAdvisorRequest.java`
-- `src/main/java/com/routechain/ai/LLMAdvisorResponse.java`
-- `src/main/java/com/routechain/ai/OfflineFallbackLLMAdvisorClient.java`
-
-Hot path không đổi:
-
-- Omega chọn plan xong rồi mới đi vào `emitDecisionArtifacts(...)`
-- `llmAdvisorClient.advise(...)` chỉ là advisory/shadow
-- không có quyền override scoring/matching/constraint
-
-### 4.2 Groq quota-aware shadow router
-
-Các file mới:
-
-- `src/main/java/com/routechain/ai/GroqRuntimeConfig.java`
-- `src/main/java/com/routechain/ai/GroqModelCatalog.java`
-- `src/main/java/com/routechain/ai/GroqRoutingPolicy.java`
-- `src/main/java/com/routechain/ai/GroqPromptCompressor.java`
-- `src/main/java/com/routechain/ai/GroqQuotaTracker.java`
-- `src/main/java/com/routechain/ai/GroqCircuitBreaker.java`
-- `src/main/java/com/routechain/ai/GroqTransport.java`
-- `src/main/java/com/routechain/ai/HttpGroqTransport.java`
-- `src/main/java/com/routechain/ai/GroqLLMAdvisorClient.java`
-
-### 4.3 Behavior của Groq layer
-
-Mặc định:
-
-- Groq chỉ dùng cho `shadow/advisory`
-- hot path dispatch vẫn deterministic
-- `1 key + offline fallback`
-- không cho LLM vẽ polyline route trực tiếp
-
-Runtime selection:
-
-- `PlatformRuntimeBootstrap.refreshLlmRuntime()` đọc env/system properties
-- nếu `GROQ_ENABLED=true` và key hợp lệ:
-  - dùng `GroqLLMAdvisorClient`
-- nếu không:
-  - dùng `OfflineFallbackLLMAdvisorClient`
-
-### 4.4 Quota/cascade logic hiện tại
-
-Policy hiện đang cài:
-
-- `SHADOW_FAST`
-  - `groq/compound-mini`
-  - fallback `llama-3.1-8b-instant`
-  - fallback cuối `offline`
-- `ADVISORY_HIGH_QUALITY`
-  - `meta-llama/llama-4-scout-17b-16e-instruct`
-  - fallback `moonshotai/kimi-k2-instruct`
-  - fallback `groq/compound-mini`
-  - fallback cuối `offline`
-- `REPLAY_BATCH`
-  - `meta-llama/llama-4-scout-17b-16e-instruct`
-  - fallback `qwen/qwen3-32b`
-  - fallback `openai/gpt-oss-20b`
-- `OPERATOR_FREE_TEXT`
-  - `groq/compound-mini`
-  - fallback `meta-llama/llama-prompt-guard-2-22m`
-
-Free-tier protection hiện có:
-
-- local quota tracker theo `RPM/RPD/TPM/TPD`
-- circuit breaker
-- prompt compression
-- local budget gate để không gọi Groq cho mọi decision
-- fallback offline khi:
-  - quota cạn
-  - timeout
-  - server/client/provider error
-  - malformed JSON/schema
-
-### 4.5 Metadata đã được gắn ở đâu
-
-`LLMAdvisorResponse` hiện đã carry:
-
-- `provider`
-- `modelId`
-- `requestClass`
-- `estimatedInputTokens`
-- `fallbackApplied`
-- `fallbackReason`
-- `fallbackChain`
-- `quotaDecision`
-- `latencyMs`
-
-`DispatchFactSink.DecisionFact` hiện đã được append thêm:
-
-- `llmRequestClass`
-- `llmEstimatedInputTokens`
-- `llmQuotaDecision`
-- `llmFallbackChain`
-- `llmFinalMode`
-- `llmShadow`
-
-`AdminQueryService.SystemAdminSnapshot` hiện đã có:
-
-- `llmMode`
-- `llmRuntimeStatus`
-
-`llmRuntimeStatus` chứa:
-
-- provider
-- mode
-- selectedModel
-- routingClass
-- fallbackReason
-- total/online/offline counts
-- quota/schema/timeout counters
-- offline fallback rate
-- p50/p95 latency
-- circuitOpen
-
-## 5. Benchmark/KPI hiện tại
-
-### 5.1 Kết quả `scenarioBatch` mới nhất
-
-Lượt smoke cuối cùng sau Groq integration:
-
-- build thành công
-- scenario batch chạy thành công
-- simulator không vỡ khi Groq tắt
-
-KPI business vẫn yếu, gần như giữ pattern cũ:
-
-- `normal`
-  - Legacy tốt hơn
-  - Omega completion thấp hơn, deadhead cao hơn
-- `rush_hour`
-  - Legacy tốt hơn
-- `heavy_rain`
-  - Legacy tốt hơn
-- `demand_spike`
-  - Legacy tốt hơn
-- `shortage`
-  - Legacy tốt hơn
-
-Một vài chỉ số nổi bật từ run mới nhất:
-
-- `normal`: Omega `completion=12.0%`, `deadhead=78.4%`, `launch3=7.3%`, `downgrade=97.2%`
-- `rush_hour`: Omega `completion=8.1%`, `deadhead=83.1%`, `launch3=8.0%`, `downgrade=99.1%`
-- `heavy_rain`: Omega `completion=8.4%`, `deadhead=71.3%`, `downgrade=97.8%`
-- `demand_spike`: Omega `completion=5.2%`, `deadhead=87.9%`, `launch3=0.9%`, `downgrade=99.1%`
-- `shortage`: Omega `completion=5.7%`, `deadhead=88.2%`, `launch3=8.9%`, `downgrade=95.4%`
-
-Kết luận ngắn:
-
-- Groq slice **không làm vỡ runtime**
-- nhưng **không giải quyết business KPI**
-- bottleneck tiếp theo vẫn là dispatch policy/tuning của Omega
-
-## 6. Test và validation đã chạy
-
-Đã chạy thành công:
-
-### Build
-
-```powershell
-.\gradlew.bat --no-daemon compileJava
-```
-
-### Groq-specific tests
-
-```powershell
-.\gradlew.bat --no-daemon test --tests com.routechain.ai.GroqQuotaTrackerTest --tests com.routechain.ai.GroqLLMAdvisorClientTest --tests com.routechain.infra.PlatformRuntimeBootstrapGroqRouterTest
-```
-
-### Regression nhỏ
-
-```powershell
-.\gradlew.bat --no-daemon test --tests com.routechain.infra.EventBusGlobalListenerTest --tests com.routechain.simulation.BenchmarkArtifactWriterTest --tests com.routechain.ai.OmegaDispatchBrainContractTest
-```
-
-### Smoke benchmark
-
-```powershell
-.\gradlew.bat --no-daemon scenarioBatch
-```
-
-Test mới đã thêm:
-
-- `src/test/java/com/routechain/ai/GroqQuotaTrackerTest.java`
-- `src/test/java/com/routechain/ai/GroqLLMAdvisorClientTest.java`
-- `src/test/java/com/routechain/infra/PlatformRuntimeBootstrapGroqRouterTest.java`
-
-## 7. Việc chưa làm xong / chỗ AI tiếp theo nên ưu tiên
-
-### Ưu tiên 1 — phục hồi KPI business của Omega
-
-Đây là việc quan trọng nhất nếu mục tiêu là demo/đồ án được đánh giá cao:
-
-- giảm `stressDowngradeRate`
-- tăng `steadyAssign`
-- tăng `selectedThreePlusRate`
-- giảm deadhead trong `normal/rush_hour/demand_spike`
-- làm `prePickupAugmentRate` có ý nghĩa thật
-
-Nói ngắn:
-
-- vấn đề chính hiện tại là **dispatch policy**
-- không phải Groq
-- không phải data plane
-
-### Ưu tiên 2 — đẩy Groq metrics xuống run-level artifact
-
-Hiện Groq metadata đã có ở:
-
-- admin snapshot
-- decision facts
-
-Nhưng **chưa được đẩy đầy đủ** xuống:
-
-- `RunReport`
-- `ReplayCompareResult`
-- `BenchmarkArtifactWriter` CSV/JSON summary
-
-Nếu AI tiếp theo muốn làm tiếp Groq observability, đây là bước hợp lý nhất:
-
-- thêm run/session-level LLM summary
-- flatten xuống benchmark CSV
-- có delta compare cho fallback/latency
-
-### Ưu tiên 3 — ổn định run/session identity
-
-Hiện shadow request trong Omega vẫn dùng:
-
-- `runId = "dispatch-live"`
-
-Nếu muốn join decision facts với run reports sạch hơn, nên:
-
-- tạo stable run/session id từ `SimulationEngine` khi run bắt đầu
-- truyền xuống Omega và exporter
-
-### Ưu tiên 4 — surfacing lên UI/admin
-
-Admin snapshot đã có `llmRuntimeStatus`, nhưng UI/control-plane chưa chắc đã show hết.
-
-Nếu muốn “wow” khi demo:
-
-- show provider
-- selected model
-- fallback rate
-- p95 latency
-- circuit status
-
-## 8. Lưu ý bảo mật và vận hành
-
-- Khóa Groq mà user từng dán trong chat **phải được revoke và tạo mới**
-- Repo hiện **không được phép** ghi raw API key vào source/log/facts
-- Mình đã quét `gsk_` trong workspace; hiện chỉ còn:
-  - pattern check trong code
-  - dummy key trong test
-  - **không có live key đó** trong source file vừa sửa
-
-Env cần thiết nếu bật Groq:
-
-```env
-GROQ_ENABLED=true
-GROQ_MODE=SHADOW
-GROQ_API_KEY=...
-GROQ_CHAT_COMPLETIONS_URL=https://api.groq.com/openai/v1/chat/completions
-GROQ_TIMEOUT_MS=1200
-GROQ_MAX_CANDIDATES=4
-GROQ_ROUTING_POLICY=FREE_TIER_BALANCED
-```
-
-## 9. Trạng thái worktree hiện tại
-
-Repo đang rất dirty vì nhiều phase trước cộng dồn.
-
-Ngoài source changes, các file/dir phát sinh bởi build/test hiện có:
-
-- `.gradle-user/`
-- `.javac-deps/`
-- `build/`
-- `routechain.db`
-
-AI tiếp theo nên cẩn thận:
-
-- không assume worktree sạch
-- không reset bừa
-- nếu cần commit thì commit chọn lọc đúng scope
-
-## 10. Gợi ý cho AI tiếp theo
-
-Nếu tiếp quản ngay bây giờ, nên đi theo thứ tự:
-
-1. Đọc nhanh:
-   - `src/main/java/com/routechain/ai/OmegaDispatchAgent.java`
-   - `src/main/java/com/routechain/simulation/SimulationEngine.java`
-   - `src/main/java/com/routechain/ai/GroqLLMAdvisorClient.java`
-   - `src/main/java/com/routechain/infra/PlatformRuntimeBootstrap.java`
-2. Chạy lại:
-   - `compileJava`
-   - 3 test Groq
-   - `scenarioBatch`
-3. Sau đó chọn một trong hai lane:
-   - lane `business recovery` cho Omega KPI
-   - lane `LLM observability/reporting` cho RunReport/ReplayCompare/CSV
-
-Nếu mục tiêu là nâng điểm đồ án nhanh nhất, hãy ưu tiên lane `business recovery` trước.
+# RouteChain Apex - Sprint Handoff (2026-03-30)
+
+## 1) Muc tieu sprint nay
+
+Chay song song 2 lane:
+
+- Lane A (Business Recovery Omega):
+  - giam deadhead
+  - tang completion
+  - giu launch3, mo wait3 co kiem soat
+  - giu heavy_rain/storm conservative
+- Lane B (Big Data + AI Production Nho):
+  - chuan hoa run/session identity
+  - nang cap contracts cho decision/outcome/report
+  - bo sung run-level decomposition + artifact flatten
+  - giu LLM o shadow/advisory, khong override hot path
+
+## 2) Da implement gi
+
+### 2.1 Lane A - Dispatch recovery core
+
+Da implement cac khoi chinh:
+
+- `DispatchPlan` duoc nang cap voi:
+  - `selectionBucket`
+  - `holdRemainingCycles`, `holdReason`, `holdAnchorZoneId`
+  - `marginalDeadheadPerAddedOrder`, `pickupSpreadKm`, `waveReadinessScore`
+  - `executionScore`, `futureScore`, `executionGatePassed`
+  - coverage metadata (`coverageQuality`, `replacementDepth`, `borrowedDependencyScore`, `emptyRiskAfter`)
+- `OmegaDispatchAgent`:
+  - split scoring thanh `executionScore` + `futureScore`
+  - them execution gate (deadhead/on-time/post-completion empty)
+  - them shortlist 3 slot (`wave/extension`, `hold`, `fallback`)
+  - them run-aware dispatch (`dispatch(..., runId)`)
+  - them recovery decomposition stats collector
+- `AssignmentSolver`:
+  - matching theo buckets:
+    - `WAVE_LOCAL`, `EXTENSION_LOCAL`, `HOLD_WAIT3`, `FALLBACK_LOCAL_LOW_DEADHEAD`, `BORROWED_COVERAGE`, `EMERGENCY_COVERAGE`
+  - cap 1 best plan / bucket / driver, cap tong 6 plan/driver
+  - pass order matching co dinh theo bucket
+  - quota theo zone cho borrowed/emergency
+- `DriverPlanGenerator`:
+  - retune hold trigger
+  - `hasWaveExtensionOpportunity(...)` quality-aware hon
+  - metadata bucket/hold TTL/hold reason duoc set ngay tai generator
+- `SimulationEngine`:
+  - mini-dispatch cho hold TTL
+  - split deadhead metrics theo wave/fallback/borrowed
+  - pre-pickup augmentation path duoc cung co
+  - them run-level recovery accumulator
+
+### 2.2 Lane B - Contract / observability / artifact
+
+Da implement:
+
+- Run identity:
+  - `SimulationEngine` so huu `runId` on dinh cho moi run
+  - `OmegaDispatchAgent` nhan va propagate `runId`
+  - bo hardcode `"dispatch-live"` tren advisory path
+- Contracts:
+  - `DispatchFactSink.DecisionFact` them: `runId`, `selectionBucket`, `holdTtlRemaining`, `marginalDeadheadPerAddedOrder`
+  - `DispatchFactSink.OutcomeFact` them `runId`
+  - `Events.DispatchDecision` them cac field bucket/hold/deadhead-margin + runId
+- New AI/data types:
+  - `DecisionContextV2`
+  - `RouteAlternative`
+  - `PolicyEvaluationRecord`
+- Recovery decomposition:
+  - `DispatchRecoveryDecomposition`
+  - `DispatchRecoveryDecompositionDelta`
+  - gan vao `OmegaDispatchAgent.DispatchResult`, `RunReport`, `ReplayCompareResult`
+- Artifact/export:
+  - `RunReport` them deadhead business metrics moi:
+    - `avgAssignedDeadheadKm`
+    - `deadheadPerCompletedOrderKm`
+    - `deadheadPerAssignedOrderKm`
+    - `borrowedDeadheadPerExecutedOrderKm`
+    - `fallbackDeadheadPerExecutedOrderKm`
+    - `waveDeadheadPerExecutedOrderKm`
+  - `RunReportExporter` dung runId on dinh tu runtime
+  - `BenchmarkArtifactWriter` CSV duoc flatten them metric funnel/deadhead
+
+## 3) File moi tao
+
+- `src/main/java/com/routechain/simulation/SelectionBucket.java`
+- `src/main/java/com/routechain/simulation/DispatchRecoveryDecomposition.java`
+- `src/main/java/com/routechain/simulation/DispatchRecoveryDecompositionDelta.java`
+- `src/main/java/com/routechain/ai/DecisionContextV2.java`
+- `src/main/java/com/routechain/ai/RouteAlternative.java`
+- `src/main/java/com/routechain/ai/PolicyEvaluationRecord.java`
+
+## 4) Ket qua benchmark moi nhat (sau implement + retune)
+
+Ngay chot: 2026-03-30 (Asia/Saigon)
+
+### 4.1 `stressTuneBatch` (seed 42/77/123) - Mean Delta (Omega - Legacy)
+
+- `normal`:
+  - completion `-3.3pp`
+  - onTime `-17.7pp`
+  - deadhead `+31.4pp`
+  - wait3 `+1.0pp`
+  - launch3 `+2.0pp`
+- `rush_hour`:
+  - completion `-4.6pp`
+  - onTime `-1.4pp`
+  - deadhead `+41.7pp`
+  - wait3 `+1.6pp`
+  - launch3 `+43.8pp`
+- `demand_spike`:
+  - completion `-4.0pp`
+  - onTime `-7.3pp`
+  - deadhead `+50.5pp`
+  - wait3 `+0.0pp`
+  - launch3 `+16.4pp`
+- `heavy_rain`:
+  - completion `-8.6pp`
+  - onTime `+4.6pp`
+  - deadhead `+51.4pp`
+  - safety regime van conservative nhung KPI business xau
+
+### 4.2 Ket luan acceptance
+
+Chua dat gate business sprint:
+
+- chua dat deadhead giam >=20pp
+- chua dat completion tang >=4pp
+- wait3 da duoc keo xuong muc thap (gan 0-1.6pp), nhung tong KPI van thua baseline
+- launch3 co tang o mot so scenario, nhung tra gia bang deadhead/cancel/completion
+
+## 5) Test / validation da chay
+
+Da pass:
+
+- `./gradlew.bat --no-daemon compileJava`
+- `./gradlew.bat --no-daemon scenarioBatch`
+- `./gradlew.bat --no-daemon stressTuneBatch`
+- `./gradlew.bat --no-daemon test --tests com.routechain.ai.DriverPlanGeneratorProfileTest --tests com.routechain.simulation.SimulationPrePickupAugmentationTest --tests com.routechain.simulation.RunReportPolicyMetricsTest --tests com.routechain.simulation.ReplayCompareResultPolicyMetricsTest --tests com.routechain.simulation.BenchmarkArtifactWriterTest --tests com.routechain.infra.PlatformRuntimeBootstrapGroqRouterTest --tests com.routechain.simulation.AssignmentSolverThreeOrderPolicyTest`
+
+## 6) Risk / ton dong quan trong
+
+- KPI business van thua baseline ro ret o cac scenario chinh.
+- Duong lane A hien tai co xu huong:
+  - launch3/3plus cao hon
+  - nhung downgrade + deadhead + cancel van bi doi cao
+- Can tuning tiep theo thu tu:
+  1. deadhead economics
+  2. completion recovery
+  3. launch3 stability
+  4. wait3/augment control
+
+## 7) Huong tiep theo de code tiep (uu tien cao -> thap)
+
+1. **Fix deadhead economics truoc**
+- Siet lai borrowed/fallback economics trong clean regime.
+- Giam winner bias cho route xa nhung score tong cao.
+
+2. **Retune wave launch quality gate**
+- Khong thuong launch3 neu marginal deadhead per added order xau.
+- Bat buoc wave readiness + on-time + corridor dong thoi.
+
+3. **Giam downgrade o clean regime**
+- Cap lai nguong downgrade de tranh single/fallback thong tri.
+- Giam fallback direct ratio trong normal/rush_hour.
+
+4. **Reserve/coverage retune (khong rollback clustering)**
+- Tang local-first, han che borrowed thanh emergency that su.
+- Theo doi borrowed quota theo zone de tranh deadhead leak.
+
+5. **Artifact + observability tiep tuc**
+- Giu run-level decomposition hien co.
+- Them dashboard layer o batch sau (khong can doi hot path trong sprint KPI).
+
+## 8) Ghi chu quan trong cho nguoi nhan handoff
+
+- Khong reset/revert cac thay doi dynamic clustering + run-level observability.
+- Khong mo them scope UI/LLM control plane trong sprint KPI.
+- LLM van shadow/advisory only.
+- Neu tiep tuc tuning, bat buoc su dung gate:
+  - `stressTuneBatch` da seed (42/77/123) la gate chinh
+  - `scenarioBatch` chi smoke regression

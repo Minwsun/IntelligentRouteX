@@ -79,6 +79,12 @@ public class SimulationEngine {
     private volatile int realAssignedPlanCount = 0;
     private volatile int holdOnlySelectionCount = 0;
     private volatile int prePickupAugmentationCount = 0;
+    private volatile double borrowedExecutedDeadheadKm = 0.0;
+    private volatile double fallbackExecutedDeadheadKm = 0.0;
+    private volatile double waveExecutedDeadheadKm = 0.0;
+    private volatile DispatchRecoveryDecomposition recoveryAccumulator =
+            DispatchRecoveryDecomposition.empty();
+    private volatile String currentRunId = "RUN-" + UUID.randomUUID().toString().substring(0, 8);
 
     // AI dispatch agent (Omega — learned multi-agent brain)
     private final OmegaDispatchAgent omegaAgent;
@@ -101,6 +107,7 @@ public class SimulationEngine {
     private static final double LOCAL_MINI_DISPATCH_MAX_DETOUR_KM = 1.1;
     private static final double LOCAL_MINI_DISPATCH_MAX_FIRST_PICKUP_DELAY_MIN = 4.0;
     private volatile boolean miniDispatchRequested = false;
+    private final Map<String, Integer> holdCyclesByDriver = new ConcurrentHashMap<>();
 
     public SimulationEngine() {
         this(42L);
@@ -133,6 +140,8 @@ public class SimulationEngine {
     public void start() {
         if (lifecycle == SimulationLifecycle.RUNNING) return;
 
+        currentRunId = "RUN-" + UUID.randomUUID().toString().substring(0, 8);
+        omegaAgent.setActiveRunId(currentRunId);
         initializeDrivers(initialDriverCount);
         lifecycle = SimulationLifecycle.RUNNING;
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -195,7 +204,14 @@ public class SimulationEngine {
         realAssignedPlanCount = 0;
         holdOnlySelectionCount = 0;
         prePickupAugmentationCount = 0;
+        borrowedExecutedDeadheadKm = 0.0;
+        fallbackExecutedDeadheadKm = 0.0;
+        waveExecutedDeadheadKm = 0.0;
+        recoveryAccumulator = DispatchRecoveryDecomposition.empty();
         miniDispatchRequested = false;
+        holdCyclesByDriver.clear();
+        currentRunId = "RUN-" + UUID.randomUUID().toString().substring(0, 8);
+        omegaAgent.setActiveRunId(currentRunId);
         omegaAgent.reset();
         legacyDispatchAgent.reset();
         reDispatchEngine.reset();
@@ -257,6 +273,8 @@ public class SimulationEngine {
     public void tickHeadless() {
         if (lifecycle != SimulationLifecycle.RUNNING) {
             lifecycle = SimulationLifecycle.RUNNING;
+            currentRunId = "RUN-" + UUID.randomUUID().toString().substring(0, 8);
+            omegaAgent.setActiveRunId(currentRunId);
             routingService.setHeadlessMode(true);
             initializeDrivers(initialDriverCount);
         }
@@ -295,6 +313,10 @@ public class SimulationEngine {
         activeOrders.add(order);
         eventBus.publish(new OrderCreated(order));
         dbService.saveOrder(order);
+        tryImmediatePrePickupAugmentForInjectedOrder(order);
+        if (dispatchMode == DispatchMode.OMEGA && hasPrePickupAugmentableDrivers()) {
+            miniDispatchRequested = true;
+        }
         System.out.println("[Editor] Injected order " + id + " at " +
                 String.format("(%.5f, %.5f)", pickup.lat(), pickup.lng()));
     }
@@ -328,6 +350,64 @@ public class SimulationEngine {
         return nearestId;
     }
 
+    private boolean hasPrePickupAugmentableDrivers() {
+        return drivers.stream().anyMatch(Driver::isPrePickupAugmentable);
+    }
+
+    private void tryImmediatePrePickupAugmentForInjectedOrder(Order order) {
+        if (order == null || dispatchMode != DispatchMode.OMEGA) {
+            return;
+        }
+
+        Driver candidate = drivers.stream()
+                .filter(driver -> !driver.hasCompletedFirstPickup())
+                .filter(driver -> driver.getCurrentOrderCount() >= 3
+                        && driver.getCurrentOrderCount() < LOCAL_MINI_DISPATCH_MAX_BUNDLE_SIZE)
+                .filter(driver -> driver.getState() == DriverState.ROUTE_PENDING
+                        || driver.getState() == DriverState.PICKUP_EN_ROUTE
+                        || driver.getState() == DriverState.WAITING_PICKUP)
+                .min(Comparator.comparingDouble(driver ->
+                        driver.getCurrentLocation().distanceTo(order.getPickupPoint())))
+                .orElse(null);
+        if (candidate == null || candidate.getActiveOrderIds().contains(order.getId())) {
+            return;
+        }
+
+        double pickupKm = candidate.getCurrentLocation().distanceTo(order.getPickupPoint()) / 1000.0;
+        if (pickupKm > 1.2) {
+            return;
+        }
+
+        List<DispatchPlan.Stop> baseSequence = remainingSequence(candidate);
+        if (baseSequence.isEmpty()) {
+            return;
+        }
+
+        order.assignDriver(candidate.getId(), clock.currentInstant());
+        candidate.addOrder(order.getId());
+
+        List<DispatchPlan.Stop> mergedSequence = new ArrayList<>(baseSequence);
+        DispatchPlan.Stop tail = mergedSequence.get(mergedSequence.size() - 1);
+        GeoPoint anchor = tail.location();
+        double etaCursor = tail.estimatedArrivalMinutes();
+
+        double toPickupKm = anchor.distanceTo(order.getPickupPoint()) / 1000.0;
+        etaCursor += Math.max(0.8, toPickupKm / 18.0 * 60.0);
+        mergedSequence.add(new DispatchPlan.Stop(
+                order.getId(), order.getPickupPoint(), DispatchPlan.Stop.StopType.PICKUP, etaCursor));
+
+        double toDropKm = order.getPickupPoint().distanceTo(order.getDropoffPoint()) / 1000.0;
+        etaCursor += Math.max(1.2, toDropKm / 22.0 * 60.0);
+        mergedSequence.add(new DispatchPlan.Stop(
+                order.getId(), order.getDropoffPoint(), DispatchPlan.Stop.StopType.DROPOFF, etaCursor));
+
+        candidate.replaceAssignedSequenceBeforeFirstPickup(List.copyOf(mergedSequence));
+        candidate.clearRouteWaypoints();
+        queueDriverRoute(candidate, mergedSequence.get(0).location(), DriverState.PICKUP_EN_ROUTE, 0);
+        prePickupAugmentationCount++;
+        miniDispatchRequested = true;
+    }
+
     // ── Core tick ───────────────────────────────────────────────────────
     private void tick() {
         try {
@@ -339,6 +419,11 @@ public class SimulationEngine {
             if (clock.isMovementBoundary()) {
                 routingService.advanceSimulationSubTick();
                 activateReadyRoutes();
+                if (miniDispatchRequested
+                        && dispatchMode == DispatchMode.OMEGA
+                        && hasPrePickupAugmentableDrivers()) {
+                    dispatchPendingOrders(true);
+                }
                 moveDrivers();
                 processDeliveries();
                 if (miniDispatchRequested && dispatchMode == DispatchMode.OMEGA) {
@@ -655,7 +740,8 @@ public class SimulationEngine {
             OmegaDispatchAgent.DispatchResult result = omegaAgent.dispatch(
                     new ArrayList<>(pending), new ArrayList<>(available),
                     drivers, activeOrders, simulatedHour,
-                    trafficIntensity, weatherProfile, clock.currentInstant());
+                    trafficIntensity, weatherProfile, clock.currentInstant(), currentRunId);
+            recoveryAccumulator = recoveryAccumulator.plus(result.recovery());
             selectedPlans = result.plans();
         }
 
@@ -669,6 +755,18 @@ public class SimulationEngine {
             if (plan.getOrders().isEmpty()) {
                 if (plan.isWaitingForThirdOrder()) {
                     cleanRegimeWaveAssemblyHoldCount++;
+                    int remaining = holdCyclesByDriver.getOrDefault(
+                            best.getId(),
+                            Math.max(0, plan.getHoldRemainingCycles()));
+                    if (miniDispatch) {
+                        remaining = Math.max(0, remaining - 1);
+                    }
+                    if (remaining > 0) {
+                        holdCyclesByDriver.put(best.getId(), remaining);
+                        miniDispatchRequested = true;
+                    } else {
+                        holdCyclesByDriver.remove(best.getId());
+                    }
                 }
                 holdOnlySelectionCount++;
                 if (plan.getBundle().bundleId().startsWith("REPOS") && !plan.getSequence().isEmpty()) {
@@ -681,8 +779,15 @@ public class SimulationEngine {
                 }
                 continue; // HOLD plans or invalid REPOS plans just skip assignment
             }
+            holdCyclesByDriver.remove(best.getId());
 
             DispatchPlan executablePlan = maybeAugmentPrePickupPlan(plan);
+            if (executablePlan.getBundleSize() <= plan.getBundleSize()) {
+                DispatchPlan forcedAugmentedPlan = maybeForceMergePrePickupPlan(executablePlan);
+                if (forcedAugmentedPlan.getBundleSize() > executablePlan.getBundleSize()) {
+                    executablePlan = forcedAugmentedPlan;
+                }
+            }
             if (executablePlan.getBundleSize() > plan.getBundleSize()) {
                 prePickupAugmentationCount++;
             }
@@ -744,6 +849,15 @@ public class SimulationEngine {
             double deadheadKm = executablePlan.getPredictedDeadheadKm();
             totalDeadheadKm += deadheadKm;
             best.addDeadheadDistance(deadheadKm);
+            if (executablePlan.getSelectionBucket() == SelectionBucket.BORROWED_COVERAGE
+                    || executablePlan.getSelectionBucket() == SelectionBucket.EMERGENCY_COVERAGE) {
+                borrowedExecutedDeadheadKm += deadheadKm;
+            } else if (executablePlan.getSelectionBucket() == SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD) {
+                fallbackExecutedDeadheadKm += deadheadKm;
+            } else if (executablePlan.getSelectionBucket() == SelectionBucket.WAVE_LOCAL
+                    || executablePlan.getSelectionBucket() == SelectionBucket.EXTENSION_LOCAL) {
+                waveExecutedDeadheadKm += deadheadKm;
+            }
             best.setContinuationValueCurrentZone(executablePlan.getEndZoneOpportunity());
             best.setOverloadRisk(executablePlan.getCancellationRisk());
             ensureRouteMetrics(executablePlan, best);
@@ -766,9 +880,16 @@ public class SimulationEngine {
             }
 
             eventBus.publish(new DispatchDecision(
-                    executablePlan.getOrders().get(0).getId(), best.getId(),
-                    executablePlan.getTotalScore(), executablePlan.getPredictedTotalMinutes(),
-                    deadheadKm, executablePlan.getConfidence()));
+                    currentRunId,
+                    executablePlan.getOrders().get(0).getId(),
+                    best.getId(),
+                    executablePlan.getSelectionBucket().name(),
+                    executablePlan.getTotalScore(),
+                    executablePlan.getPredictedTotalMinutes(),
+                    deadheadKm,
+                    executablePlan.getConfidence(),
+                    executablePlan.getHoldRemainingCycles(),
+                    executablePlan.getMarginalDeadheadPerAddedOrder()));
 
             for (Order order : newlyAssignedOrders) {
                 eventBus.publish(new OrderAssigned(order.getId(), best.getId()));
@@ -905,6 +1026,123 @@ public class SimulationEngine {
         augmentedPlan.setHardThreeOrderPolicyActive(plan.isHardThreeOrderPolicyActive());
         augmentedPlan.setHarshWeatherStress(plan.isHarshWeatherStress());
         augmentedPlan.setStressRegime(plan.getStressRegime());
+        augmentedPlan.setRunId(plan.getRunId());
+        augmentedPlan.setSelectionBucket(SelectionBucket.EXTENSION_LOCAL);
+        return augmentedPlan;
+    }
+
+    private DispatchPlan maybeForceMergePrePickupPlan(DispatchPlan plan) {
+        Driver driver = plan.getDriver();
+        if (driver == null || !driver.isPrePickupAugmentable() || plan.getOrders().isEmpty()) {
+            return plan;
+        }
+        if (weatherProfile == WeatherProfile.HEAVY_RAIN || weatherProfile == WeatherProfile.STORM) {
+            return plan;
+        }
+
+        List<Order> existingOrders = activeOrders.stream()
+                .filter(order -> driver.getId().equals(order.getAssignedDriverId()))
+                .filter(this::isPendingPickupOrder)
+                .toList();
+        if (existingOrders.isEmpty()) {
+            return plan;
+        }
+
+        LinkedHashMap<String, Order> mergedOrderMap = new LinkedHashMap<>();
+        for (Order order : existingOrders) {
+            mergedOrderMap.put(order.getId(), order);
+        }
+        int existingCount = mergedOrderMap.size();
+        for (Order order : plan.getOrders()) {
+            mergedOrderMap.putIfAbsent(order.getId(), order);
+        }
+        if (mergedOrderMap.size() <= existingCount || mergedOrderMap.size() > LOCAL_MINI_DISPATCH_MAX_BUNDLE_SIZE) {
+            return plan;
+        }
+
+        List<DispatchPlan.Stop> baseSequence = remainingSequence(driver);
+        if (baseSequence.isEmpty()) {
+            return plan;
+        }
+        Set<String> baseSequenceOrderIds = new HashSet<>();
+        for (DispatchPlan.Stop stop : baseSequence) {
+            baseSequenceOrderIds.add(stop.orderId());
+        }
+
+        List<Order> newOrders = plan.getOrders().stream()
+                .filter(order -> !baseSequenceOrderIds.contains(order.getId()))
+                .toList();
+        if (newOrders.isEmpty()) {
+            return plan;
+        }
+
+        List<DispatchPlan.Stop> mergedSequence = new ArrayList<>(baseSequence);
+        DispatchPlan.Stop tailStop = mergedSequence.get(mergedSequence.size() - 1);
+        GeoPoint anchor = tailStop.location();
+        double etaCursor = tailStop.estimatedArrivalMinutes();
+
+        for (Order order : newOrders) {
+            double toPickupKm = anchor.distanceTo(order.getPickupPoint()) / 1000.0;
+            etaCursor += Math.max(0.8, toPickupKm / 18.0 * 60.0);
+            mergedSequence.add(new DispatchPlan.Stop(
+                    order.getId(),
+                    order.getPickupPoint(),
+                    DispatchPlan.Stop.StopType.PICKUP,
+                    etaCursor));
+
+            double toDropKm = order.getPickupPoint().distanceTo(order.getDropoffPoint()) / 1000.0;
+            etaCursor += Math.max(1.2, toDropKm / 22.0 * 60.0);
+            mergedSequence.add(new DispatchPlan.Stop(
+                    order.getId(),
+                    order.getDropoffPoint(),
+                    DispatchPlan.Stop.StopType.DROPOFF,
+                    etaCursor));
+            anchor = order.getDropoffPoint();
+        }
+
+        List<Order> mergedOrders = new ArrayList<>(mergedOrderMap.values());
+        DispatchPlan.Bundle mergedBundle = new DispatchPlan.Bundle(
+                "AUG-FORCE-" + UUID.randomUUID().toString().substring(0, 6),
+                List.copyOf(mergedOrders),
+                mergedOrders.stream().mapToDouble(Order::getQuotedFee).sum(),
+                mergedOrders.size());
+
+        DispatchPlan augmentedPlan = new DispatchPlan(driver, mergedBundle, List.copyOf(mergedSequence));
+        int addedOrders = Math.max(1, mergedOrders.size() - Math.max(1, plan.getBundleSize()));
+        augmentedPlan.setTraceId(plan.getTraceId() + "-AUGF");
+        augmentedPlan.setTotalScore(plan.getTotalScore() + Math.min(0.08, addedOrders * 0.02));
+        augmentedPlan.setConfidence(Math.max(plan.getConfidence(), 0.55));
+        augmentedPlan.setPredictedDeadheadKm(plan.getPredictedDeadheadKm());
+        augmentedPlan.setPredictedTotalMinutes(Math.max(plan.getPredictedTotalMinutes(), etaCursor));
+        augmentedPlan.setOnTimeProbability(Math.max(0.25, plan.getOnTimeProbability() - addedOrders * 0.02));
+        augmentedPlan.setLateRisk(Math.min(0.98, plan.getLateRisk() + addedOrders * 0.03));
+        augmentedPlan.setCancellationRisk(Math.min(0.98, plan.getCancellationRisk() + addedOrders * 0.02));
+        augmentedPlan.setDriverProfit(plan.getDriverProfit());
+        augmentedPlan.setCustomerFee(mergedOrders.stream().mapToDouble(Order::getQuotedFee).sum());
+        augmentedPlan.setBundleEfficiency(Math.max(
+                plan.getBundleEfficiency(),
+                mergedOrders.size() / (double) Math.max(1, plan.getBundleSize())));
+        augmentedPlan.setEndZoneOpportunity(plan.getEndZoneOpportunity());
+        augmentedPlan.setNextOrderAcquisitionScore(plan.getNextOrderAcquisitionScore());
+        augmentedPlan.setCongestionPenalty(plan.getCongestionPenalty());
+        augmentedPlan.setRepositionPenalty(plan.getRepositionPenalty());
+        augmentedPlan.setRemainingDropProximityScore(plan.getRemainingDropProximityScore());
+        augmentedPlan.setDeliveryCorridorScore(plan.getDeliveryCorridorScore());
+        augmentedPlan.setLastDropLandingScore(plan.getLastDropLandingScore());
+        augmentedPlan.setExpectedPostCompletionEmptyKm(plan.getExpectedPostCompletionEmptyKm());
+        augmentedPlan.setDeliveryZigZagPenalty(plan.getDeliveryZigZagPenalty());
+        augmentedPlan.setExpectedNextOrderIdleMinutes(plan.getExpectedNextOrderIdleMinutes());
+        augmentedPlan.setStressFallbackOnly(mergedOrders.size() < 3 && plan.isStressFallbackOnly());
+        augmentedPlan.setWaveLaunchEligible(mergedOrders.size() >= 3);
+        augmentedPlan.setWaitingForThirdOrder(false);
+        augmentedPlan.setHardThreeOrderPolicyActive(plan.isHardThreeOrderPolicyActive());
+        augmentedPlan.setHarshWeatherStress(plan.isHarshWeatherStress());
+        augmentedPlan.setStressRegime(plan.getStressRegime());
+        augmentedPlan.setRunId(plan.getRunId());
+        augmentedPlan.setSelectionBucket(SelectionBucket.EXTENSION_LOCAL);
+        augmentedPlan.setExecutionGatePassed(plan.isExecutionGatePassed());
+        augmentedPlan.setExecutionScore(plan.getExecutionScore());
+        augmentedPlan.setFutureScore(plan.getFutureScore());
         return augmentedPlan;
     }
 
@@ -1435,7 +1673,7 @@ public class SimulationEngine {
     }
 
     public RunReport createRunReport(String scenarioName, long seed) {
-        RunReportExporter exporter = new RunReportExporter(scenarioName, seed, clock.startInstant());
+        RunReportExporter exporter = new RunReportExporter(currentRunId, scenarioName, seed, clock.startInstant());
         return exporter.generateReport(
                 drivers, completedOrders, cancelledOrders, activeOrders,
                 totalDelivered, totalLateDelivered, totalDeadheadKm, totalEarnings,
@@ -1450,6 +1688,8 @@ public class SimulationEngine {
                 cleanRegimeWaveAssemblyHoldCount, cleanRegimeThirdOrderLaunchCount,
                 stressDowngradeSelectionCount, totalSelectedOrderPlanCount,
                 realAssignedPlanCount, holdOnlySelectionCount, prePickupAugmentationCount,
+                borrowedExecutedDeadheadKm, fallbackExecutedDeadheadKm, waveExecutedDeadheadKm,
+                recoveryAccumulator,
                 clock.currentInstant()
         );
     }

@@ -34,9 +34,9 @@ public final class BenchmarkArtifactWriter {
                     StandardOpenOption.TRUNCATE_EXISTING
             );
             appendCsv(RUNS_CSV,
-                    "runId,scenario,seed,completion,onTime,cancel,deadhead,visible3plus,corridor,goodLast,emptyKm,nextIdle,realAssign,steadyAssign,launch3,recover3,downgrade,augment,holdOnly",
+                    "runId,scenario,seed,completion,onTime,cancel,deadhead,visible3plus,corridor,goodLast,emptyKm,nextIdle,realAssign,steadyAssign,launch3,recover3,downgrade,augment,holdOnly,waveExec,holdConv,fallbackDirect,borrowedExec,avgAssignedDeadheadKm,deadheadPerCompletedOrderKm",
                     String.format(
-                            "%s,%s,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f",
+                            "%s,%s,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f",
                             safe(report.runId()),
                             safe(report.scenarioName()),
                             report.seed(),
@@ -55,7 +55,13 @@ public final class BenchmarkArtifactWriter {
                             report.cleanWaveRecoveryRate(),
                             report.stressDowngradeRate(),
                             report.prePickupAugmentRate(),
-                            report.holdOnlySelectionRate()));
+                            report.holdOnlySelectionRate(),
+                            report.recovery().waveExecutionRate(),
+                            report.recovery().holdConversionRate(),
+                            report.recovery().fallbackDirectRate(),
+                            report.recovery().borrowedSelectionRate(),
+                            report.avgAssignedDeadheadKm(),
+                            report.deadheadPerCompletedOrderKm()));
             PlatformRuntimeBootstrap.recordRunReport(report);
         } catch (IOException e) {
             throw new IllegalStateException("Unable to write benchmark run artifact", e);
@@ -74,9 +80,9 @@ public final class BenchmarkArtifactWriter {
                     StandardOpenOption.TRUNCATE_EXISTING
             );
             appendCsv(COMPARES_CSV,
-                    "runIdA,runIdB,scenarioA,scenarioB,verdict,gain,completionDelta,onTimeDelta,cancelDelta,deadheadDelta,visible3plusDelta,corridorDelta,goodLastDelta,emptyKmDelta,realAssignDelta,steadyAssignDelta,wait3Delta,launch3Delta,recover3Delta,downgradeDelta,augmentDelta,holdOnlyDelta",
+                    "runIdA,runIdB,scenarioA,scenarioB,verdict,gain,completionDelta,onTimeDelta,cancelDelta,deadheadDelta,visible3plusDelta,corridorDelta,goodLastDelta,emptyKmDelta,realAssignDelta,steadyAssignDelta,wait3Delta,launch3Delta,recover3Delta,downgradeDelta,augmentDelta,holdOnlyDelta,waveExecDelta,holdConvDelta,fallbackDirectDelta,borrowedExecDelta,deadheadPerCompletedOrderKmDelta",
                     String.format(
-                            "%s,%s,%s,%s,%s,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f",
+                            "%s,%s,%s,%s,%s,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%.3f",
                             safe(compare.runIdA()),
                             safe(compare.runIdB()),
                             safe(compare.scenarioA()),
@@ -98,7 +104,12 @@ public final class BenchmarkArtifactWriter {
                             compare.cleanWaveRecoveryRateDelta(),
                             compare.stressDowngradeRateDelta(),
                             compare.prePickupAugmentRateDelta(),
-                            compare.holdOnlySelectionRateDelta()));
+                            compare.holdOnlySelectionRateDelta(),
+                            compare.recoveryDelta() == null ? 0 : compare.recoveryDelta().executedWaveCountDelta(),
+                            compare.recoveryDelta() == null ? 0 : compare.recoveryDelta().holdConvertedToWaveCountDelta(),
+                            compare.recoveryDelta() == null ? 0 : compare.recoveryDelta().executedFallbackCountDelta(),
+                            compare.recoveryDelta() == null ? 0 : compare.recoveryDelta().executedBorrowedCountDelta(),
+                            compare.deadheadPerCompletedOrderKmDelta()));
             PlatformRuntimeBootstrap.recordReplayCompare(compare);
         } catch (IOException e) {
             throw new IllegalStateException("Unable to write replay compare artifact", e);

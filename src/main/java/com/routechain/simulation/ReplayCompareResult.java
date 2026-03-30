@@ -33,6 +33,13 @@ public record ReplayCompareResult(
         double prePickupAugmentRateDelta,
         double holdOnlySelectionRateDelta,
         double nonDowngradedRealAssignmentRateDelta,
+        double avgAssignedDeadheadKmDelta,
+        double deadheadPerCompletedOrderKmDelta,
+        double deadheadPerAssignedOrderKmDelta,
+        double borrowedDeadheadPerExecutedOrderKmDelta,
+        double fallbackDeadheadPerExecutedOrderKmDelta,
+        double waveDeadheadPerExecutedOrderKmDelta,
+        DispatchRecoveryDecompositionDelta recoveryDelta,
         String verdict,
         double overallGainPercent
 ) {
@@ -58,7 +65,7 @@ public record ReplayCompareResult(
         double realAssignmentDelta = ai.realAssignmentRate() - baseline.realAssignmentRate();
         double waitDelta = ai.waveAssemblyWaitRate() - baseline.waveAssemblyWaitRate();
         double launchDelta = ai.thirdOrderLaunchRate() - baseline.thirdOrderLaunchRate();
-        double recoveryDelta = ai.cleanWaveRecoveryRate() - baseline.cleanWaveRecoveryRate();
+        double recoveryRateDelta = ai.cleanWaveRecoveryRate() - baseline.cleanWaveRecoveryRate();
         double subThreeDelta =
                 ai.selectedSubThreeRateInCleanRegime() - baseline.selectedSubThreeRateInCleanRegime();
         double downgradeDelta = ai.stressDowngradeRate() - baseline.stressDowngradeRate();
@@ -66,6 +73,19 @@ public record ReplayCompareResult(
         double holdOnlyDelta = ai.holdOnlySelectionRate() - baseline.holdOnlySelectionRate();
         double steadyAssignmentDelta =
                 ai.nonDowngradedRealAssignmentRate() - baseline.nonDowngradedRealAssignmentRate();
+        double avgAssignedDeadheadKmDelta = ai.avgAssignedDeadheadKm() - baseline.avgAssignedDeadheadKm();
+        double deadheadPerCompletedOrderKmDelta =
+                ai.deadheadPerCompletedOrderKm() - baseline.deadheadPerCompletedOrderKm();
+        double deadheadPerAssignedOrderKmDelta =
+                ai.deadheadPerAssignedOrderKm() - baseline.deadheadPerAssignedOrderKm();
+        double borrowedDeadheadPerExecutedOrderKmDelta =
+                ai.borrowedDeadheadPerExecutedOrderKm() - baseline.borrowedDeadheadPerExecutedOrderKm();
+        double fallbackDeadheadPerExecutedOrderKmDelta =
+                ai.fallbackDeadheadPerExecutedOrderKm() - baseline.fallbackDeadheadPerExecutedOrderKm();
+        double waveDeadheadPerExecutedOrderKmDelta =
+                ai.waveDeadheadPerExecutedOrderKm() - baseline.waveDeadheadPerExecutedOrderKm();
+        DispatchRecoveryDecompositionDelta recoveryFunnelDelta =
+                DispatchRecoveryDecompositionDelta.compare(baseline.recovery(), ai.recovery());
 
         double gain =
                 compDelta * 0.20 +
@@ -84,12 +104,13 @@ public record ReplayCompareResult(
                 realAssignmentDelta * 0.015 +
                 (-waitDelta) * 0.012 +
                 launchDelta * 0.010 +
-                recoveryDelta * 0.010 +
+                recoveryRateDelta * 0.010 +
                 (-subThreeDelta) * 0.006 +
                 (-downgradeDelta) * 0.006 +
                 augmentDelta * 0.006 +
                 (-holdOnlyDelta) * 0.006 +
-                steadyAssignmentDelta * 0.010;
+                steadyAssignmentDelta * 0.010 +
+                (-deadheadPerCompletedOrderKmDelta) * 0.05;
 
         String verdict;
         if (gain > 1.0) {
@@ -123,12 +144,19 @@ public record ReplayCompareResult(
                 realAssignmentDelta,
                 waitDelta,
                 launchDelta,
-                recoveryDelta,
+                recoveryRateDelta,
                 subThreeDelta,
                 downgradeDelta,
                 augmentDelta,
                 holdOnlyDelta,
                 steadyAssignmentDelta,
+                avgAssignedDeadheadKmDelta,
+                deadheadPerCompletedOrderKmDelta,
+                deadheadPerAssignedOrderKmDelta,
+                borrowedDeadheadPerExecutedOrderKmDelta,
+                fallbackDeadheadPerExecutedOrderKmDelta,
+                waveDeadheadPerExecutedOrderKmDelta,
+                recoveryFunnelDelta,
                 verdict,
                 Math.round(gain * 10) / 10.0
         );
@@ -162,7 +190,8 @@ public record ReplayCompareResult(
                 "[Replay] %s vs %s | verdict=%s gain=%.1f%% | "
                         + "completion=%+.1f%% onTime=%+.1f%% cancel=%+.1f%% deadhead=%+.1f%% util=%+.2f | "
                         + "3plus=%+.1fpp corridor=%+.2f goodLast=%+.1fpp emptyKm=%+.2f | "
-                        + "realAssign=%+.1fpp steadyAssign=%+.1fpp wait3=%+.1fpp launch3=%+.1fpp recover3=%+.1fpp sub3=%+.1fpp downgrade=%+.1fpp augment=%+.1fpp holdOnly=%+.1fpp",
+                        + "realAssign=%+.1fpp steadyAssign=%+.1fpp wait3=%+.1fpp launch3=%+.1fpp recover3=%+.1fpp sub3=%+.1fpp downgrade=%+.1fpp augment=%+.1fpp holdOnly=%+.1fpp | "
+                        + "waveExec=%+d holdConv=%+d fallbackDirect=%+d borrowedExec=%+d dh/completed=%+.2fkm",
                 scenarioA,
                 scenarioB,
                 verdict,
@@ -184,7 +213,12 @@ public record ReplayCompareResult(
                 selectedSubThreeRateInCleanRegimeDelta,
                 stressDowngradeRateDelta,
                 prePickupAugmentRateDelta,
-                holdOnlySelectionRateDelta
+                holdOnlySelectionRateDelta,
+                recoveryDelta == null ? 0 : recoveryDelta.executedWaveCountDelta(),
+                recoveryDelta == null ? 0 : recoveryDelta.holdConvertedToWaveCountDelta(),
+                recoveryDelta == null ? 0 : recoveryDelta.executedFallbackCountDelta(),
+                recoveryDelta == null ? 0 : recoveryDelta.executedBorrowedCountDelta(),
+                deadheadPerCompletedOrderKmDelta
         );
     }
 }

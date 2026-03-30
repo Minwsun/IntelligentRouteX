@@ -44,8 +44,11 @@ public final class Events {
                               SurgeSeverity severity, String regionId, Instant timestamp) {}
 
     // ── Dispatch events ─────────────────────────────────────────────────
-    public record DispatchDecision(String orderId, String driverId, double score,
-                                    double etaMinutes, double deadheadKm, double confidence) {}
+    public record DispatchDecision(String runId, String orderId, String driverId,
+                                    String selectionBucket, double score,
+                                    double etaMinutes, double deadheadKm, double confidence,
+                                    int holdTtlRemaining,
+                                    double marginalDeadheadPerAddedOrder) {}
     public record ReDispatchTriggered(String orderId, String reason) {}
 
     // ── AI Insight events ───────────────────────────────────────────────

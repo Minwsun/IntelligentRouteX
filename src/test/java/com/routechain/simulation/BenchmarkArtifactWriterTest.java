@@ -110,7 +110,14 @@ class BenchmarkArtifactWriterTest {
                 70.0,
                 4.0,
                 6.0,
-                12.0
+                12.0,
+                1.18,
+                1.82,
+                1.31,
+                1.05,
+                1.14,
+                0.99,
+                DispatchRecoveryDecomposition.empty()
         );
     }
 }

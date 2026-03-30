@@ -39,6 +39,21 @@ public class DispatchPlan {
     private boolean hardThreeOrderPolicyActive;
     private boolean harshWeatherStress;
     private StressRegime stressRegime = StressRegime.NORMAL;
+    private String runId = "dispatch-live";
+    private SelectionBucket selectionBucket = SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD;
+    private int holdRemainingCycles;
+    private String holdReason;
+    private String holdAnchorZoneId;
+    private double marginalDeadheadPerAddedOrder;
+    private double pickupSpreadKm;
+    private double waveReadinessScore;
+    private double coverageQuality;
+    private double replacementDepth;
+    private double borrowedDependencyScore;
+    private double emptyRiskAfter;
+    private double executionScore;
+    private double futureScore;
+    private boolean executionGatePassed = true;
 
     // ── Final scoring ───────────────────────────────────────────────────
     private double totalScore;
@@ -93,6 +108,21 @@ public class DispatchPlan {
     public boolean isHardThreeOrderPolicyActive() { return hardThreeOrderPolicyActive; }
     public boolean isHarshWeatherStress() { return harshWeatherStress; }
     public StressRegime getStressRegime() { return stressRegime; }
+    public String getRunId() { return runId; }
+    public SelectionBucket getSelectionBucket() { return selectionBucket; }
+    public int getHoldRemainingCycles() { return holdRemainingCycles; }
+    public String getHoldReason() { return holdReason; }
+    public String getHoldAnchorZoneId() { return holdAnchorZoneId; }
+    public double getMarginalDeadheadPerAddedOrder() { return marginalDeadheadPerAddedOrder; }
+    public double getPickupSpreadKm() { return pickupSpreadKm; }
+    public double getWaveReadinessScore() { return waveReadinessScore; }
+    public double getCoverageQuality() { return coverageQuality; }
+    public double getReplacementDepth() { return replacementDepth; }
+    public double getBorrowedDependencyScore() { return borrowedDependencyScore; }
+    public double getEmptyRiskAfter() { return emptyRiskAfter; }
+    public double getExecutionScore() { return executionScore; }
+    public double getFutureScore() { return futureScore; }
+    public boolean isExecutionGatePassed() { return executionGatePassed; }
     public double getTotalScore() { return totalScore; }
     public double getConfidence() { return confidence; }
     public String getTraceId() { return traceId; }
@@ -133,6 +163,33 @@ public class DispatchPlan {
     public void setHarshWeatherStress(boolean v) { this.harshWeatherStress = v; }
     public void setStressRegime(StressRegime v) {
         this.stressRegime = v == null ? StressRegime.NORMAL : v;
+    }
+    public void setRunId(String runId) {
+        this.runId = (runId == null || runId.isBlank()) ? "dispatch-live" : runId;
+    }
+    public void setSelectionBucket(SelectionBucket selectionBucket) {
+        this.selectionBucket = selectionBucket == null
+                ? SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD
+                : selectionBucket;
+    }
+    public void setHoldRemainingCycles(int holdRemainingCycles) {
+        this.holdRemainingCycles = Math.max(0, holdRemainingCycles);
+    }
+    public void setHoldReason(String holdReason) { this.holdReason = holdReason; }
+    public void setHoldAnchorZoneId(String holdAnchorZoneId) { this.holdAnchorZoneId = holdAnchorZoneId; }
+    public void setMarginalDeadheadPerAddedOrder(double value) { this.marginalDeadheadPerAddedOrder = value; }
+    public void setPickupSpreadKm(double pickupSpreadKm) { this.pickupSpreadKm = pickupSpreadKm; }
+    public void setWaveReadinessScore(double waveReadinessScore) { this.waveReadinessScore = waveReadinessScore; }
+    public void setCoverageQuality(double coverageQuality) { this.coverageQuality = coverageQuality; }
+    public void setReplacementDepth(double replacementDepth) { this.replacementDepth = replacementDepth; }
+    public void setBorrowedDependencyScore(double borrowedDependencyScore) {
+        this.borrowedDependencyScore = borrowedDependencyScore;
+    }
+    public void setEmptyRiskAfter(double emptyRiskAfter) { this.emptyRiskAfter = emptyRiskAfter; }
+    public void setExecutionScore(double executionScore) { this.executionScore = executionScore; }
+    public void setFutureScore(double futureScore) { this.futureScore = futureScore; }
+    public void setExecutionGatePassed(boolean executionGatePassed) {
+        this.executionGatePassed = executionGatePassed;
     }
     public void setTotalScore(double v) { this.totalScore = v; }
     public void setConfidence(double v) { this.confidence = v; }

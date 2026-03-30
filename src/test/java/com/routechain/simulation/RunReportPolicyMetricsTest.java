@@ -84,7 +84,14 @@ class RunReportPolicyMetricsTest {
                 launchRate,
                 downgradeRate,
                 4.0,
-                waitRate
+                waitRate,
+                1.25,
+                1.90,
+                1.35,
+                1.10,
+                1.20,
+                1.05,
+                DispatchRecoveryDecomposition.empty()
         );
     }
 }
