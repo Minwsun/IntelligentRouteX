@@ -58,6 +58,7 @@ public class SimulationEngine {
     private volatile double totalDeadheadKm = 0;
     private volatile double totalEarnings = 0;
     private volatile long totalAssignmentLatencyMs = 0;
+    private volatile long totalDispatchDecisionLatencyMs = 0;
     private volatile int totalAssignments = 0;
     private volatile int totalBundled = 0;
     private volatile int surgeEventsCounter = 0;
@@ -82,9 +83,26 @@ public class SimulationEngine {
     private volatile double borrowedExecutedDeadheadKm = 0.0;
     private volatile double fallbackExecutedDeadheadKm = 0.0;
     private volatile double waveExecutedDeadheadKm = 0.0;
+    private volatile int postDropOpportunityCount = 0;
+    private volatile int postDropOrderHitCount = 0;
+    private volatile double totalPredictedPostDropOpportunity = 0.0;
+    private volatile double totalTrafficForecastAbsError = 0.0;
+    private volatile double totalWeatherForecastHitRate = 0.0;
+    private volatile int forecastDecisionCount = 0;
+    private volatile double totalBorrowSuccessCalibrationGap = 0.0;
+    private volatile int borrowSuccessCalibrationCount = 0;
     private volatile DispatchRecoveryDecomposition recoveryAccumulator =
             DispatchRecoveryDecomposition.empty();
-    private volatile String currentRunId = "RUN-" + UUID.randomUUID().toString().substring(0, 8);
+    private final List<Long> dispatchDecisionLatencySamples = new CopyOnWriteArrayList<>();
+    private final List<Long> modelInferenceLatencySamples = new CopyOnWriteArrayList<>();
+    private final List<Long> neuralPriorLatencySamples = new CopyOnWriteArrayList<>();
+    private final List<Long> assignmentAgingLatencySamples = new CopyOnWriteArrayList<>();
+    private final Set<String> noDriverFoundOrderIds = ConcurrentHashMap.newKeySet();
+    private final AtomicLong runSequence = new AtomicLong(0);
+    private static final AtomicLong GLOBAL_RUN_SEQUENCE = new AtomicLong(0);
+    private volatile String currentSessionId = "SESSION-UNSET";
+    private volatile String currentRunId = "RUN-UNINITIALIZED";
+    private volatile long runWallClockStartedNanos = System.nanoTime();
 
     // AI dispatch agent (Omega — learned multi-agent brain)
     private final OmegaDispatchAgent omegaAgent;
@@ -106,8 +124,10 @@ public class SimulationEngine {
     private static final int LOCAL_MINI_DISPATCH_MAX_CANDIDATES = 10;
     private static final double LOCAL_MINI_DISPATCH_MAX_DETOUR_KM = 1.1;
     private static final double LOCAL_MINI_DISPATCH_MAX_FIRST_PICKUP_DELAY_MIN = 4.0;
+    private static final long POST_DROP_HIT_WINDOW_TICKS = 10L;
     private volatile boolean miniDispatchRequested = false;
     private final Map<String, Integer> holdCyclesByDriver = new ConcurrentHashMap<>();
+    private final Map<String, Long> postDropIdleTickByDriver = new ConcurrentHashMap<>();
 
     public SimulationEngine() {
         this(42L);
@@ -116,6 +136,8 @@ public class SimulationEngine {
     public SimulationEngine(long seed) {
         this.randomSeed = seed;
         this.rng = new Random(seed);
+        this.currentSessionId = "SESSION-s" + seed;
+        this.currentRunId = nextRunId();
         PlatformRuntimeBootstrap.ensureInitialized(eventBus);
         this.regions = new ArrayList<>(HcmcCityData.createRegions());
         this.corridors = HcmcCityData.createCorridors();
@@ -140,8 +162,10 @@ public class SimulationEngine {
     public void start() {
         if (lifecycle == SimulationLifecycle.RUNNING) return;
 
-        currentRunId = "RUN-" + UUID.randomUUID().toString().substring(0, 8);
+        currentRunId = nextRunId();
         omegaAgent.setActiveRunId(currentRunId);
+        omegaAgent.setActiveRouteLatencyMode(routeLatencyMode.name());
+        runWallClockStartedNanos = System.nanoTime();
         initializeDrivers(initialDriverCount);
         lifecycle = SimulationLifecycle.RUNNING;
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -183,6 +207,7 @@ public class SimulationEngine {
         totalDeadheadKm = 0;
         totalEarnings = 0;
         totalAssignmentLatencyMs = 0;
+        totalDispatchDecisionLatencyMs = 0;
         totalAssignments = 0;
         totalBundled = 0;
         surgeEventsCounter = 0;
@@ -207,11 +232,27 @@ public class SimulationEngine {
         borrowedExecutedDeadheadKm = 0.0;
         fallbackExecutedDeadheadKm = 0.0;
         waveExecutedDeadheadKm = 0.0;
+        postDropOpportunityCount = 0;
+        postDropOrderHitCount = 0;
+        totalPredictedPostDropOpportunity = 0.0;
+        totalTrafficForecastAbsError = 0.0;
+        totalWeatherForecastHitRate = 0.0;
+        forecastDecisionCount = 0;
+        totalBorrowSuccessCalibrationGap = 0.0;
+        borrowSuccessCalibrationCount = 0;
         recoveryAccumulator = DispatchRecoveryDecomposition.empty();
+        dispatchDecisionLatencySamples.clear();
+        modelInferenceLatencySamples.clear();
+        neuralPriorLatencySamples.clear();
+        assignmentAgingLatencySamples.clear();
+        noDriverFoundOrderIds.clear();
         miniDispatchRequested = false;
         holdCyclesByDriver.clear();
-        currentRunId = "RUN-" + UUID.randomUUID().toString().substring(0, 8);
+        postDropIdleTickByDriver.clear();
+        currentRunId = nextRunId();
+        runWallClockStartedNanos = System.nanoTime();
         omegaAgent.setActiveRunId(currentRunId);
+        omegaAgent.setActiveRouteLatencyMode(routeLatencyMode.name());
         omegaAgent.reset();
         legacyDispatchAgent.reset();
         reDispatchEngine.reset();
@@ -228,6 +269,11 @@ public class SimulationEngine {
     public int getSimulatedMinute() { return simulatedMinute; }
     public String getSimulatedTimeFormatted() {
         return String.format("%02d:%02d", simulatedHour, simulatedMinute);
+    }
+    public String getCurrentSessionId() { return currentSessionId; }
+    public String getCurrentRunId() { return currentRunId; }
+    public RunIdentity getRunIdentity() {
+        return new RunIdentity(currentSessionId, currentRunId);
     }
     public long getTickCount() { return tickCounter.get(); }
     public List<TimelineDataPoint> getTimelineHistory() {
@@ -257,6 +303,7 @@ public class SimulationEngine {
         this.routeLatencyMode = routeLatencyMode == null
                 ? RouteLatencyMode.SIMULATED_ASYNC
                 : routeLatencyMode;
+        omegaAgent.setActiveRouteLatencyMode(this.routeLatencyMode.name());
     }
 
     // ── Metric Getters & Headless Execution ─────────────────────────────
@@ -273,8 +320,10 @@ public class SimulationEngine {
     public void tickHeadless() {
         if (lifecycle != SimulationLifecycle.RUNNING) {
             lifecycle = SimulationLifecycle.RUNNING;
-            currentRunId = "RUN-" + UUID.randomUUID().toString().substring(0, 8);
+            currentRunId = nextRunId();
             omegaAgent.setActiveRunId(currentRunId);
+            omegaAgent.setActiveRouteLatencyMode(routeLatencyMode.name());
+            runWallClockStartedNanos = System.nanoTime();
             routingService.setHeadlessMode(true);
             initializeDrivers(initialDriverCount);
         }
@@ -310,6 +359,7 @@ public class SimulationEngine {
 
         Order order = new Order(id, custId, pickupRegionId, pickup, dropoff,
                 dropoffRegionId, fee, promisedEtaMin, clock.currentInstant());
+        order.setServiceType("instant");
         activeOrders.add(order);
         eventBus.publish(new OrderCreated(order));
         dbService.saveOrder(order);
@@ -720,6 +770,11 @@ public class SimulationEngine {
         }
 
         if (available.isEmpty() || pending.isEmpty()) {
+            if (!pending.isEmpty() && available.isEmpty()) {
+                for (Order order : pending) {
+                    noDriverFoundOrderIds.add(order.getId());
+                }
+            }
             if (miniDispatch) {
                 miniDispatchRequested = false;
             }
@@ -731,10 +786,14 @@ public class SimulationEngine {
 
         List<DispatchPlan> selectedPlans;
         if (dispatchMode == DispatchMode.LEGACY) {
+            long dispatchStartedNanos = System.nanoTime();
             DispatchAgent.DispatchResult result = legacyDispatchAgent.dispatch(
                     new ArrayList<>(pending), new ArrayList<>(available),
                     drivers, activeOrders, simulatedHour,
                     trafficIntensity, weatherProfile);
+            long dispatchLatencyMs = (System.nanoTime() - dispatchStartedNanos) / 1_000_000L;
+            totalDispatchDecisionLatencyMs += dispatchLatencyMs;
+            dispatchDecisionLatencySamples.add(dispatchLatencyMs);
             selectedPlans = result.plans();
         } else {
             OmegaDispatchAgent.DispatchResult result = omegaAgent.dispatch(
@@ -742,7 +801,16 @@ public class SimulationEngine {
                     drivers, activeOrders, simulatedHour,
                     trafficIntensity, weatherProfile, clock.currentInstant(), currentRunId);
             recoveryAccumulator = recoveryAccumulator.plus(result.recovery());
+            totalDispatchDecisionLatencyMs += result.dispatchDecisionLatencyMs();
+            dispatchDecisionLatencySamples.add(result.dispatchDecisionLatencyMs());
+            modelInferenceLatencySamples.addAll(result.modelInferenceLatencySamples());
+            neuralPriorLatencySamples.addAll(result.neuralPriorLatencySamples());
             selectedPlans = result.plans();
+        }
+        if (!pending.isEmpty() && selectedPlans.isEmpty()) {
+            for (Order order : pending) {
+                noDriverFoundOrderIds.add(order.getId());
+            }
         }
 
         Instant decisionTime = clock.currentInstant();
@@ -807,6 +875,12 @@ public class SimulationEngine {
                 stressDowngradeSelectionCount++;
             }
 
+            Long postDropIdleTick = postDropIdleTickByDriver.remove(best.getId());
+            if (postDropIdleTick != null
+                    && tickCounter.get() - postDropIdleTick <= POST_DROP_HIT_WINDOW_TICKS) {
+                postDropOrderHitCount++;
+            }
+
             List<Order> newlyAssignedOrders = new ArrayList<>();
             for (Order order : executablePlan.getOrders()) {
                 boolean newlyAssigned = !best.getId().equals(order.getAssignedDriverId());
@@ -827,6 +901,7 @@ public class SimulationEngine {
 
                 if (newlyAssigned) {
                     totalAssignmentLatencyMs += order.getAssignmentLatencyMs();
+                    assignmentAgingLatencySamples.add(Math.max(0L, order.getAssignmentLatencyMs()));
                     totalAssignments++;
                 }
             }
@@ -868,6 +943,16 @@ public class SimulationEngine {
             totalExpectedPostCompletionEmptyKm += executablePlan.getExpectedPostCompletionEmptyKm();
             totalExpectedNextOrderIdleMinutes += executablePlan.getExpectedNextOrderIdleMinutes();
             totalZigZagPenalty += executablePlan.getDeliveryZigZagPenalty();
+            totalPredictedPostDropOpportunity += executablePlan.getPostDropDemandProbability();
+            totalTrafficForecastAbsError += executablePlan.getTrafficForecastAbsError();
+            totalWeatherForecastHitRate += executablePlan.getWeatherForecastHitRate();
+            forecastDecisionCount++;
+            if (executablePlan.getSelectionBucket() == SelectionBucket.BORROWED_COVERAGE
+                    || executablePlan.getSelectionBucket() == SelectionBucket.EMERGENCY_COVERAGE) {
+                totalBorrowSuccessCalibrationGap += Math.abs(
+                        1.0 - executablePlan.getBorrowSuccessProbability());
+                borrowSuccessCalibrationCount++;
+            }
             if (executablePlan.getLastDropLandingScore() >= 0.60) {
                 lastDropGoodZoneCount++;
             }
@@ -888,6 +973,11 @@ public class SimulationEngine {
                     executablePlan.getPredictedTotalMinutes(),
                     deadheadKm,
                     executablePlan.getConfidence(),
+                    executablePlan.getServiceTier(),
+                    routeLatencyMode.name(),
+                    dispatchDecisionLatencySamples.isEmpty()
+                            ? 0L
+                            : dispatchDecisionLatencySamples.get(dispatchDecisionLatencySamples.size() - 1),
                     executablePlan.getHoldRemainingCycles(),
                     executablePlan.getMarginalDeadheadPerAddedOrder()));
 
@@ -1440,6 +1530,8 @@ public class SimulationEngine {
                     driver.clearRouteWaypoints();
                     driver.clearPendingRoute();
                     driver.setAssignedSequence(null);
+                    postDropIdleTickByDriver.put(driver.getId(), tickCounter.get());
+                    postDropOpportunityCount++;
                     miniDispatchRequested = true;
                     eventBus.publish(new DriverStateChanged(driver.getId(),
                                 oldState, DriverState.ONLINE_IDLE));
@@ -1662,6 +1754,7 @@ public class SimulationEngine {
 
         RunReport report = createRunReport("simulation-" + dispatchMode.name().toLowerCase(), 42);
         PlatformRuntimeBootstrap.recordRunReport(report);
+        BenchmarkArtifactWriter.writeControlRoomFrame(createControlRoomFrame(report));
 
         System.out.println(report.toSummary());
         eventBus.publish(new RunReportGenerated(
@@ -1674,10 +1767,20 @@ public class SimulationEngine {
 
     public RunReport createRunReport(String scenarioName, long seed) {
         RunReportExporter exporter = new RunReportExporter(currentRunId, scenarioName, seed, clock.startInstant());
+        double wallClockSeconds = Math.max(
+                0.001,
+                (System.nanoTime() - runWallClockStartedNanos) / 1_000_000_000.0);
+        double tickThroughputPerSec = tickCounter.get() / wallClockSeconds;
         return exporter.generateReport(
                 drivers, completedOrders, cancelledOrders, activeOrders,
                 totalDelivered, totalLateDelivered, totalDeadheadKm, totalEarnings,
-                totalAssignmentLatencyMs, totalAssignments, totalBundled,
+                totalAssignmentLatencyMs,
+                dispatchDecisionLatencySamples,
+                modelInferenceLatencySamples,
+                neuralPriorLatencySamples,
+                assignmentAgingLatencySamples,
+                tickThroughputPerSec,
+                totalAssignments, totalBundled,
                 reDispatchEngine.getReDispatchCount(),
                 tickCounter.get(), surgeEventsCounter, shortageEventsCounter,
                 totalDeliveryCorridorScore, totalLastDropLandingScore,
@@ -1689,9 +1792,17 @@ public class SimulationEngine {
                 stressDowngradeSelectionCount, totalSelectedOrderPlanCount,
                 realAssignedPlanCount, holdOnlySelectionCount, prePickupAugmentationCount,
                 borrowedExecutedDeadheadKm, fallbackExecutedDeadheadKm, waveExecutedDeadheadKm,
+                postDropOpportunityCount, postDropOrderHitCount, totalPredictedPostDropOpportunity,
+                totalTrafficForecastAbsError, totalWeatherForecastHitRate, forecastDecisionCount,
+                totalBorrowSuccessCalibrationGap, borrowSuccessCalibrationCount,
+                noDriverFoundOrderIds.size(),
                 recoveryAccumulator,
                 clock.currentInstant()
         );
+    }
+
+    public ControlRoomFrame createControlRoomFrame(RunReport report) {
+        return ControlRoomFrameBuilder.buildFromEngine(this, report);
     }
 
     // ── Timeline snapshot recorder ───────────────────────────────────────
@@ -1793,5 +1904,12 @@ public class SimulationEngine {
         if (lat >= 10.750 && lat <= 10.765 && lng >= 106.705 && lng <= 106.725) return false;
         if (lat < 10.710 && lng > 106.720) return false;
         return true;
+    }
+
+    private String nextRunId() {
+        long sequence = runSequence.incrementAndGet();
+        long globalSequence = GLOBAL_RUN_SEQUENCE.incrementAndGet();
+        return "RUN-s" + randomSeed + "-" + String.format("%06d", sequence)
+                + "-g" + String.format("%06d", globalSequence);
     }
 }

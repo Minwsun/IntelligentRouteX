@@ -47,6 +47,9 @@ public final class Events {
     public record DispatchDecision(String runId, String orderId, String driverId,
                                     String selectionBucket, double score,
                                     double etaMinutes, double deadheadKm, double confidence,
+                                    String serviceTier,
+                                    String routeLatencyMode,
+                                    long dispatchDecisionLatencyMs,
                                     int holdTtlRemaining,
                                     double marginalDeadheadPerAddedOrder) {}
     public record ReDispatchTriggered(String orderId, String reason) {}

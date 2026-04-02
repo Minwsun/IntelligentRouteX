@@ -8,8 +8,15 @@ import java.time.Instant;
 public record DecisionContextV2(
         String runId,
         String scenario,
+        String serviceTier,
         String cellId,
         Instant featureTimestamp,
         int trafficHorizonMinutes,
-        int weatherHorizonMinutes
+        int weatherHorizonMinutes,
+        double merchantPrepForecastMinutes,
+        double continuationOpportunityScore,
+        double postDropDemandProbability,
+        double emptyZoneRisk,
+        String neuralPriorVersion,
+        long neuralPriorFreshnessMs
 ) {}

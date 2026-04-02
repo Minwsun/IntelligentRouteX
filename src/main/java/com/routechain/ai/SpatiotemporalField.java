@@ -2,9 +2,13 @@ package com.routechain.ai;
 
 import com.routechain.domain.*;
 import com.routechain.domain.Enums.*;
+import com.routechain.simulation.CellValueSnapshot;
 import com.routechain.simulation.HcmcCityData;
 
+import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Spatiotemporal Demand Field — the "city brain".
@@ -24,8 +28,10 @@ public class SpatiotemporalField {
 
     public static final int ROWS = 12;
     public static final int COLS = 12;
+    private static final int H3_RESOLUTION = 8;
     private static final double DIFFUSION_RATE = 0.12;
     private static final double TEMPORAL_DECAY = 0.92;
+    private static final H3Support H3_SUPPORT = H3Support.tryCreate(H3_RESOLUTION);
 
     // ── HCMC bounding box ───────────────────────────────────────────────
     private static final double MIN_LAT = 10.68;
@@ -268,6 +274,126 @@ public class SpatiotemporalField {
         return Math.max(0.0, persistence + spikeLift + shortageLift - densityPenalty);
     }
 
+    /** Forecasted congestion/traffic pressure at a point for a near-future horizon. */
+    public double getTrafficForecastAt(GeoPoint p, int horizonMinutes) {
+        int[] cell = cellOf(p);
+        if (cell == null) return 0;
+
+        int r = cell[0];
+        int c = cell[1];
+        double currentCongestion = congestionExposure[r][c];
+        double futureDemand = Math.min(1.0, getForecastDemandAt(p, horizonMinutes) / 4.5);
+        double futureShortage = getShortageForecastAt(p, horizonMinutes);
+        double futureWeather = getWeatherForecastAt(p, horizonMinutes);
+        double horizonFactor = Math.max(0.4, horizonMinutes / 10.0);
+
+        return clamp01(
+                currentCongestion * 0.64
+                        + futureDemand * 0.18
+                        + futureShortage * 0.10
+                        + futureWeather * 0.08
+                        + Math.min(0.10, horizonFactor * 0.05));
+    }
+
+    /** Forecasted weather exposure for short-horizon dispatch decisions. */
+    public double getWeatherForecastAt(GeoPoint p, int horizonMinutes) {
+        int[] cell = cellOf(p);
+        if (cell == null) return 0;
+
+        int r = cell[0];
+        int c = cell[1];
+        double currentWeather = weatherExposure[r][c];
+        double spike = spikeProbability[r][c];
+        double shortage = shortagePressure[r][c];
+        double horizonFactor = Math.max(0.5, horizonMinutes / 10.0);
+
+        return clamp01(
+                currentWeather * (0.78 + 0.04 * horizonFactor)
+                        + spike * 0.08
+                        + shortage * 0.06);
+    }
+
+    /** Forecasted shortage pressure, useful for reserve shaping and post-drop landing. */
+    public double getShortageForecastAt(GeoPoint p, int horizonMinutes) {
+        int[] cell = cellOf(p);
+        if (cell == null) return 0;
+
+        int r = cell[0];
+        int c = cell[1];
+        double currentShortage = shortagePressure[r][c];
+        double futureDemand = Math.min(1.0, getForecastDemandAt(p, horizonMinutes) / 4.0);
+        double supplyPenalty = Math.min(0.55, driverDensity[r][c] / 8.5);
+
+        return clamp01(currentShortage * 0.62 + futureDemand * 0.30 - supplyPenalty * 0.16 + 0.10);
+    }
+
+    /**
+     * Post-drop opportunity combines demand, shortage, and low-risk landing quality.
+     * Higher means better chance a driver gets the next order soon after the final drop.
+     */
+    public double getPostDropOpportunityAt(GeoPoint p, int horizonMinutes) {
+        double demand = Math.min(1.0, getForecastDemandAt(p, horizonMinutes) / 4.0);
+        double shortage = getShortageForecastAt(p, horizonMinutes);
+        double attraction = clamp01(getRiskAdjustedAttractionAt(p));
+        double traffic = getTrafficForecastAt(p, horizonMinutes);
+        double weather = getWeatherForecastAt(p, horizonMinutes);
+        double density = Math.min(1.0, getDriverDensityAt(p) / 6.0);
+
+        return clamp01(
+                demand * 0.34
+                        + shortage * 0.22
+                        + attraction * 0.24
+                        + (1.0 - traffic) * 0.10
+                        + (1.0 - weather) * 0.06
+                        + (1.0 - density) * 0.04);
+    }
+
+    /** Risk that a driver landing here will idle and run empty after completion. */
+    public double getEmptyZoneRiskAt(GeoPoint p, int horizonMinutes) {
+        double postDropOpportunity = getPostDropOpportunityAt(p, horizonMinutes);
+        double traffic = getTrafficForecastAt(p, horizonMinutes);
+        double weather = getWeatherForecastAt(p, horizonMinutes);
+        double density = Math.min(1.0, getDriverDensityAt(p) / 6.0);
+
+        return clamp01(
+                (1.0 - postDropOpportunity) * 0.58
+                        + traffic * 0.18
+                        + weather * 0.14
+                        + density * 0.10);
+    }
+
+    /** Expected merchant prep burden in minutes for this pickup area and horizon. */
+    public double getMerchantPrepForecastMinutesAt(GeoPoint p, int horizonMinutes) {
+        double demand = Math.min(1.0, getForecastDemandAt(p, horizonMinutes) / 4.5);
+        double traffic = getTrafficForecastAt(p, horizonMinutes);
+        double weather = getWeatherForecastAt(p, horizonMinutes);
+        double shortage = getShortageForecastAt(p, horizonMinutes);
+        double horizonFactor = Math.max(0.5, horizonMinutes / 10.0);
+        double minutes = 3.5
+                + demand * 3.2
+                + traffic * 2.0
+                + weather * 2.8
+                + shortage * 1.4
+                + horizonFactor * 0.4;
+        return Math.max(2.0, Math.min(18.0, minutes));
+    }
+
+    /** Probability that borrowed coverage remains useful for this zone in the near future. */
+    public double getBorrowSuccessProbabilityAt(GeoPoint p, int horizonMinutes) {
+        double shortage = getShortageForecastAt(p, horizonMinutes);
+        double density = Math.min(1.0, getDriverDensityAt(p) / 6.0);
+        double traffic = getTrafficForecastAt(p, horizonMinutes);
+        double weather = getWeatherForecastAt(p, horizonMinutes);
+        double postDropOpportunity = getPostDropOpportunityAt(p, horizonMinutes);
+        return clamp01(
+                0.48
+                        + postDropOpportunity * 0.24
+                        + shortage * 0.16
+                        + (1.0 - density) * 0.10
+                        - traffic * 0.10
+                        - weather * 0.08);
+    }
+
     // ── Grid utilities ──────────────────────────────────────────────────
 
     /**
@@ -293,6 +419,142 @@ public class SpatiotemporalField {
         double lat = MIN_LAT + (row + 0.5) * (MAX_LAT - MIN_LAT) / ROWS;
         double lng = MIN_LNG + (col + 0.5) * (MAX_LNG - MIN_LNG) / COLS;
         return new GeoPoint(lat, lng);
+    }
+
+    public String cellKeyOf(GeoPoint p) {
+        String h3Cell = H3_SUPPORT.cellId(p);
+        if (h3Cell != null) {
+            return h3Cell;
+        }
+        int[] cell = cellOf(p);
+        if (cell == null) {
+            return "GRID-outside";
+        }
+        return "GRID-" + cell[0] + "-" + cell[1];
+    }
+
+    public List<CellValueSnapshot> topCellSnapshots(String serviceTier, int limit) {
+        return topCellSnapshots(serviceTier, 10, limit);
+    }
+
+    public List<CellValueSnapshot> topCellSnapshots(String serviceTier,
+                                                    int focusHorizonMinutes,
+                                                    int limit) {
+        List<CellValueSnapshot> snapshots = new ArrayList<>(ROWS * COLS);
+        double tierBias = serviceTierBias(serviceTier);
+        for (int row = 0; row < ROWS; row++) {
+            for (int col = 0; col < COLS; col++) {
+                GeoPoint center = cellCenter(row, col);
+                double demand5 = getForecastDemandAt(center, 5);
+                double demand10 = getForecastDemandAt(center, 10);
+                double demand15 = getForecastDemandAt(center, 15);
+                double demand30 = getForecastDemandAt(center, 30);
+                double shortage10 = getShortageForecastAt(center, 10);
+                double traffic10 = getTrafficForecastAt(center, 10);
+                double weather10 = getWeatherForecastAt(center, 10);
+                double postDrop = getPostDropOpportunityAt(center, focusHorizonMinutes);
+                double emptyRisk = getEmptyZoneRiskAt(center, focusHorizonMinutes);
+                double reserveTargetScore = clamp01(
+                        Math.min(1.0, demand10 / 4.5) * 0.36
+                                + shortage10 * 0.38
+                                + postDrop * 0.26);
+                double borrowPressure = clamp01(
+                        emptyRisk * 0.38
+                                + shortage10 * 0.34
+                                + Math.max(0.0, Math.min(1.0, (demand15 - demand5) / 4.0)) * 0.28);
+                double compositeValue = clamp01(
+                        postDrop * 0.34
+                                + Math.min(1.0, demand10 / 4.5) * 0.22
+                                + shortage10 * 0.16
+                                + reserveTargetScore * 0.12
+                                + (1.0 - traffic10) * 0.08
+                                + (1.0 - weather10) * 0.04
+                                + tierBias);
+                String cellId = cellKeyOf(center);
+                snapshots.add(new CellValueSnapshot(
+                        cellId,
+                        H3_SUPPORT.available() ? "H3-r" + H3_RESOLUTION : "GRID12x12-fallback",
+                        serviceTier,
+                        center.lat(),
+                        center.lng(),
+                        demandIntensity[row][col],
+                        demand5,
+                        demand10,
+                        demand15,
+                        demand30,
+                        shortage10,
+                        traffic10,
+                        weather10,
+                        postDrop,
+                        emptyRisk,
+                        reserveTargetScore,
+                        borrowPressure,
+                        compositeValue
+                ));
+            }
+        }
+        snapshots.sort((left, right) -> Double.compare(right.compositeValue(), left.compositeValue()));
+        return snapshots.subList(0, Math.min(Math.max(limit, 0), snapshots.size()));
+    }
+
+    private static final class H3Support {
+        private final Object core;
+        private final Method latLngToCellAddress;
+        private final Method geoToH3Address;
+        private final int resolution;
+
+        private H3Support(Object core,
+                          Method latLngToCellAddress,
+                          Method geoToH3Address,
+                          int resolution) {
+            this.core = core;
+            this.latLngToCellAddress = latLngToCellAddress;
+            this.geoToH3Address = geoToH3Address;
+            this.resolution = resolution;
+        }
+
+        static H3Support tryCreate(int resolution) {
+            try {
+                Class<?> h3CoreClass = Class.forName("com.uber.h3core.H3Core");
+                Object core = h3CoreClass.getMethod("newInstance").invoke(null);
+                Method latLngMethod = null;
+                Method geoToH3Method = null;
+                try {
+                    latLngMethod = h3CoreClass.getMethod("latLngToCellAddress", double.class, double.class, int.class);
+                } catch (NoSuchMethodException ignored) {
+                    // Try legacy API name below.
+                }
+                try {
+                    geoToH3Method = h3CoreClass.getMethod("geoToH3Address", double.class, double.class, int.class);
+                } catch (NoSuchMethodException ignored) {
+                    // Legacy API missing too.
+                }
+                if (latLngMethod == null && geoToH3Method == null) {
+                    return new H3Support(null, null, null, resolution);
+                }
+                return new H3Support(core, latLngMethod, geoToH3Method, resolution);
+            } catch (Throwable ignored) {
+                return new H3Support(null, null, null, resolution);
+            }
+        }
+
+        boolean available() {
+            return core != null && (latLngToCellAddress != null || geoToH3Address != null);
+        }
+
+        String cellId(GeoPoint point) {
+            if (!available() || point == null) {
+                return null;
+            }
+            try {
+                if (latLngToCellAddress != null) {
+                    return (String) latLngToCellAddress.invoke(core, point.lat(), point.lng(), resolution);
+                }
+                return (String) geoToH3Address.invoke(core, point.lat(), point.lng(), resolution);
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
     }
 
     private double cellAreaKm2() {
@@ -326,6 +588,26 @@ public class SpatiotemporalField {
         return snapshot;
     }
 
+    public double[][] getDerivedSnapshot(String layer, int horizonMinutes) {
+        double[][] snapshot = new double[ROWS][COLS];
+        for (int r = 0; r < ROWS; r++) {
+            for (int c = 0; c < COLS; c++) {
+                GeoPoint point = cellCenter(r, c);
+                snapshot[r][c] = switch (layer) {
+                    case "trafficForecast" -> getTrafficForecastAt(point, horizonMinutes);
+                    case "weatherForecast" -> getWeatherForecastAt(point, horizonMinutes);
+                    case "shortageForecast" -> getShortageForecastAt(point, horizonMinutes);
+                    case "postDropOpportunity" -> getPostDropOpportunityAt(point, horizonMinutes);
+                    case "emptyZoneRisk" -> getEmptyZoneRiskAt(point, horizonMinutes);
+                    case "merchantPrepForecast" -> getMerchantPrepForecastMinutesAt(point, horizonMinutes);
+                    case "borrowSuccessProbability" -> getBorrowSuccessProbabilityAt(point, horizonMinutes);
+                    default -> 0.0;
+                };
+            }
+        }
+        return snapshot;
+    }
+
     /** Get bounding box for UI rendering. */
     public double[] getBounds() {
         return new double[] { MIN_LAT, MAX_LAT, MIN_LNG, MAX_LNG };
@@ -345,5 +627,23 @@ public class SpatiotemporalField {
                 prevDemand[r][c] = 0;
             }
         }
+    }
+
+    private double clamp01(double value) {
+        return Math.max(0.0, Math.min(1.0, value));
+    }
+
+    private double serviceTierBias(String serviceTier) {
+        if (serviceTier == null) {
+            return 0.0;
+        }
+        String normalized = serviceTier.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "instant" -> 0.02;
+            case "2h" -> 0.04;
+            case "4h", "scheduled" -> 0.06;
+            case "multi_stop_cod" -> 0.03;
+            default -> 0.0;
+        };
     }
 }

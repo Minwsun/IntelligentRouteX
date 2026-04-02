@@ -99,11 +99,19 @@ public class DriverContextBuilder {
         double forecast10m = field.getForecastDemandAt(pos, 10);
         double forecast15m = field.getForecastDemandAt(pos, 15);
         double forecast30m = field.getForecastDemandAt(pos, 30);
+        double trafficForecast5m = field.getTrafficForecastAt(pos, 5);
+        double trafficForecast10m = field.getTrafficForecastAt(pos, 10);
+        double weatherForecast10m = field.getWeatherForecastAt(pos, 10);
+        double shortageForecast10m = field.getShortageForecastAt(pos, 10);
+        double merchantPrepForecast10m = field.getMerchantPrepForecastMinutesAt(pos, 10);
+        double borrowSuccessProbability = field.getBorrowSuccessProbabilityAt(pos, 10);
         double localShortage = field.getShortageAt(pos);
         double localDensity = field.getDriverDensityAt(pos);
         double localSpike = field.getSpikeAt(pos);
         double localWeatherExposure = field.getWeatherExposureAt(pos);
         double localCorridorExposure = field.getCongestionExposureAt(pos);
+        double localPostDropOpportunity = field.getPostDropOpportunityAt(pos, 10);
+        double localEmptyZoneRisk = field.getEmptyZoneRiskAt(pos, 10);
         double localAttraction = field.getAttractionAt(pos);
         int nearReadyOrders = (int) reachable.stream()
                 .filter(o -> estimateReadySlackMinutes(o, currentTime) <= 1.5)
@@ -159,9 +167,13 @@ public class DriverContextBuilder {
                 driver, reachable, clusters,
                 localTraffic, localDemand,
                 forecast5m, forecast10m, forecast15m, forecast30m,
+                trafficForecast5m, trafficForecast10m,
+                weatherForecast10m, shortageForecast10m,
+                merchantPrepForecast10m, borrowSuccessProbability,
                 localShortage,
                 localDensity, localSpike,
                 localWeatherExposure, localCorridorExposure,
+                localPostDropOpportunity, localEmptyZoneRisk,
                 localAttraction, idleMinutes, nearReadyOrders,
                 effectiveSlaSlackMinutes, nearReadySameMerchantCount,
                 compactClusterCount, localReachableBacklog,
@@ -500,15 +512,25 @@ public class DriverContextBuilder {
 
                 double weatherExposure = field.getWeatherExposureAt(cellCenter);
                 double corridorExposure = field.getCongestionExposureAt(cellCenter);
-                double attraction = field.getRiskAdjustedAttractionAt(cellCenter) * 0.45
-                        + field.getForecastDemandAt(cellCenter, 10) * 0.30
-                        + field.getForecastDemandAt(cellCenter, 15) * 0.15
-                        + field.getForecastDemandAt(cellCenter, 30) * 0.10;
-                attraction -= weatherExposure * 0.10 + corridorExposure * 0.12;
+                double demandForecast10m = field.getForecastDemandAt(cellCenter, 10);
+                double shortageForecast10m = field.getShortageForecastAt(cellCenter, 10);
+                double merchantPrepForecast10m = field.getMerchantPrepForecastMinutesAt(cellCenter, 10);
+                double postDropOpportunity = field.getPostDropOpportunityAt(cellCenter, 10);
+                double emptyZoneRisk = field.getEmptyZoneRiskAt(cellCenter, 10);
+                double attraction = field.getRiskAdjustedAttractionAt(cellCenter) * 0.32
+                        + demandForecast10m * 0.22
+                        + field.getForecastDemandAt(cellCenter, 15) * 0.10
+                        + shortageForecast10m * 0.16
+                        + postDropOpportunity * 0.20;
+                attraction -= weatherExposure * 0.08 + corridorExposure * 0.10
+                        + emptyZoneRisk * 0.12 + Math.min(0.08, merchantPrepForecast10m / 20.0);
                 if (attraction > 0.1) {
                     candidates.add(new EndZoneCandidate(
                             cellCenter, attraction, distKm,
-                            weatherExposure, corridorExposure));
+                            weatherExposure, corridorExposure,
+                            demandForecast10m, shortageForecast10m,
+                            merchantPrepForecast10m,
+                            postDropOpportunity, emptyZoneRisk));
                 }
             }
         }
@@ -567,7 +589,9 @@ public class DriverContextBuilder {
                 .max()
                 .orElse(0.0);
         double bestEndSignal = endZones.stream()
-                .mapToDouble(EndZoneCandidate::attractionScore)
+                .mapToDouble(candidate -> candidate.postDropOpportunity() * 0.55
+                        + candidate.demandForecast10m() * 0.20
+                        + candidate.attractionScore() * 0.25)
                 .max()
                 .orElse(0.0);
         return Math.max(0.0, Math.max(bestDropSignal, bestEndSignal) - localDemand);
@@ -577,11 +601,21 @@ public class DriverContextBuilder {
                                           double localShortage,
                                           double localDensity) {
         double bestLanding = endZones.stream()
-                .mapToDouble(EndZoneCandidate::attractionScore)
+                .mapToDouble(candidate -> candidate.postDropOpportunity() * 0.60
+                        + candidate.attractionScore() * 0.25
+                        + (1.0 - candidate.emptyZoneRisk()) * 0.15)
                 .max()
                 .orElse(0.0);
+        double bestEmptyRisk = endZones.stream()
+                .mapToDouble(EndZoneCandidate::emptyZoneRisk)
+                .min()
+                .orElse(0.5);
         double densityPenalty = Math.min(0.4, localDensity / 15.0);
-        return clamp01(1.0 - Math.min(1.0, bestLanding / 2.0) + densityPenalty - localShortage * 0.15);
+        return clamp01(1.0
+                - Math.min(1.0, bestLanding / 1.6)
+                + densityPenalty
+                - localShortage * 0.15
+                + bestEmptyRisk * 0.18);
     }
 
     // ── Estimation helpers ──────────────────────────────────────────────

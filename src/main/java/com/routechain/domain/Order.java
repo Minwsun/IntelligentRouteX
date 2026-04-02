@@ -33,7 +33,7 @@ public class Order {
     private volatile Instant failedAt;
 
     // ── Business ────────────────────────────────────────────────────────
-    private final String serviceType;
+    private volatile String serviceType;
     private final int priority;
     private final double quotedFee;
     private volatile double actualFee;
@@ -221,6 +221,9 @@ public class Order {
     public void setPredictedLateRisk(double r) { this.predictedLateRisk = r; }
     public void setPredictedBundleFit(double f) { this.predictedBundleFit = f; }
     public void setPredictedAssignmentConfidence(double v) { this.predictedAssignmentConfidence = v; }
+    public void setServiceType(String serviceType) {
+        this.serviceType = serviceType == null || serviceType.isBlank() ? "standard" : serviceType;
+    }
 
     // ── Merchant readiness getters/setters ───────────────────────────────
     public String getMerchantId() { return merchantId; }

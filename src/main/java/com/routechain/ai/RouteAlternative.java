@@ -5,11 +5,15 @@ package com.routechain.ai;
  */
 public record RouteAlternative(
         String routeId,
+        String serviceTier,
         double etaP50Minutes,
         double etaP90Minutes,
         double deadheadKm,
         double rainExposure,
         double congestionExposure,
+        double expectedPostCompletionEmptyKm,
+        double postDropOpportunity,
+        double routePriorScore,
         String reasonCode,
         int feasibleDriverCount
 ) {}

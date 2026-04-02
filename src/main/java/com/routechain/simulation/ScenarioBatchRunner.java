@@ -1,9 +1,13 @@
 package com.routechain.simulation;
 
 import com.routechain.ai.OmegaDispatchAgent;
+import com.routechain.domain.Enums.DeliveryServiceTier;
 import com.routechain.domain.Enums.WeatherProfile;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.ToDoubleFunction;
 
 /**
  * Runs a small portfolio of benchmark scenarios and compares
@@ -75,6 +79,7 @@ public class ScenarioBatchRunner {
     );
     private static final List<Long> DEV_TUNING_SEEDS = List.of(42L, 77L, 123L);
     private static final List<Long> SHOWCASE_HOLDOUT_SEEDS = List.of(211L, 307L, 509L);
+    private static final List<Integer> REALISM_DRIVER_PROFILES = List.of(10, 25, 50);
 
     public static void main(String[] args) {
         if (args.length > 0 && "ablation".equalsIgnoreCase(args[0])) {
@@ -225,6 +230,11 @@ public class ScenarioBatchRunner {
         System.out.println("   ROUTECHAIN AI - RECOVERY MULTI-SEED BATCH");
         System.out.println("=================================================");
 
+        BenchmarkArtifactWriter.writeManifest(createStressTuneManifest());
+        List<RunReport> allLegacyRuns = new ArrayList<>();
+        List<RunReport> allOmegaRuns = new ArrayList<>();
+        List<ReplayCompareResult> allCompares = new ArrayList<>();
+
         for (ScenarioConfig scenario : STRESS_SCENARIOS) {
             List<RunReport> legacyRuns = new java.util.ArrayList<>();
             List<RunReport> omegaRuns = new java.util.ArrayList<>();
@@ -250,6 +260,9 @@ public class ScenarioBatchRunner {
                 legacyRuns.add(legacy);
                 omegaRuns.add(omega);
                 compares.add(compare);
+                allLegacyRuns.add(legacy);
+                allOmegaRuns.add(omega);
+                allCompares.add(compare);
                 System.out.println("  Seed " + seed + ": " + compare.toSummary());
             }
 
@@ -258,7 +271,74 @@ public class ScenarioBatchRunner {
             System.out.println("  Mean Delta  : " + formatAveragedCompare(compares));
             System.out.println("  Best Omega seed  : " + bestSeedSummary(omegaRuns));
             System.out.println("  Worst Omega seed : " + worstSeedSummary(omegaRuns));
+
+            String scope = "stressTune/" + scenario.name();
+            BenchmarkStatSummary gainSummary = BenchmarkStatistics.summarize(
+                    "overallGainPercent",
+                    scope,
+                    toDoubleList(compares, ReplayCompareResult::overallGainPercent));
+            BenchmarkStatSummary completionDeltaSummary = BenchmarkStatistics.summarizeComparison(
+                    "completionRate",
+                    scope,
+                    toDoubleList(legacyRuns, RunReport::completionRate),
+                    toDoubleList(omegaRuns, RunReport::completionRate));
+            BenchmarkStatSummary deadheadDeltaSummary = BenchmarkStatistics.summarizeComparison(
+                    "deadheadDistanceRatio",
+                    scope,
+                    toDoubleList(legacyRuns, RunReport::deadheadDistanceRatio),
+                    toDoubleList(omegaRuns, RunReport::deadheadDistanceRatio));
+            BenchmarkStatSummary waveLaunchDeltaSummary = BenchmarkStatistics.summarizeComparison(
+                    "thirdOrderLaunchRate",
+                    scope,
+                    toDoubleList(legacyRuns, RunReport::thirdOrderLaunchRate),
+                    toDoubleList(omegaRuns, RunReport::thirdOrderLaunchRate));
+            BenchmarkStatSummary waitThreeDeltaSummary = BenchmarkStatistics.summarizeComparison(
+                    "waveAssemblyWaitRate",
+                    scope,
+                    toDoubleList(legacyRuns, RunReport::waveAssemblyWaitRate),
+                    toDoubleList(omegaRuns, RunReport::waveAssemblyWaitRate));
+            BenchmarkStatSummary holdConversionSummary = BenchmarkStatistics.summarizeComparison(
+                    "holdConversionRate",
+                    scope,
+                    toDoubleList(legacyRuns, RunReport::holdConv),
+                    toDoubleList(omegaRuns, RunReport::holdConv));
+
+            BenchmarkArtifactWriter.writeStatSummary(gainSummary);
+            BenchmarkArtifactWriter.writeStatSummary(completionDeltaSummary);
+            BenchmarkArtifactWriter.writeStatSummary(deadheadDeltaSummary);
+            BenchmarkArtifactWriter.writeStatSummary(waveLaunchDeltaSummary);
+            BenchmarkArtifactWriter.writeStatSummary(waitThreeDeltaSummary);
+            BenchmarkArtifactWriter.writeStatSummary(holdConversionSummary);
+            BenchmarkArtifactWriter.writeAblationResult(new PolicyAblationResult(
+                    BenchmarkSchema.VERSION,
+                    "ablation-" + scenario.name() + "-legacy-vs-omega",
+                    scenario.name(),
+                    "Legacy",
+                    "Omega-current",
+                    meanGain(compares) > 1.0 ? "CANDIDATE_BETTER"
+                            : (meanGain(compares) < -1.0 ? "BASELINE_BETTER" : "MIXED"),
+                    meanGain(compares),
+                    gainSummary,
+                    completionDeltaSummary,
+                    deadheadDeltaSummary,
+                    List.of(waveLaunchDeltaSummary, waitThreeDeltaSummary, holdConversionSummary)
+            ));
         }
+
+        BenchmarkArtifactWriter.writeStatSummary(BenchmarkStatistics.summarize(
+                "overallGainPercent",
+                "stressTune/global",
+                toDoubleList(allCompares, ReplayCompareResult::overallGainPercent)));
+        BenchmarkArtifactWriter.writeStatSummary(BenchmarkStatistics.summarizeComparison(
+                "completionRate",
+                "stressTune/global",
+                toDoubleList(allLegacyRuns, RunReport::completionRate),
+                toDoubleList(allOmegaRuns, RunReport::completionRate)));
+        BenchmarkArtifactWriter.writeStatSummary(BenchmarkStatistics.summarizeComparison(
+                "deadheadDistanceRatio",
+                "stressTune/global",
+                toDoubleList(allLegacyRuns, RunReport::deadheadDistanceRatio),
+                toDoubleList(allOmegaRuns, RunReport::deadheadDistanceRatio)));
 
         System.out.println("=================================================");
     }
@@ -324,6 +404,7 @@ public class ScenarioBatchRunner {
                 seed
         );
         BenchmarkArtifactWriter.writeRun(report);
+        BenchmarkArtifactWriter.writeControlRoomFrame(engine.createControlRoomFrame(report));
         return report;
     }
 
@@ -483,6 +564,95 @@ public class ScenarioBatchRunner {
                 - run.expectedPostCompletionEmptyKm() * 2.0 * 0.02
                 - run.nextOrderIdleMinutes() * 0.01
                 - run.zigZagPenaltyAvg() * 8.0 * 0.01;
+    }
+
+    private static BenchmarkRunManifest createStressTuneManifest() {
+        Instant createdAt = Instant.now();
+        List<BenchmarkCaseSpec> cases = new ArrayList<>();
+        for (ScenarioConfig scenario : STRESS_SCENARIOS) {
+            for (int i = 0; i < DEV_TUNING_SEEDS.size(); i++) {
+                long seed = DEV_TUNING_SEEDS.get(i);
+                cases.add(new BenchmarkCaseSpec(
+                        scenario.name() + "-seed" + seed,
+                        "production-realism",
+                        scenario.name(),
+                        DeliveryServiceTier.classifyScenario(scenario.name()).wireValue(),
+                        "local-production-small-" + scenario.drivers(),
+                        SimulationEngine.RouteLatencyMode.SIMULATED_ASYNC.name(),
+                        "simulation",
+                        "stressTuneBatch",
+                        scenario.ticks(),
+                        scenario.drivers(),
+                        scenario.demandMultiplier(),
+                        scenario.trafficIntensity(),
+                        scenario.weatherProfile().name(),
+                        seed,
+                        i
+                ));
+            }
+        }
+        return new BenchmarkRunManifest(
+                BenchmarkSchema.VERSION,
+                "stress-tune-" + createdAt.toEpochMilli(),
+                "stressTuneBatch",
+                createdAt,
+                resolveGitRevision(),
+                DEV_TUNING_SEEDS,
+                REALISM_DRIVER_PROFILES,
+                BenchmarkEnvironmentProfile.detect(
+                        "local-production-small-50",
+                        50,
+                        SimulationEngine.RouteLatencyMode.SIMULATED_ASYNC.name()),
+                1,
+                3,
+                120,
+                180_000L,
+                "trackA-production-realism,multi-seed,ci95,effect-size",
+                "ScenarioBatch stress mode baseline gate",
+                cases,
+                List.of(
+                        new PolicyCandidateRecord("Legacy", SolverType.LEGACY_GREEDY, "legacy-fixed", "legacy", List.of("all")),
+                        new PolicyCandidateRecord("Omega-current", SolverType.TIMEFOLD_ONLINE, "execution-first-hybrid", "execution-first-default", List.of("all")),
+                        new PolicyCandidateRecord("OR-Tools-shadow", SolverType.ORTOOLS_SHADOW, "offline-challenger", "offline-eval", List.of("normal", "rush_hour", "demand_spike"))
+                ),
+                List.of()
+        );
+    }
+
+    private static String resolveGitRevision() {
+        try {
+            Process process = new ProcessBuilder("git", "rev-parse", "--short", "HEAD")
+                    .redirectErrorStream(true)
+                    .start();
+            byte[] output = process.getInputStream().readAllBytes();
+            int code = process.waitFor();
+            if (code != 0) {
+                return "unknown";
+            }
+            String value = new String(output, java.nio.charset.StandardCharsets.UTF_8).trim();
+            return value.isBlank() ? "unknown" : value;
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
+
+    private static <T> List<Double> toDoubleList(List<T> items, ToDoubleFunction<T> extractor) {
+        List<Double> values = new ArrayList<>(items.size());
+        for (T item : items) {
+            values.add(extractor.applyAsDouble(item));
+        }
+        return values;
+    }
+
+    private static double meanGain(List<ReplayCompareResult> compares) {
+        if (compares == null || compares.isEmpty()) {
+            return 0.0;
+        }
+        double sum = 0.0;
+        for (ReplayCompareResult compare : compares) {
+            sum += compare.overallGainPercent();
+        }
+        return sum / compares.size();
     }
 
     private static void configureShowcasePickupWave(ScenarioShockEngine shocks) {

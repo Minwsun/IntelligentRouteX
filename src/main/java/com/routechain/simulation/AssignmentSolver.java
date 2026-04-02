@@ -223,11 +223,11 @@ public class AssignmentSolver {
             case HOLD_WAIT3 -> plan.isWaitingForThirdOrder()
                     && plan.isHardThreeOrderPolicyActive()
                     && plan.getHoldRemainingCycles() > 0
-                    && plan.getWaveReadinessScore() >= 0.58;
+                    && plan.getWaveReadinessScore() >= 0.60;
             case FALLBACK_LOCAL_LOW_DEADHEAD -> plan.isExecutionGatePassed()
                     && plan.getBundleSize() <= 2
                     && plan.getBorrowedDependencyScore() < 0.25
-                    && (plan.getOnTimeProbability() <= 0.0 || plan.getOnTimeProbability() >= 0.74);
+                    && (plan.getOnTimeProbability() <= 0.0 || plan.getOnTimeProbability() >= 0.72);
             case BORROWED_COVERAGE -> plan.getBorrowedDependencyScore() >= 0.25
                     && plan.isExecutionGatePassed();
             case EMERGENCY_COVERAGE -> true;
@@ -240,11 +240,37 @@ public class AssignmentSolver {
         if (bucket == SelectionBucket.WAVE_LOCAL || bucket == SelectionBucket.EXTENSION_LOCAL) {
             score += 0.06;
         }
-        score -= plan.getPredictedDeadheadKm() * 0.08;
-        score -= plan.getBorrowedDependencyScore() * 0.10;
-        score -= plan.getEmptyRiskAfter() * 0.06;
+        if (bucket == SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD) {
+            score += plan.getPredictedDeadheadKm() <= 1.9
+                    && plan.getOnTimeProbability() >= 0.82
+                    && plan.getBorrowedDependencyScore() < 0.25
+                    ? 0.04 : -0.01;
+        } else if (bucket == SelectionBucket.BORROWED_COVERAGE) {
+            score -= 0.07;
+        } else if (bucket == SelectionBucket.EMERGENCY_COVERAGE) {
+            score -= 0.10;
+        } else if (bucket == SelectionBucket.HOLD_WAIT3) {
+            score -= 0.04;
+        }
+        score += Math.max(0.0, plan.getExecutionScore()) * 0.12;
+        score += Math.max(0.0, plan.getContinuationScore()) * 0.04;
+        score += Math.max(0.0, plan.getCoverageScore()) * 0.02;
+        score -= plan.getPredictedDeadheadKm() * 0.10;
+        score -= plan.getExpectedPostCompletionEmptyKm() * 0.08;
+        score -= plan.getBorrowedDependencyScore() * 0.12;
+        score -= plan.getEmptyRiskAfter() * 0.07;
+        if (plan.isStressFallbackOnly() && plan.getBundleSize() <= 2) {
+            score -= 0.05;
+        }
         score += plan.getCoverageQuality() * 0.03;
         score += plan.getReplacementDepth() * 0.02;
+        score += plan.getPostDropDemandProbability() * 0.03;
+        if (bucket == SelectionBucket.HOLD_WAIT3) {
+            score += plan.getWaveReadinessScore() * 0.03;
+            if (plan.getHoldRemainingCycles() <= 1) {
+                score -= 0.02;
+            }
+        }
         return score;
     }
 

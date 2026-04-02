@@ -1,0 +1,31 @@
+package com.routechain.infra;
+
+import java.util.Map;
+
+/**
+ * Canonical event contract identifiers for RouteChain production-small data plane.
+ */
+public final class EventContractCatalog {
+    public static final String DISPATCH_DECISION_V2 = "dispatch.decision.v2";
+    public static final String DISPATCH_OUTCOME_V2 = "dispatch.outcome.v2";
+    public static final String FEATURE_SNAPSHOT_V2 = "feature.snapshot.v2";
+    public static final String MODEL_INFERENCE_V1 = "model.inference.v1";
+    public static final String BENCHMARK_MANIFEST_V2 = "benchmark.manifest.v2";
+
+    private static final Map<String, String> SCHEMA_BY_TOPIC = Map.of(
+            DISPATCH_DECISION_V2, "v2",
+            DISPATCH_OUTCOME_V2, "v2",
+            FEATURE_SNAPSHOT_V2, "v2",
+            MODEL_INFERENCE_V1, "v1",
+            BENCHMARK_MANIFEST_V2, "v2"
+    );
+
+    private EventContractCatalog() {}
+
+    public static String schemaVersionForTopic(String topic) {
+        if (topic == null || topic.isBlank()) {
+            return "v0";
+        }
+        return SCHEMA_BY_TOPIC.getOrDefault(topic, "v0");
+    }
+}

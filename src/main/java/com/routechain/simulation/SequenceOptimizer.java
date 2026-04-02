@@ -13,8 +13,10 @@ import com.routechain.simulation.DispatchPlan.Stop.StopType;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -100,6 +102,14 @@ public class SequenceOptimizer {
             }
         }
 
+        List<Stop> riskAware = generateRiskAwareWaveSequence(driver, orders);
+        if (riskAware != null) {
+            computeArrivalTimes(driver.getCurrentLocation(), riskAware, orders);
+            if (isFeasible(riskAware, orders) && !candidates.contains(riskAware)) {
+                candidates.add(riskAware);
+            }
+        }
+
         List<Stop> baseSequence = buildInitialSequence(driver, orders);
         computeArrivalTimes(driver.getCurrentLocation(), baseSequence, orders);
         if (isFeasible(baseSequence, orders) && !candidates.contains(baseSequence)) {
@@ -117,7 +127,7 @@ public class SequenceOptimizer {
         }
 
         candidates.sort(Comparator.comparingDouble(
-                s -> computeRouteCost(driver.getCurrentLocation(), s, orders)));
+                s -> computeRouteCost(driver, driver.getCurrentLocation(), s, orders)));
 
         return candidates.subList(0, Math.min(candidates.size(), maxCandidates));
     }
@@ -240,6 +250,30 @@ public class SequenceOptimizer {
         }
 
         route.add(new Stop(finalDrop.getId(), finalDrop.getDropoffPoint(), StopType.DROPOFF, 0));
+        return route;
+    }
+
+    private List<Stop> generateRiskAwareWaveSequence(Driver driver, List<Order> orders) {
+        List<Stop> route = buildPickupWavePrefix(driver, orders);
+        if (route.isEmpty()) {
+            return null;
+        }
+
+        List<Order> remainingDropoffs = new ArrayList<>(orders);
+        GeoPoint current = route.get(route.size() - 1).location();
+        while (!remainingDropoffs.isEmpty()) {
+            final GeoPoint origin = current;
+            Order next = remainingDropoffs.stream()
+                    .max(Comparator.comparingDouble(order ->
+                            scoreRiskAwareDropCandidate(origin, order, remainingDropoffs)))
+                    .orElse(null);
+            if (next == null) {
+                break;
+            }
+            route.add(new Stop(next.getId(), next.getDropoffPoint(), StopType.DROPOFF, 0));
+            remainingDropoffs.remove(next);
+            current = next.getDropoffPoint();
+        }
         return route;
     }
 
@@ -476,7 +510,7 @@ public class SequenceOptimizer {
         return true;
     }
 
-    private double computeRouteCost(GeoPoint start, List<Stop> sequence, List<Order> orders) {
+    private double computeRouteCost(Driver driver, GeoPoint start, List<Stop> sequence, List<Order> orders) {
         double totalDistKm = computeDistanceOnly(start, sequence);
         double merchantWaitPenalty = computeCumulativeMerchantWait(sequence, orders);
         boolean cleanThreeOrderWindow = isCleanThreeOrderWindow(orders);
@@ -487,6 +521,10 @@ public class SequenceOptimizer {
             stressPenalty = 0.58;
         }
         RouteObjectiveMetrics metrics = evaluateRouteObjectiveFromSequence(start, sequence, orders);
+        double slaRiskPenalty = computeSlaRiskPenalty(sequence, orders);
+        double urgencyFrontloadPenalty = computeUrgencyFrontloadPenalty(sequence, orders);
+        double weatherCongestionPenalty = computeWeatherCongestionPenalty(metrics, orders.size());
+        double headingPenalty = computeHeadingMisalignmentPenalty(driver, start, sequence);
         double dropTransitionCost = (1.0 - metrics.remainingDropProximityScore()) * 1.6;
         double corridorDeviationCost = metrics.deliveryZigZagPenalty() * 1.4
                 + (1.0 - metrics.deliveryCorridorScore()) * 0.9;
@@ -505,10 +543,120 @@ public class SequenceOptimizer {
         }
         return totalDistKm
                 + merchantWaitPenalty * stressPenalty
+                + slaRiskPenalty
+                + urgencyFrontloadPenalty
+                + weatherCongestionPenalty
+                + headingPenalty
                 + dropTransitionCost
                 + corridorDeviationCost
                 + lastDropLandingCost
                 + returnToDemandCost;
+    }
+
+    private double computeSlaRiskPenalty(List<Stop> sequence, List<Order> orders) {
+        if (sequence == null || orders == null || orders.isEmpty()) {
+            return 0.0;
+        }
+        Map<String, Order> ordersById = new HashMap<>(orders.size());
+        for (Order order : orders) {
+            ordersById.put(order.getId(), order);
+        }
+
+        double penalty = 0.0;
+        int dropCount = 0;
+        for (Stop stop : sequence) {
+            if (stop.type() != StopType.DROPOFF) {
+                continue;
+            }
+            Order order = ordersById.get(stop.orderId());
+            if (order == null) {
+                continue;
+            }
+            double promised = Math.max(12.0, order.getPromisedEtaMinutes() * slaLatenessFactor(orders));
+            double lateness = Math.max(0.0, stop.estimatedArrivalMinutes() - promised);
+            double normalizedLateness = lateness / promised;
+            double urgency = 0.60 + computeOrderUrgency(order) * 0.80;
+            penalty += normalizedLateness * urgency * 3.2;
+            dropCount++;
+        }
+        return dropCount == 0 ? 0.0 : penalty / dropCount;
+    }
+
+    private double computeUrgencyFrontloadPenalty(List<Stop> sequence, List<Order> orders) {
+        if (sequence == null || orders == null || orders.size() <= 1) {
+            return 0.0;
+        }
+        Map<String, Order> ordersById = new HashMap<>(orders.size());
+        for (Order order : orders) {
+            ordersById.put(order.getId(), order);
+        }
+
+        List<Order> dropSequence = new ArrayList<>();
+        for (Stop stop : sequence) {
+            if (stop.type() != StopType.DROPOFF) {
+                continue;
+            }
+            Order order = ordersById.get(stop.orderId());
+            if (order != null) {
+                dropSequence.add(order);
+            }
+        }
+        if (dropSequence.size() <= 1) {
+            return 0.0;
+        }
+
+        double penalty = 0.0;
+        for (int i = 0; i < dropSequence.size() - 1; i++) {
+            double lhsUrgency = computeOrderUrgency(dropSequence.get(i));
+            for (int j = i + 1; j < dropSequence.size(); j++) {
+                double rhsUrgency = computeOrderUrgency(dropSequence.get(j));
+                if (rhsUrgency > lhsUrgency + 0.12) {
+                    penalty += (rhsUrgency - lhsUrgency) * 0.35;
+                }
+            }
+        }
+        return penalty / Math.max(1, dropSequence.size() - 1);
+    }
+
+    private double computeWeatherCongestionPenalty(RouteObjectiveMetrics metrics, int orderCount) {
+        if (metrics == null) {
+            return 0.0;
+        }
+        double weatherSeverity = switch (weather) {
+            case CLEAR -> 0.08;
+            case LIGHT_RAIN -> 0.14;
+            case HEAVY_RAIN -> 0.24;
+            case STORM -> 0.35;
+        };
+        double structuralRisk = (1.0 - metrics.deliveryCorridorScore()) * 0.55
+                + metrics.deliveryZigZagPenalty() * 0.30
+                + Math.min(1.0, metrics.expectedPostCompletionEmptyKm() / 2.8) * 0.15;
+        double densityFactor = Math.min(1.5, Math.max(0.8, orderCount / 2.0));
+        return weatherSeverity * structuralRisk * densityFactor;
+    }
+
+    private double computeHeadingMisalignmentPenalty(Driver driver,
+                                                     GeoPoint start,
+                                                     List<Stop> sequence) {
+        if (driver == null || sequence == null || sequence.isEmpty() || start == null) {
+            return 0.0;
+        }
+        if (driver.getSpeedKmh() <= 2.0) {
+            return 0.0;
+        }
+        GeoPoint first = sequence.get(0).location();
+        double dx = first.lng() - start.lng();
+        double dy = first.lat() - start.lat();
+        if (Math.abs(dx) + Math.abs(dy) < 1e-9) {
+            return 0.0;
+        }
+        double targetDeg = Math.toDegrees(Math.atan2(dy, dx));
+        double headingDeg = driver.getHeading();
+        double diff = Math.abs(targetDeg - headingDeg);
+        if (diff > 180.0) {
+            diff = 360.0 - diff;
+        }
+        return clamp01(diff / 180.0) * 0.18;
     }
 
     private double computeDistanceOnly(GeoPoint start, List<Stop> sequence) {
@@ -711,6 +859,50 @@ public class SequenceOptimizer {
                 - distancePenalty * 0.22;
     }
 
+    private double scoreRiskAwareDropCandidate(GeoPoint current,
+                                               Order candidate,
+                                               List<Order> remainingDropoffs) {
+        List<Order> futureRemaining = new ArrayList<>(remainingDropoffs);
+        futureRemaining.remove(candidate);
+        double distancePenalty = current.distanceTo(candidate.getDropoffPoint()) / 1000.0;
+        double urgency = computeOrderUrgency(candidate);
+        double projectedMinutes = estimateTravelMinutes(current, candidate.getDropoffPoint());
+        double promisedWindow = Math.max(12.0, candidate.getPromisedEtaMinutes() * slaLatenessFactor(remainingDropoffs));
+        double slackAfterTravel = promisedWindow - projectedMinutes;
+        double slackScore = clamp01((slackAfterTravel + 6.0) / 18.0);
+        double corridorAffinity = computeCorridorAffinity(candidate.getDropoffPoint());
+        double landingPotential = futureRemaining.isEmpty()
+                ? computeLandingPotential(candidate.getDropoffPoint())
+                : computeLandingPotentialOfFuture(futureRemaining);
+        return urgency * 0.34
+                + (1.0 - distancePenalty / 4.0) * 0.24
+                + slackScore * 0.20
+                + corridorAffinity * 0.14
+                + landingPotential * 0.08;
+    }
+
+    private double computeOrderUrgency(Order order) {
+        if (order == null) {
+            return 0.0;
+        }
+        double etaTightness = clamp01(1.0 - order.getPromisedEtaMinutes() / 90.0);
+        double delayHazard = clamp01(order.getPickupDelayHazard());
+        double cancelRisk = clamp01(order.getCancellationRisk());
+        double priority = clamp01(order.getPriority() / 3.0);
+        return etaTightness * 0.40
+                + delayHazard * 0.30
+                + cancelRisk * 0.20
+                + priority * 0.10;
+    }
+
+    private double estimateTravelMinutes(GeoPoint from, GeoPoint to) {
+        if (from == null || to == null) {
+            return 0.0;
+        }
+        double distKm = from.distanceTo(to) / 1000.0;
+        return (distKm / estimateSpeed()) * 60.0;
+    }
+
     private double computeRemainingProgress(GeoPoint currentDrop, List<Order> remaining) {
         if (remaining.isEmpty()) {
             return 1.0;
@@ -835,10 +1027,13 @@ public class SequenceOptimizer {
         for (EndZoneCandidate candidate : context.endZoneCandidates()) {
             double distKm = lastDrop.distanceTo(candidate.position()) / 1000.0;
             double proximity = 1.0 / (1.0 + distKm / 1.2);
-            double score = candidate.attractionScore() * 0.60
-                    + proximity * 0.25
-                    + (1.0 - candidate.corridorExposure()) * 0.10
-                    + (1.0 - candidate.weatherExposure()) * 0.05;
+            double score = candidate.attractionScore() * 0.32
+                    + candidate.postDropOpportunity() * 0.28
+                    + proximity * 0.18
+                    + Math.min(1.0, candidate.demandForecast10m() / 2.5) * 0.10
+                    + (1.0 - candidate.emptyZoneRisk()) * 0.07
+                    + (1.0 - candidate.corridorExposure()) * 0.03
+                    + (1.0 - candidate.weatherExposure()) * 0.02;
             bestScore = Math.max(bestScore, score);
         }
         return clamp01(bestScore / 1.4);
@@ -852,7 +1047,9 @@ public class SequenceOptimizer {
         double bestWeightedKm = Double.MAX_VALUE;
         for (EndZoneCandidate candidate : context.endZoneCandidates()) {
             double distKm = lastDrop.distanceTo(candidate.position()) / 1000.0;
-            double weightedKm = distKm / Math.max(0.35, candidate.attractionScore());
+            double opportunity = Math.max(0.25,
+                    candidate.postDropOpportunity() * 0.60 + candidate.attractionScore() * 0.40);
+            double weightedKm = distKm * (1.0 + candidate.emptyZoneRisk() * 0.75) / opportunity;
             bestWeightedKm = Math.min(bestWeightedKm, weightedKm);
         }
         if (bestWeightedKm == Double.MAX_VALUE) {
@@ -867,10 +1064,21 @@ public class SequenceOptimizer {
             return 4.0;
         }
 
+        double bestPostDropOpportunity = context.endZoneCandidates().stream()
+                .mapToDouble(EndZoneCandidate::postDropOpportunity)
+                .max()
+                .orElse(0.0);
+        double bestEmptyZoneRisk = context.endZoneCandidates().stream()
+                .mapToDouble(EndZoneCandidate::emptyZoneRisk)
+                .min()
+                .orElse(0.5);
+
         double adjusted = context.estimatedIdleMinutes() * (1.0 - lastDropLandingScore * 0.55)
                 + expectedPostCompletionEmptyKm * 0.85
                 + context.endZoneIdleRisk() * 2.0
-                - context.deliveryDemandGradient() * 0.60;
+                - context.deliveryDemandGradient() * 0.60
+                - bestPostDropOpportunity * 2.4
+                + bestEmptyZoneRisk * 1.1;
         return Math.max(0.5, adjusted);
     }
 

@@ -29,6 +29,15 @@ dependencies {
     // Database
     implementation("org.xerial:sqlite-jdbc:3.45.1.0")
 
+    // AI-first optimization/runtime stack (production-small, Java-first)
+    implementation("ai.timefold.solver:timefold-solver-core:1.16.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime:1.22.0")
+
+    // Stream backbone client (local-first now, cluster-ready later)
+    implementation("org.apache.kafka:kafka-clients:4.2.0")
+    implementation("com.uber:h3:4.1.1")
+    runtimeOnly("com.google.ortools:ortools-java:9.10.4067")
+
     // Logging
     implementation("org.slf4j:slf4j-api:2.0.13")
     implementation("ch.qos.logback:logback-classic:1.5.6")
@@ -85,4 +94,65 @@ tasks.register<JavaExec>("stressTuneBatch") {
     mainClass.set("com.routechain.simulation.ScenarioBatchRunner")
     classpath = sourceSets["main"].runtimeClasspath
     args("stress")
+}
+
+tasks.register<JavaExec>("hybridBenchmark") {
+    group = "application"
+    mainClass.set("com.routechain.simulation.HybridBenchmarkRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("all")
+}
+
+tasks.register<JavaExec>("researchBenchmark") {
+    group = "application"
+    mainClass.set("com.routechain.simulation.HybridBenchmarkRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("research")
+}
+
+tasks.register<JavaExec>("counterfactualArena") {
+    group = "application"
+    mainClass.set("com.routechain.simulation.CounterfactualArenaRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
+tasks.register<JavaExec>("counterfactualArenaSmoke") {
+    group = "application"
+    mainClass.set("com.routechain.simulation.CounterfactualArenaRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("smoke")
+}
+
+tasks.register<JavaExec>("performanceBenchmark") {
+    group = "application"
+    mainClass.set("com.routechain.simulation.PerformanceBenchmarkRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("all")
+}
+
+tasks.register<JavaExec>("microDispatchBenchmark") {
+    group = "application"
+    mainClass.set("com.routechain.simulation.PerformanceBenchmarkRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("micro")
+}
+
+tasks.register<JavaExec>("performanceBenchmarkSmoke") {
+    group = "application"
+    mainClass.set("com.routechain.simulation.PerformanceBenchmarkRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("smoke")
+}
+
+tasks.register<JavaExec>("soakBenchmark") {
+    group = "application"
+    mainClass.set("com.routechain.simulation.PerformanceBenchmarkRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("soak")
+}
+
+tasks.register<JavaExec>("controlRoomConsole") {
+    group = "application"
+    mainClass.set("com.routechain.simulation.ControlRoomConsoleRunner")
+    classpath = sourceSets["main"].runtimeClasspath
 }

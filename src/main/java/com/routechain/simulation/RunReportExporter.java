@@ -1,5 +1,6 @@
 package com.routechain.simulation;
 
+import com.routechain.domain.Enums.DeliveryServiceTier;
 import com.routechain.domain.Driver;
 import com.routechain.domain.Order;
 import com.routechain.domain.Enums.OrderStatus;
@@ -42,6 +43,11 @@ public class RunReportExporter {
             double totalDeadheadKm,
             double totalEarnings,
             long totalAssignmentLatencyMs,
+            List<Long> dispatchDecisionLatencySamples,
+            List<Long> modelInferenceLatencySamples,
+            List<Long> neuralPriorLatencySamples,
+            List<Long> assignmentAgingLatencySamples,
+            double tickThroughputPerSec,
             int totalAssignments,
             int totalBundled,
             int reDispatchCount,
@@ -68,6 +74,15 @@ public class RunReportExporter {
             double borrowedExecutedDeadheadKm,
             double fallbackExecutedDeadheadKm,
             double waveExecutedDeadheadKm,
+            int postDropOpportunityCount,
+            int postDropOrderHitCount,
+            double totalPredictedPostDropOpportunity,
+            double totalTrafficForecastAbsError,
+            double totalWeatherForecastHitRate,
+            int forecastDecisionCount,
+            double totalBorrowSuccessCalibrationGap,
+            int borrowSuccessCalibrationCount,
+            int noDriverFoundOrderCount,
             DispatchRecoveryDecomposition recovery,
             Instant endTime) {
 
@@ -179,6 +194,12 @@ public class RunReportExporter {
                 ? totalDeadheadKm / totalDelivered : 0.0;
         double deadheadPerAssignedOrderKm = totalAssignments > 0
                 ? totalDeadheadKm / totalAssignments : 0.0;
+        double postDropOrderHitRate = postDropOpportunityCount > 0
+                ? postDropOrderHitCount * 100.0 / postDropOpportunityCount
+                : 0.0;
+        double avgPredictedPostDropOpportunity = routeMetricPlanCount > 0
+                ? totalPredictedPostDropOpportunity / routeMetricPlanCount
+                : 0.0;
         int borrowedExecutedCount = Math.max(0, safeRecovery.executedBorrowedCount());
         int fallbackExecutedCount = Math.max(0, safeRecovery.executedFallbackCount());
         int waveExecutedCount = Math.max(0, safeRecovery.executedWaveCount() + safeRecovery.executedExtensionCount());
@@ -188,6 +209,65 @@ public class RunReportExporter {
                 ? fallbackExecutedDeadheadKm / fallbackExecutedCount : 0.0;
         double waveDeadheadPerExecutedOrderKm = waveExecutedCount > 0
                 ? waveExecutedDeadheadKm / waveExecutedCount : 0.0;
+        Map<String, ServiceTierMetrics> serviceTierBreakdown = buildServiceTierBreakdown(allKnownOrders);
+        String dominantServiceTier = serviceTierBreakdown.entrySet().stream()
+                .max(Map.Entry.comparingByValue((left, right) -> Integer.compare(left.orderCount(), right.orderCount())))
+                .map(Map.Entry::getKey)
+                .orElse(DeliveryServiceTier.classifyScenario(scenarioName).wireValue());
+        double merchantPrepMaeMinutes = computeMerchantPrepMae(allKnownOrders);
+        ForecastCalibrationSummary forecastCalibrationSummary = new ForecastCalibrationSummary(
+                etaMAE,
+                merchantPrepMaeMinutes,
+                Math.abs(postDropOrderHitRate / 100.0 - avgPredictedPostDropOpportunity),
+                avgPredictedPostDropOpportunity
+        );
+        LatencyBreakdown latency = LatencyBreakdown.fromSamples(
+                dispatchDecisionLatencySamples,
+                modelInferenceLatencySamples,
+                neuralPriorLatencySamples,
+                assignmentAgingLatencySamples,
+                tickThroughputPerSec
+        );
+        MeasurementSanityCheck measurementSanity = MeasurementSanityCheck.evaluate(latency, avgAssignLatency);
+        double avgTrafficForecastError = forecastDecisionCount > 0
+                ? totalTrafficForecastAbsError / forecastDecisionCount
+                : 0.0;
+        double avgWeatherForecastHitRate = forecastDecisionCount > 0
+                ? totalWeatherForecastHitRate / forecastDecisionCount
+                : 1.0;
+        double avgBorrowSuccessCalibration = borrowSuccessCalibrationCount > 0
+                ? totalBorrowSuccessCalibrationGap / borrowSuccessCalibrationCount
+                : 0.0;
+        IntelligenceScorecard intelligence = buildIntelligenceScorecard(
+                completionRate,
+                onTimeRate,
+                etaMAE,
+                deadheadPerCompletedOrderKm,
+                deadheadPerAssignedOrderKm,
+                postDropOrderHitRate,
+                expectedPostCompletionEmptyKm,
+                deliveryCorridorQuality,
+                thirdOrderLaunchRate,
+                safeRecovery,
+                merchantPrepMaeMinutes,
+                forecastCalibrationSummary.continuationCalibrationGap(),
+                avgTrafficForecastError,
+                avgWeatherForecastHitRate,
+                avgBorrowSuccessCalibration,
+                noDriverFoundOrderCount,
+                totalOrders,
+                fallbackDeadheadPerExecutedOrderKm,
+                borrowedDeadheadPerExecutedOrderKm
+        );
+        ScenarioAcceptanceResult acceptance = buildScenarioAcceptance(
+                scenarioName,
+                dominantServiceTier,
+                latency,
+                intelligence,
+                measurementSanity,
+                weatherSeverityOf(scenarioName),
+                noDriverFoundOrderCount
+        );
 
         return new RunReport(
                 runId, scenarioName, seed, startTime, endTime, totalTicks,
@@ -209,9 +289,16 @@ public class RunReportExporter {
                 avgAssignedDeadheadKm,
                 deadheadPerCompletedOrderKm,
                 deadheadPerAssignedOrderKm,
+                postDropOrderHitRate,
                 borrowedDeadheadPerExecutedOrderKm,
                 fallbackDeadheadPerExecutedOrderKm,
                 waveDeadheadPerExecutedOrderKm,
+                latency,
+                intelligence,
+                acceptance,
+                dominantServiceTier,
+                serviceTierBreakdown,
+                forecastCalibrationSummary,
                 safeRecovery
         );
     }
@@ -287,6 +374,220 @@ public class RunReportExporter {
             addBundleOrder(bundleOrders, order);
         }
         return bundleOrders;
+    }
+
+    private Map<String, ServiceTierMetrics> buildServiceTierBreakdown(List<Order> orders) {
+        Map<String, List<Order>> byTier = new java.util.LinkedHashMap<>();
+        for (Order order : orders) {
+            String tier = DeliveryServiceTier.classify(order).wireValue();
+            byTier.computeIfAbsent(tier, ignored -> new ArrayList<>()).add(order);
+        }
+        Map<String, ServiceTierMetrics> breakdown = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, List<Order>> entry : byTier.entrySet()) {
+            List<Order> tierOrders = entry.getValue();
+            int completed = (int) tierOrders.stream()
+                    .filter(order -> order.getStatus() == OrderStatus.DELIVERED)
+                    .count();
+            double completionRate = tierOrders.isEmpty()
+                    ? 0.0
+                    : completed * 100.0 / tierOrders.size();
+            double avgPromisedEta = tierOrders.stream()
+                    .mapToInt(Order::getPromisedEtaMinutes)
+                    .average()
+                    .orElse(0.0);
+            double avgQuotedFee = tierOrders.stream()
+                    .mapToDouble(Order::getQuotedFee)
+                    .average()
+                    .orElse(0.0);
+            breakdown.put(entry.getKey(), new ServiceTierMetrics(
+                    entry.getKey(),
+                    tierOrders.size(),
+                    completed,
+                    completionRate,
+                    avgPromisedEta,
+                    avgQuotedFee
+            ));
+        }
+        if (breakdown.isEmpty()) {
+            String fallbackTier = DeliveryServiceTier.classifyScenario(scenarioName).wireValue();
+            breakdown.put(fallbackTier, new ServiceTierMetrics(fallbackTier, 0, 0, 0.0, 0.0, 0.0));
+        }
+        return breakdown;
+    }
+
+    private double computeMerchantPrepMae(List<Order> orders) {
+        double totalError = 0.0;
+        int count = 0;
+        for (Order order : orders) {
+            if (order.getPredictedReadyAt() == null || order.getActualReadyAt() == null) {
+                continue;
+            }
+            double predicted = java.time.Duration.between(order.getCreatedAt(), order.getPredictedReadyAt())
+                    .toSeconds() / 60.0;
+            double actual = java.time.Duration.between(order.getCreatedAt(), order.getActualReadyAt())
+                    .toSeconds() / 60.0;
+            totalError += Math.abs(actual - predicted);
+            count++;
+        }
+        return count > 0 ? totalError / count : 0.0;
+    }
+
+    private IntelligenceScorecard buildIntelligenceScorecard(double completionRate,
+                                                             double onTimeRate,
+                                                             double etaMAE,
+                                                             double deadheadPerCompletedOrderKm,
+                                                             double deadheadPerAssignedOrderKm,
+                                                             double postDropOrderHitRate,
+                                                             double expectedPostCompletionEmptyKm,
+                                                             double deliveryCorridorQuality,
+                                                             double thirdOrderLaunchRate,
+                                                             DispatchRecoveryDecomposition recovery,
+                                                             double merchantPrepMaeMinutes,
+                                                             double continuationCalibrationGap,
+                                                             double trafficForecastError,
+                                                             double weatherForecastHitRate,
+                                                             double borrowSuccessCalibration,
+                                                             int noDriverFoundOrderCount,
+                                                             int totalOrders,
+                                                             double fallbackDeadheadPerExecutedOrderKm,
+                                                             double borrowedDeadheadPerExecutedOrderKm) {
+        double waveQuality = clamp01(
+                thirdOrderLaunchRate / 100.0 * 0.45
+                        + (recovery == null ? 0.0 : recovery.holdConversionRate() / 100.0) * 0.30
+                        + (recovery == null ? 0.0 : recovery.waveExecutionRate() / 100.0) * 0.25);
+        double noDriverFoundRate = totalOrders > 0
+                ? Math.min(100.0, noDriverFoundOrderCount * 100.0 / totalOrders)
+                : 0.0;
+        double coverageRecoveryRate = clamp01(realRate(recovery));
+        double emptyZoneRecoveryRate = clamp01(postDropOrderHitRate / 100.0);
+        double reserveStability = clamp01(
+                1.0 - (recovery == null ? 0.0 : recovery.borrowedSelectionRate() / 100.0) * 0.65
+                        - noDriverFoundRate / 100.0 * 0.35);
+        double weatherAvoidanceQuality = clamp01(
+                1.0 - Math.min(1.0, borrowedDeadheadPerExecutedOrderKm / 3.5) * 0.35
+                        - Math.min(1.0, fallbackDeadheadPerExecutedOrderKm / 3.5) * 0.15
+                        + Math.min(1.0, onTimeRate / 100.0) * 0.20
+                        + Math.min(1.0, weatherForecastHitRate) * 0.30);
+        double congestionAvoidanceQuality = clamp01(
+                deliveryCorridorQuality * 0.45
+                        + Math.min(1.0, onTimeRate / 100.0) * 0.20
+                        + Math.max(0.0, 1.0 - deadheadPerAssignedOrderKm / 3.0) * 0.35);
+        double businessScore = clamp01(
+                Math.max(0.0, 1.0 - deadheadPerCompletedOrderKm / 2.5) * 0.34
+                        + completionRate / 100.0 * 0.28
+                        + postDropOrderHitRate / 100.0 * 0.22
+                        + Math.max(0.0, 1.0 - expectedPostCompletionEmptyKm / 2.6) * 0.16);
+        double routingScore = clamp01(
+                onTimeRate / 100.0 * 0.28
+                        + Math.max(0.0, 1.0 - etaMAE / 15.0) * 0.12
+                        + weatherAvoidanceQuality * 0.18
+                        + congestionAvoidanceQuality * 0.18
+                        + waveQuality * 0.24);
+        double networkScore = clamp01(
+                Math.max(0.0, 1.0 - noDriverFoundRate / 100.0) * 0.30
+                        + reserveStability * 0.18
+                        + coverageRecoveryRate * 0.28
+                        + emptyZoneRecoveryRate * 0.24);
+        double forecastScore = clamp01(
+                Math.max(0.0, 1.0 - merchantPrepMaeMinutes / 12.0) * 0.30
+                        + Math.max(0.0, 1.0 - Math.abs(continuationCalibrationGap)) * 0.30
+                        + Math.max(0.0, 1.0 - trafficForecastError) * 0.18
+                        + clamp01(weatherForecastHitRate) * 0.12
+                        + Math.max(0.0, 1.0 - borrowSuccessCalibration) * 0.10);
+        String primaryVerdict = verdictForScore(businessScore);
+        String secondaryVerdict = verdictForScore((businessScore + routingScore + networkScore + forecastScore) / 4.0);
+        return new IntelligenceScorecard(
+                businessScore,
+                routingScore,
+                networkScore,
+                forecastScore,
+                weatherAvoidanceQuality,
+                congestionAvoidanceQuality,
+                waveQuality,
+                noDriverFoundRate,
+                reserveStability,
+                coverageRecoveryRate,
+                emptyZoneRecoveryRate,
+                trafficForecastError,
+                clamp01(weatherForecastHitRate),
+                borrowSuccessCalibration,
+                primaryVerdict,
+                secondaryVerdict
+        );
+    }
+
+    private ScenarioAcceptanceResult buildScenarioAcceptance(String scenarioName,
+                                                             String serviceTier,
+                                                             LatencyBreakdown latency,
+                                                             IntelligenceScorecard intelligence,
+                                                             MeasurementSanityCheck measurementSanity,
+                                                             com.routechain.domain.Enums.WeatherProfile scenarioWeather,
+                                                             int noDriverFoundOrderCount) {
+        boolean measurementPass = measurementSanity.valid();
+        boolean performancePass = latency.dispatchP95Ms() <= 120.0 && latency.dispatchP99Ms() <= 180.0;
+        boolean intelligencePass = intelligence.businessScore() >= 0.55
+                && intelligence.routingScore() >= 0.45
+                && intelligence.networkScore() >= 0.45;
+        boolean safetyPass = scenarioWeather == com.routechain.domain.Enums.WeatherProfile.HEAVY_RAIN
+                || scenarioWeather == com.routechain.domain.Enums.WeatherProfile.STORM
+                ? intelligence.weatherAvoidanceQuality() >= 0.45 && noDriverFoundOrderCount <= 3
+                : true;
+        boolean overallPass = measurementPass && performancePass && intelligencePass && safetyPass;
+        String notes = String.join(" | ", measurementSanity.warnings());
+        return new ScenarioAcceptanceResult(
+                scenarioName,
+                serviceTier,
+                "local-production-small-50",
+                measurementPass,
+                performancePass,
+                intelligencePass,
+                safetyPass,
+                overallPass,
+                intelligence.primaryVerdict(),
+                intelligence.secondaryVerdict(),
+                notes
+        );
+    }
+
+    private double realRate(DispatchRecoveryDecomposition recovery) {
+        if (recovery == null) {
+            return 0.0;
+        }
+        return clamp01(recovery.localCoverageExecutionRate() / 100.0);
+    }
+
+    private String verdictForScore(double score) {
+        if (score >= 0.72) {
+            return "STRONG";
+        }
+        if (score >= 0.55) {
+            return "PASSING";
+        }
+        if (score >= 0.40) {
+            return "WATCH";
+        }
+        return "WEAK";
+    }
+
+    private double clamp01(double value) {
+        return Math.max(0.0, Math.min(1.0, value));
+    }
+
+    private com.routechain.domain.Enums.WeatherProfile weatherSeverityOf(String scenarioName) {
+        if (scenarioName == null) {
+            return com.routechain.domain.Enums.WeatherProfile.CLEAR;
+        }
+        String normalized = scenarioName.toLowerCase();
+        if (normalized.contains("storm")) {
+            return com.routechain.domain.Enums.WeatherProfile.STORM;
+        }
+        if (normalized.contains("heavy_rain")) {
+            return com.routechain.domain.Enums.WeatherProfile.HEAVY_RAIN;
+        }
+        if (normalized.contains("rain")) {
+            return com.routechain.domain.Enums.WeatherProfile.LIGHT_RAIN;
+        }
+        return com.routechain.domain.Enums.WeatherProfile.CLEAR;
     }
 
     private void addBundleOrder(Map<String, List<Order>> bundleOrders, Order order) {

@@ -1,6 +1,7 @@
 package com.routechain.simulation;
 
 import java.time.Instant;
+import java.util.Map;
 
 /**
  * Captures all KPIs for a single simulation run.
@@ -67,15 +68,38 @@ public record RunReport(
         double avgAssignedDeadheadKm,
         double deadheadPerCompletedOrderKm,
         double deadheadPerAssignedOrderKm,
+        double postDropOrderHitRate,
         double borrowedDeadheadPerExecutedOrderKm,
         double fallbackDeadheadPerExecutedOrderKm,
         double waveDeadheadPerExecutedOrderKm,
+        LatencyBreakdown latency,
+        IntelligenceScorecard intelligence,
+        ScenarioAcceptanceResult acceptance,
+        String dominantServiceTier,
+        Map<String, ServiceTierMetrics> serviceTierBreakdown,
+        ForecastCalibrationSummary forecastCalibrationSummary,
         DispatchRecoveryDecomposition recovery
 ) {
     public RunReport {
         if (recovery == null) {
             recovery = DispatchRecoveryDecomposition.empty();
         }
+        latency = latency == null ? LatencyBreakdown.empty() : latency;
+        intelligence = intelligence == null ? IntelligenceScorecard.empty() : intelligence;
+        acceptance = acceptance == null ? ScenarioAcceptanceResult.empty() : acceptance;
+        dominantServiceTier = dominantServiceTier == null || dominantServiceTier.isBlank()
+                ? "instant"
+                : dominantServiceTier;
+        serviceTierBreakdown = serviceTierBreakdown == null
+                ? Map.of()
+                : Map.copyOf(serviceTierBreakdown);
+        forecastCalibrationSummary = forecastCalibrationSummary == null
+                ? ForecastCalibrationSummary.empty()
+                : forecastCalibrationSummary;
+    }
+
+    public String schemaVersion() {
+        return BenchmarkSchema.VERSION;
     }
 
     public double holdBehaviorRate() {
@@ -137,7 +161,8 @@ public record RunReport(
                 "bundleRate=%.1f%% avgBundle=%.2f maxBundle=%d 3plus=%.1f%% reDispatch=%d | " +
                 "corridor=%.2f goodLast=%.1f%% emptyKm=%.2f | " +
                 "realAssign=%.1f%% steadyAssign=%.1f%% cleanSub3=%.1f%% wait3=%.1f%% launch3=%.1f%% downgrade=%.1f%% augment=%.1f%% holdOnly=%.1f%% | " +
-                "dh/assigned=%.2fkm dh/completed=%.2fkm waveExec=%.1f%% holdConv=%.1f%% fallbackDirect=%.1f%% borrowedExec=%.1f%% | " +
+                "tier=%s dh/assigned=%.2fkm dh/completed=%.2fkm postDropHit=%.1f%% waveExec=%.1f%% holdConv=%.1f%% fallbackDirect=%.1f%% borrowedExec=%.1f%% | " +
+                "prepMae=%.2fm contGap=%.2f dispatchP95=%.1fms biz=%s bal=%s | " +
                 "recover3=%.1f%% | " +
                 "assignLatency=%.0fms confidence=%.2f",
                 runId, scenarioName, totalOrders, totalDrivers,
@@ -148,11 +173,17 @@ public record RunReport(
                 deliveryCorridorQuality, lastDropGoodZoneRate, expectedPostCompletionEmptyKm,
                 realAssignmentRate, nonDowngradedRealAssignmentRate(), selectedSubThreeRateInCleanRegime, waveAssemblyWaitRate,
                 thirdOrderLaunchRate, stressDowngradeRate, prePickupAugmentRate, holdOnlySelectionRate,
-                deadheadPerAssignedOrderKm, deadheadPerCompletedOrderKm,
+                dominantServiceTier,
+                deadheadPerAssignedOrderKm, deadheadPerCompletedOrderKm, postDropOrderHitRate,
                 recovery == null ? 0.0 : recovery.waveExecutionRate(),
                 recovery == null ? 0.0 : recovery.holdConversionRate(),
                 recovery == null ? 0.0 : recovery.fallbackDirectRate(),
                 recovery == null ? 0.0 : recovery.borrowedSelectionRate(),
+                forecastCalibrationSummary == null ? 0.0 : forecastCalibrationSummary.merchantPrepMaeMinutes(),
+                forecastCalibrationSummary == null ? 0.0 : forecastCalibrationSummary.continuationCalibrationGap(),
+                latency == null ? 0.0 : latency.dispatchP95Ms(),
+                intelligence == null ? "UNASSESSED" : intelligence.primaryVerdict(),
+                intelligence == null ? "UNASSESSED" : intelligence.secondaryVerdict(),
                 cleanWaveRecoveryRate(),
                 avgAssignmentLatencyMs, avgConfidence
         );

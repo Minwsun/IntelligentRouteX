@@ -8,3 +8,16 @@ build/
 .gradle-user/
 .javac-deps/
 routechain.db
+.venv-neural/
+build/routechain-apex/runtime/
+models/onnx/*
+models/routefinder/
+models/rrnco/
+models/download-manifest.json
+!models/model-registry-v1.json
+!models/README.md
+!models/.gitkeep
+!models/onnx/
+!models/onnx/.gitkeep
+ops/production-small/.env
+ops/production-small/data/

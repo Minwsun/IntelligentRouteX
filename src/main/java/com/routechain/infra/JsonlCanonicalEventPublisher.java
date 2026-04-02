@@ -1,5 +1,6 @@
 package com.routechain.infra;
 
+import java.lang.reflect.Method;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -28,7 +29,9 @@ public final class JsonlCanonicalEventPublisher implements CanonicalEventPublish
     public synchronized void publish(String topic, Object payload) {
         CanonicalEnvelope envelope = new CanonicalEnvelope(
                 topic,
+                EventContractCatalog.schemaVersionForTopic(topic),
                 payload.getClass().getSimpleName(),
+                resolveRunId(payload),
                 Instant.now(),
                 payload
         );
@@ -47,8 +50,23 @@ public final class JsonlCanonicalEventPublisher implements CanonicalEventPublish
 
     private record CanonicalEnvelope(
             String topic,
+            String schemaVersion,
             String payloadType,
+            String runId,
             Instant publishedAt,
             Object payload
     ) {}
+
+    private static String resolveRunId(Object payload) {
+        if (payload == null) {
+            return null;
+        }
+        try {
+            Method method = payload.getClass().getMethod("runId");
+            Object value = method.invoke(payload);
+            return value == null ? null : value.toString();
+        } catch (ReflectiveOperationException ignored) {
+            return null;
+        }
+    }
 }

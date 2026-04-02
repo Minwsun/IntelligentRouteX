@@ -3,6 +3,7 @@ package com.routechain.simulation;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -26,6 +27,10 @@ class ReplayCompareResultRouteMetricsTest {
         assertTrue(summary.contains("recover3="));
         assertTrue(summary.contains("sub3="));
         assertTrue(summary.contains("downgrade="));
+        assertTrue(summary.contains("postDropHit="));
+        assertTrue(summary.contains("tier="));
+        assertTrue(summary.contains("prepMae="));
+        assertTrue(summary.contains("contGap="));
     }
 
     private RunReport createReport(String id,
@@ -80,9 +85,16 @@ class ReplayCompareResultRouteMetricsTest {
                 1.15,
                 1.75,
                 1.28,
+                41.0,
                 1.02,
                 1.10,
                 0.96,
+                new LatencyBreakdown(20.0, 16.0, 92.0, 118.0, 6.0, 10.0, 31.0, 56.0, 1580.0, 2380.0, 7.9, 11, 8),
+                new IntelligenceScorecard(0.71, 0.67, 0.62, 0.59, 0.65, 0.61, 0.63, 1.0, 0.73, 0.69, 0.46, 0.23, 0.81, 0.15, "PASSING", "PASSING"),
+                new ScenarioAcceptanceResult(id, "instant", "local-production-small-50", true, true, true, true, true, "PASSING", "PASSING", ""),
+                "instant",
+                Map.of("instant", new ServiceTierMetrics("instant", 100, 82, 82.0, 45.0, 28000.0)),
+                new ForecastCalibrationSummary(4.8, 3.4, -0.02, 0.41),
                 DispatchRecoveryDecomposition.empty()
         );
     }

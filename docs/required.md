@@ -1,72 +1,83 @@
-# Required Scope - Parallel Lane A + B (Locked)
+# Required Scope - Backend-First Production Core (Locked)
 
-## 1) Project target
+## 1) Strategic scope
 
-He thong phai chay song song 2 lane:
+Vong nay chi lam backend:
 
-- **Lane A - Omega Business Recovery**
-  - deadhead xuong
-  - completion len
-  - launch3 khong vo
-  - wait3 mo co kiem soat
-  - heavy_rain/storm giu conservative
-- **Lane B - Big Data + AI Production Nho (50 drivers)**
-  - run/session identity on dinh
-  - event/fact/report contracts V2
-  - run-level decomposition + artifact reproducibility
-  - Java-first runtime, ML support, LLM shadow-only
+1. Recovery KPI Omega cho dispatch core.
+2. Big Data + AI production-small benchmark stack.
+3. Khong mo App/UI.
 
 ## 2) Functional requirements
 
-### Lane A
+### A. Dispatch business recovery
 
-- Scoring phai split:
-  - `executionScore`
-  - `futureScore`
-- Co execution gate truoc blend final.
-- Solver phai bucket-based matching va pass order co dinh.
-- Wave/hold lifecycle co TTL mini-dispatch.
-- Coverage/borrow/reserve co quota va gate economics.
-- Run report phai co decomposition + deadhead business metrics moi.
+- Execution-first gate bat buoc trong `OmegaDispatchAgent`.
+- Fallback/borrow khong duoc bypass execution economics trong clean regimes.
+- Wave/hold lifecycle co TTL + mini-dispatch + hold->wave conversion path.
+- Solver matching bucket order co dinh, quota borrowed/emergency theo zone-cluster.
+- Coverage split ro:
+  - execution coverage (local/adaptive)
+  - emergency coverage (borrowed)
 
-### Lane B
+### B. Benchmark/data production foundation
 
-- `runId` phai propagate end-to-end:
-  - request shadow/advisory
-  - decision facts
-  - outcome facts
-  - run report/export
-- Contracts phai support schema evolution.
-- Artifact JSON/CSV phai flatten field funnel + deadhead diagnostics.
-- Replay compare phai co delta decomposition.
+- `runId` phai join duoc end-to-end: decision/outcome/report/artifact.
+- `sessionId` va policy metadata phai join duoc trong counterfactual artifacts.
+- Runtime luu count/funnel; rates chi tinh tai exporter/harness.
+- Schema benchmark/report V2 phai versioned va backward-safe.
+- Artifacts bat buoc co:
+  - decomposition funnel
+  - deadhead split
+  - compare deltas
+  - policy context theo case/track
+  - drift snapshots cho completion/deadhead/latency
+
+### C. Hybrid benchmark protocol
+
+- Track A (production realism):
+  - seeds `42/77/123`
+  - profiles `10/25/50 drivers`
+  - scenarios `normal/rush_hour/demand_spike/heavy_rain/storm`
+- Track B (research standard):
+  - adapter cho dataset public (Solomon/Homberger)
+  - cung compute budget/time limit/seed protocol nhu track A
+- Evaluation:
+  - mean/median/p95 + CI95
+  - p-value + effect-size
+  - reproducible manifest + raw + summary artifacts
+  - challenger lane summary (OR-tools shadow objective)
 
 ## 3) Non-functional requirements
 
-- Hot path phai deterministic.
-- LLM tuyet doi khong override assignment/constraint/scoring hot path.
-- p95 latency phai duoc monitor theo profile 50 drivers.
-- Replay theo `runId` phai reproducible.
+- Hot path deterministic.
+- Replay deterministic theo `runId`.
+- Dispatch latency p95 dat nguong profile 50 drivers.
+- Fault/restart co kha nang recover pipeline.
 
-## 4) Acceptance gates (locked)
+## 4) Acceptance gates
 
-- **KPI gate clean regimes (`normal/rush_hour/demand_spike`)**
-  - deadhead giam >= 20pp vs Omega current
-  - completion tang >= 4pp vs Omega current
-  - `launch3` khong roi
-  - `wait3 > 1%` va co kiem soat
-- **Weather gate (`heavy_rain/storm`)**
-  - khong noi safety guard
-  - khong tang deadhead do borrowed/fallback tuning
-- **Production-small gate**
-  - contract tests pass
-  - replay deterministic theo runId
-  - stream/job restart recover duoc
-- **Overall verdict**
-  - `overallGainPercent` van la business verdict chinh
-  - decomposition chi diagnostic, khong doi logic verdict
+### Business gate (clean regimes)
 
-## 5) Out of scope (sprint nay)
+- deadhead giam >=20pp vs Omega current
+- completion tang >=4pp vs Omega current
+- launch3 khong giam
+- wait3 >1%
+- holdConversionRate >0
 
-- UI/control-plane surfacing full
-- LLM control-plane override
-- Runtime flag expansion lon
+### Safety gate (heavy weather)
+
+- heavy_rain/storm khong noi guard
+- khong tang deadhead do fallback/borrow tuning
+
+### Production gate
+
+- contract tests schema V2 pass
+- benchmark manifest/artifacts day du
+- no-driver-found gan 0 nhung khong pha safety
+
+## 5) Out of scope
+
+- App mobile/web cho user/driver
+- UI control-plane advanced
+- LLM control override cho dispatch hot path

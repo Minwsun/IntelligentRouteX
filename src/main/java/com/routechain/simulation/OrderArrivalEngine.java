@@ -1,5 +1,6 @@
 package com.routechain.simulation;
 
+import com.routechain.domain.Enums.DeliveryServiceTier;
 import com.routechain.domain.Enums.WeatherProfile;
 import com.routechain.domain.GeoPoint;
 import com.routechain.domain.Order;
@@ -206,9 +207,10 @@ public class OrderArrivalEngine {
 
         String orderId = "ORD-" + System.nanoTime() + "-" + rng.nextInt(1000);
         String custId = "CUST-" + rng.nextInt(10000);
-
-        return new Order(orderId, custId, region.getId(),
+        Order order = new Order(orderId, custId, region.getId(),
                 pickup, dropoff, dropRegion.getId(), fee, etaPromise, createdAt);
+        order.setServiceType(selectServiceTier(region, simulatedHour, distKm).wireValue());
+        return order;
     }
 
     private GeoPoint randomPointInRegion(Region region) {
@@ -264,6 +266,28 @@ public class OrderArrivalEngine {
             target = regions.get(rng.nextInt(regions.size()));
         } while (target.getId().equals(origin.getId()) && regions.size() > 1);
         return target;
+    }
+
+    private DeliveryServiceTier selectServiceTier(Region region, int simulatedHour, double distanceKm) {
+        boolean mealPeak = (simulatedHour >= 10 && simulatedHour <= 13)
+                || (simulatedHour >= 17 && simulatedHour <= 20);
+        if (distanceKm <= 3.0 && mealPeak) {
+            return DeliveryServiceTier.INSTANT;
+        }
+        if (distanceKm <= 6.0 && region.getZoneType() == Region.ZoneType.MIXED) {
+            return rng.nextDouble() < 0.75
+                    ? DeliveryServiceTier.INSTANT
+                    : DeliveryServiceTier.TWO_HOUR;
+        }
+        if (distanceKm <= 8.5) {
+            return DeliveryServiceTier.TWO_HOUR;
+        }
+        if (distanceKm <= 14.0) {
+            return region.getZoneType() == Region.ZoneType.INDUSTRIAL
+                    ? DeliveryServiceTier.MULTI_STOP_COD
+                    : DeliveryServiceTier.FOUR_HOUR;
+        }
+        return DeliveryServiceTier.SCHEDULED;
     }
 
     // ── Setters ────────────────────────────────────────────────────────

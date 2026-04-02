@@ -19,11 +19,19 @@ public record DriverDecisionContext(
         double localDemandForecast10m,
         double localDemandForecast15m,
         double localDemandForecast30m,
+        double localTrafficForecast5m,
+        double localTrafficForecast10m,
+        double localWeatherForecast10m,
+        double localShortageForecast10m,
+        double localMerchantPrepForecast10m,
+        double localBorrowSuccessProbability,
         double localShortagePressure,
         double localDriverDensity,
         double localSpikeProbability,
         double localWeatherExposure,
         double localCorridorExposure,
+        double localPostDropOpportunity,
+        double localEmptyZoneRisk,
         double currentAttractionScore,
         double estimatedIdleMinutes,
         int nearReadyOrders,
@@ -55,7 +63,12 @@ public record DriverDecisionContext(
             double attractionScore,
             double distanceKm,
             double weatherExposure,
-            double corridorExposure
+            double corridorExposure,
+            double demandForecast10m,
+            double shortageForecast10m,
+            double merchantPrepForecast10m,
+            double postDropOpportunity,
+            double emptyZoneRisk
     ) {}
 
     public record DropCorridorCandidate(

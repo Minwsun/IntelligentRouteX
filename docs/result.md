@@ -1,58 +1,151 @@
-# Result Snapshot - Sprint Update (2026-03-30)
+# Result Snapshot - Backend-First Implementation (2026-03-31)
 
-## 1) Implemented outputs
+## 1) What is implemented now
 
-Da implement cac khoi chinh theo lane A+B:
+### 1.1 Benchmark contracts and statistics
 
-- Bucket matching + execution-first scoring gate.
-- Hold lifecycle co TTL va mini-dispatch.
-- Dispatch decomposition counters + compare delta.
-- Run-level deadhead business metrics.
-- Stable `runId` propagation end-to-end.
-- Event/fact/report contracts V2 fields cho selection/hold/deadhead margin.
-- Artifact CSV/JSON flatten them metric funnel/deadhead.
-- Test fixtures duoc cap nhat theo `RunReport` API moi.
+Da them bo type moi cho benchmark V2:
 
-## 2) Validation commands da chay
+- `BenchmarkSchema`
+- `BenchmarkCaseSpec`
+- `BenchmarkRunManifest`
+- `BenchmarkStatSummary`
+- `PolicyAblationResult`
+- `BenchmarkStatistics`
+
+`BenchmarkStatistics` da ho tro:
+
+- mean, median, p95
+- stddev, CI95
+- effect size (Cohen's d)
+- p-value xap xi two-sided
+
+### 1.2 Artifact pipeline hardening
+
+`BenchmarkArtifactWriter` da ghi duoc:
+
+- run artifacts (JSON + CSV)
+- replay compare artifacts (JSON + CSV)
+- manifest artifacts (JSON + CSV)
+- stat summaries (JSON + CSV)
+- policy ablation artifacts (JSON + CSV)
+
+Artifact root:
+
+- `build/routechain-apex/benchmarks`
+
+### 1.3 Harness upgrades
+
+`ScenarioBatchRunner` mode `stress` da nang cap:
+
+- tao va ghi manifest cho batch
+- tong hop stats theo scenario + global
+- ghi policy ablation result cho Legacy vs Omega
+
+`HybridBenchmarkRunner` moi:
+
+- Track A production realism (10/25/50 drivers, 42/77/123 seeds)
+- Track B research-standard adapter (Solomon/Homberger folder scan)
+- compare Legacy vs Omega va ghi full artifacts/stat summaries
+
+### 1.4 Build/run tasks moi
+
+Trong `build.gradle.kts`:
+
+- `hybridBenchmark`
+- `researchBenchmark`
+
+### 1.5 Schema marker trong report
+
+- `RunReport.schemaVersion() = "v2"`
+- `ReplayCompareResult.schemaVersion() = "v2"`
+
+### 1.6 Production-small AI/BigData wiring added in this sprint
+
+- Runtime dependencies added for backend AI-first stack:
+  - `ai.timefold.solver:timefold-solver-core:1.16.0`
+  - `com.microsoft.onnxruntime:onnxruntime:1.22.0`
+  - `org.apache.kafka:kafka-clients:4.2.0`
+- Event contract registry added: `EventContractCatalog`
+  - `dispatch.decision.v2`
+  - `dispatch.outcome.v2`
+  - `feature.snapshot.v2`
+  - `model.inference.v1`
+  - `benchmark.manifest.v2`
+- Canonical event tape envelope now stores:
+  - `topic`
+  - `schemaVersion`
+  - `payloadType`
+  - `runId` (when payload exposes it)
+  - `publishedAt`
+- `OmegaDispatchAgent` now emits canonical V2/V1 events for:
+  - decision facts
+  - outcome facts
+  - feature snapshots
+  - model inference traces
+- `PolicyEvaluationRecord` now includes `selectedBucket`.
+- `SimulationEngine` run identity hardened:
+  - deterministic `runId` format `RUN-s<seed>-<seq>`
+  - stable `sessionId` per engine seed
+  - public `RunIdentity` access (`sessionId`, `runId`)
+- New counterfactual harness:
+  - `CounterfactualArenaRunner`
+  - Gradle task `counterfactualArena`
+  - runs Legacy vs Omega candidates on same scenario setup with multi-seed outputs
+  - writes stat summaries + policy ablations + SLO warning if latency p95 > 120ms
+
+### 1.7 AI-first model lifecycle + challenger metadata
+
+- Added model lifecycle contracts:
+  - `ModelBundleManifest`
+  - `InferenceTraceV1`
+  - `PolicyCandidateRecord`
+  - `CounterfactualRunSpec`
+  - `SolverType`
+- `ModelArtifactProvider` now supports:
+  - active champion bundle lookup
+  - challenger bundle registration
+  - promotion (`promoteBundle`) for rollback/roll-forward workflow
+- `DefaultModelArtifactProvider` now stores champion/challenger metadata instead of plain string-only versions.
+- `PlatformRuntimeBootstrap` now pre-registers default AI bundles:
+  - `eta-model-xgb-v1`
+  - `dispatch-ranker-lambdamart-v1`
+  - `empty-zone-logit-v1`
+- `OmegaDispatchAgent` now emits `InferenceTraceV1` to canonical `model.inference.v1`.
+- Added `TimefoldOnlineOptimizer` and wired it to hot-path dispatch via `PlatformRuntimeBootstrap.getDispatchOptimizer()`.
+- Added `OrToolsShadowPolicySearch` (offline challenger objective proxy) and integrated into hybrid/counterfactual stat outputs.
+- Added drift monitor artifacts:
+  - `DispatchDriftMonitor`
+  - `DispatchDriftSnapshot`
+  - writer output `drift/*.json` + `drift_snapshots.csv`
+
+## 2) Verification executed
+
+Da run pass:
 
 - `./gradlew.bat --no-daemon compileJava`
-- `./gradlew.bat --no-daemon scenarioBatch`
-- `./gradlew.bat --no-daemon stressTuneBatch`
-- `./gradlew.bat --no-daemon test --tests com.routechain.ai.DriverPlanGeneratorProfileTest --tests com.routechain.simulation.SimulationPrePickupAugmentationTest --tests com.routechain.simulation.RunReportPolicyMetricsTest --tests com.routechain.simulation.ReplayCompareResultPolicyMetricsTest --tests com.routechain.simulation.BenchmarkArtifactWriterTest --tests com.routechain.infra.PlatformRuntimeBootstrapGroqRouterTest --tests com.routechain.simulation.AssignmentSolverThreeOrderPolicyTest`
+- `./gradlew.bat --no-daemon test --tests com.routechain.simulation.BenchmarkArtifactWriterTest --tests com.routechain.simulation.BenchmarkStatisticsTest`
+- `./gradlew.bat --no-daemon test --tests com.routechain.simulation.RunReportPolicyMetricsTest --tests com.routechain.simulation.ReplayCompareResultPolicyMetricsTest`
+- `./gradlew.bat --no-daemon hybridBenchmark --dry-run`
+- `./gradlew.bat --no-daemon researchBenchmark`
+- `./gradlew.bat --no-daemon test --tests com.routechain.infra.EventContractCatalogTest --tests com.routechain.simulation.SimulationRunIdentityTest`
+- `./gradlew.bat --no-daemon test --tests com.routechain.ai.DefaultModelArtifactProviderTest --tests com.routechain.simulation.BenchmarkArtifactWriterTest`
+- `./gradlew.bat --no-daemon counterfactualArenaSmoke`
 
-Tat ca command tren pass.
+Ghi chu:
 
-## 3) KPI status (latest stressTuneBatch mean delta: Omega - Legacy)
+- Track B hien tai skip runtime neu local chua co `benchmarks/vrp/solomon` va `benchmarks/vrp/homberger`.
 
-- `normal`: completion `-3.3pp`, deadhead `+31.4pp`, launch3 `+2.0pp`, wait3 `+1.0pp`
-- `rush_hour`: completion `-4.6pp`, deadhead `+41.7pp`, launch3 `+43.8pp`, wait3 `+1.6pp`
-- `demand_spike`: completion `-4.0pp`, deadhead `+50.5pp`, launch3 `+16.4pp`, wait3 `+0.0pp`
-- `heavy_rain`: completion `-8.6pp`, deadhead `+51.4pp`
+## 3) Current gap vs final acceptance
 
-Ket luan:
+- Foundation benchmark/protocol/contracts da san sang.
+- KPI business acceptance cuoi (deadhead/completion gates) can rerun full `stressTuneBatch` + tune lane A tiep de chot.
 
-- acceptance business **chua dat**
-- lane A da co instrumentation/gating de tune tiep nhanh hon
-- lane B da co contracts + artifacts de theo doi va replay chuan hon
+## 4) Next execution order
 
-## 4) What improved technically
-
-- Co decomposition funnel ro nguon goc fail (generated -> shortlisted -> selected -> executed).
-- Co deadhead split metric theo wave/fallback/borrowed.
-- Co runId join duoc giua runtime facts va benchmark artifacts.
-- Co metadata selection bucket/hold ttl/marginal deadhead de debug nhanh.
-
-## 5) Remaining gap to close
-
-- Deadhead economics dang qua yeu trong clean regimes.
-- Completion van thap hon baseline.
-- Launch3 tang nhung doi lai downgrade/cancel lon.
-- Borrowed/fallback van chiem ty le cao trong nhieu scenario.
-
-## 6) Recommended next iteration order
-
-1. Retune deadhead penalty + deadhead budget matrix theo bucket.
-2. Tighten downgrade path trong clean regimes (giam fallback thong tri).
-3. Tang quality gate cho wave/extension (khong thuong launch3 “deu”).
-4. Retune coverage/borrow quota de borrowed chi emergency.
-5. Re-run `stressTuneBatch` multi-seed sau moi batch tuning.
+1. Re-run `stressTuneBatch` multi-seed tren code moi.
+2. Neu KPI chua dat, tune tiep dispatch economics (deadhead/completion first).
+3. Nap dataset Solomon/Homberger that su vao `benchmarks/vrp/*` de mo full Track B.
+4. Run `counterfactualArena` de tao policy-vs-policy evidence tren cung scenario tape.
+5. Chot policy winner bang manifest + CI95 + effect-size + p-value.
+6. Dong goi backend release candidate truoc khi mo lane App/UI.

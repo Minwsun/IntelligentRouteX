@@ -15,8 +15,10 @@ import com.routechain.simulation.SequenceOptimizer;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -75,14 +77,23 @@ public class DriverPlanGenerator {
         if (ctx.localReachableBacklog() < 2 || ctx.localReachableBacklog() > 3) {
             return false;
         }
+        boolean borderlineBacklog = ctx.localReachableBacklog() == 2;
         boolean clusterSignal = ctx.nearReadySameMerchantCount() >= 2 || ctx.compactClusterCount() >= 1;
-        boolean readinessSignal = ctx.nearReadyOrders() >= 2;
+        boolean readinessSignal = ctx.nearReadyOrders() >= 2
+                && (!borderlineBacklog
+                || ctx.nearReadyOrders() >= 3
+                || (ctx.thirdOrderFeasibilityScore() >= 0.82
+                && ctx.waveAssemblyPressure() >= 0.40));
+        double requiredThirdOrderFeasibility = borderlineBacklog ? 0.70 : 0.62;
+        double requiredWaveAssemblyPressure = borderlineBacklog ? 0.40 : 0.38;
+        double requiredSlaSlackMinutes = borderlineBacklog ? 2.4 : 2.0;
+        double requiredSlackBuffer = borderlineBacklog ? 0.25 : 0.0;
         return clusterSignal
                 && readinessSignal
-                && ctx.thirdOrderFeasibilityScore() >= 0.62
-                && ctx.waveAssemblyPressure() >= 0.38
-                && ctx.effectiveSlaSlackMinutes() > 2.0
-                && ctx.threeOrderSlackBuffer() >= 0.0
+                && ctx.thirdOrderFeasibilityScore() >= requiredThirdOrderFeasibility
+                && ctx.waveAssemblyPressure() >= requiredWaveAssemblyPressure
+                && ctx.effectiveSlaSlackMinutes() > requiredSlaSlackMinutes
+                && ctx.threeOrderSlackBuffer() >= requiredSlackBuffer
                 && ctx.localCorridorExposure() <= 0.55;
     }
 
@@ -265,7 +276,9 @@ public class DriverPlanGenerator {
                 + (opportunisticExtension && effectiveBundleSize >= 4 ? 0.06 : 0.0)
                 + routeMetrics.lastDropLandingScore() * 0.08
                 + routeMetrics.deliveryCorridorScore() * 0.04
+                + ctx.localPostDropOpportunity() * 0.06
                 - Math.min(0.12, routeMetrics.expectedPostCompletionEmptyKm() / 8.0)
+                - ctx.localEmptyZoneRisk() * 0.05
                 - regimePenalty;
 
         plan.setTotalScore(Math.max(0.01, prelimScore));
@@ -693,10 +706,11 @@ public class DriverPlanGenerator {
             return null;
         }
 
-        List<Stop> bestSeq = sequences.get(0);
+        List<Stop> bestSeq = selectBestSequenceByRouteIntelligence(driver, sequences, orders, seqOpt);
         DispatchPlan plan = new DispatchPlan(driver, bundle, bestSeq);
 
-        double deadheadKm = driver.getCurrentLocation().distanceTo(orders.get(0).getPickupPoint()) / 1000.0;
+        GeoPoint firstPickup = bestSeq.isEmpty() ? orders.get(0).getPickupPoint() : bestSeq.get(0).location();
+        double deadheadKm = driver.getCurrentLocation().distanceTo(firstPickup) / 1000.0;
         boolean sameMerchant = isSameMerchant(orders);
         boolean samePickupCluster = isSamePickupCluster(orders);
         double maxDeadheadKm = computeMaxPlanDeadheadKm(
@@ -843,8 +857,10 @@ public class DriverPlanGenerator {
                 + (sameMerchant ? 0.08 : 0.0)
                 + (samePickupCluster ? 0.06 : 0.0)
                 + (opportunisticExtension ? onRouteAddOnScore * 0.14 : 0.0)
+                + ctx.localPostDropOpportunity() * 0.05
                 - routeMetrics.deliveryZigZagPenalty() * 0.10
                 - Math.min(0.15, routeMetrics.expectedPostCompletionEmptyKm() / 8.0)
+                - ctx.localEmptyZoneRisk() * 0.04
                 - (deadheadKm / 6.0) * (opportunisticExtension ? 0.12 : 0.18);
 
         plan.setTotalScore(Math.max(0.02, prelimScore));
@@ -872,10 +888,12 @@ public class DriverPlanGenerator {
                 + ctx.localDemandForecast10m() * 0.06
                 + ctx.localDemandForecast15m() * 0.04
                 + ctx.localDemandForecast30m() * 0.03
+                + ctx.localPostDropOpportunity() * 0.05
                 + ctx.localSpikeProbability() * 0.06
                 + ctx.localShortagePressure() * 0.03
                 + Math.min(3, ctx.nearReadyOrders()) * 0.025
                 - ctx.localDriverDensity() / 20.0 * 0.02
+                - ctx.localEmptyZoneRisk() * 0.03
                 - ctx.localWeatherExposure() * 0.05
                 - ctx.localCorridorExposure() * 0.04;
         if (waitingForThirdOrder) {
@@ -920,7 +938,9 @@ public class DriverPlanGenerator {
 
         double score = REPOSITION_BASE_SCORE
                 + zone.attractionScore() * 0.08
+                + zone.postDropOpportunity() * 0.08
                 - zone.distanceKm() / 5.0 * 0.04
+                - zone.emptyZoneRisk() * 0.04
                 - zone.weatherExposure() * 0.04
                 - zone.corridorExposure() * 0.05;
 
@@ -943,6 +963,49 @@ public class DriverPlanGenerator {
                 ctx);
     }
 
+    private List<Stop> selectBestSequenceByRouteIntelligence(Driver driver,
+                                                             List<List<Stop>> sequences,
+                                                             List<Order> orders,
+                                                             SequenceOptimizer seqOpt) {
+        if (sequences == null || sequences.isEmpty()) {
+            return List.of();
+        }
+        if (sequences.size() == 1) {
+            return sequences.get(0);
+        }
+
+        Map<String, Order> ordersById = new HashMap<>(orders.size());
+        for (Order order : orders) {
+            ordersById.put(order.getId(), order);
+        }
+
+        double bestScore = Double.NEGATIVE_INFINITY;
+        List<Stop> best = sequences.get(0);
+        int maxCandidates = Math.min(6, sequences.size());
+        for (int i = 0; i < maxCandidates; i++) {
+            List<Stop> candidate = sequences.get(i);
+            SequenceOptimizer.RouteObjectiveMetrics metrics =
+                    seqOpt.evaluateRouteObjective(driver, candidate, orders);
+            double routeKm = computeRouteDistance(driver.getCurrentLocation(), candidate);
+            double firstDropUrgency = firstDropUrgency(candidate, ordersById);
+            double frontloadScore = urgencyFrontloadScore(candidate, ordersById);
+            double score = metrics.deliveryCorridorScore() * 0.26
+                    + metrics.lastDropLandingScore() * 0.22
+                    + metrics.remainingDropProximityScore() * 0.16
+                    + (1.0 - metrics.deliveryZigZagPenalty()) * 0.16
+                    + firstDropUrgency * 0.10
+                    + frontloadScore * 0.10
+                    - Math.min(0.22, metrics.expectedPostCompletionEmptyKm() / 10.0)
+                    - Math.min(0.10, metrics.expectedNextOrderIdleMinutes() / 10.0)
+                    - Math.min(0.18, routeKm / 24.0);
+            if (score > bestScore) {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
     private double computeRouteDistance(GeoPoint start, List<Stop> sequence) {
         double dist = 0;
         GeoPoint prev = start;
@@ -951,6 +1014,67 @@ public class DriverPlanGenerator {
             prev = stop.location();
         }
         return dist;
+    }
+
+    private double firstDropUrgency(List<Stop> sequence, Map<String, Order> ordersById) {
+        if (sequence == null || ordersById == null || ordersById.isEmpty()) {
+            return 0.0;
+        }
+        for (Stop stop : sequence) {
+            if (stop.type() != StopType.DROPOFF) {
+                continue;
+            }
+            Order order = ordersById.get(stop.orderId());
+            if (order != null) {
+                return computeOrderUrgency(order);
+            }
+        }
+        return 0.0;
+    }
+
+    private double urgencyFrontloadScore(List<Stop> sequence, Map<String, Order> ordersById) {
+        if (sequence == null || ordersById == null || ordersById.size() <= 1) {
+            return 0.0;
+        }
+        List<Order> dropOrder = new ArrayList<>();
+        for (Stop stop : sequence) {
+            if (stop.type() != StopType.DROPOFF) {
+                continue;
+            }
+            Order order = ordersById.get(stop.orderId());
+            if (order != null) {
+                dropOrder.add(order);
+            }
+        }
+        if (dropOrder.size() <= 1) {
+            return 0.0;
+        }
+
+        double score = 0.0;
+        int compared = 0;
+        for (int i = 0; i < dropOrder.size() - 1; i++) {
+            double left = computeOrderUrgency(dropOrder.get(i));
+            for (int j = i + 1; j < dropOrder.size(); j++) {
+                double right = computeOrderUrgency(dropOrder.get(j));
+                score += left >= right ? 1.0 : Math.max(0.0, 1.0 - (right - left));
+                compared++;
+            }
+        }
+        return compared == 0 ? 0.0 : score / compared;
+    }
+
+    private double computeOrderUrgency(Order order) {
+        if (order == null) {
+            return 0.0;
+        }
+        double etaTightness = clamp01(1.0 - order.getPromisedEtaMinutes() / 90.0);
+        double delayHazard = clamp01(order.getPickupDelayHazard());
+        double cancelRisk = clamp01(order.getCancellationRisk());
+        double priority = clamp01(order.getPriority() / 3.0);
+        return etaTightness * 0.44
+                + delayHazard * 0.28
+                + cancelRisk * 0.18
+                + priority * 0.10;
     }
 
     private int computeDynamicBatchCap(OrderCluster cluster,
@@ -1132,6 +1256,10 @@ public class DriverPlanGenerator {
             }
         }
         return maxSpreadMeters / 1000.0;
+    }
+
+    private double clamp01(double value) {
+        return Math.max(0.0, Math.min(1.0, value));
     }
 
     private double computeReadinessDeltaMinutes(List<Order> orders) {

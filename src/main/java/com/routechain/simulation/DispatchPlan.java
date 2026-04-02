@@ -39,7 +39,7 @@ public class DispatchPlan {
     private boolean hardThreeOrderPolicyActive;
     private boolean harshWeatherStress;
     private StressRegime stressRegime = StressRegime.NORMAL;
-    private String runId = "dispatch-live";
+    private String runId = "run-unset";
     private SelectionBucket selectionBucket = SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD;
     private int holdRemainingCycles;
     private String holdReason;
@@ -53,7 +53,28 @@ public class DispatchPlan {
     private double emptyRiskAfter;
     private double executionScore;
     private double futureScore;
+    private double continuationScore;
+    private double coverageScore;
+    private double continuationValueScore;
+    private double endZoneOpportunityScore;
+    private double trafficExposureScore;
+    private double weatherExposureScore;
+    private double postDropDemandProbability;
+    private String serviceTier = "instant";
+    private double routePriorScore;
+    private double merchantPrepRiskScore;
+    private double borrowSuccessProbability;
+    private double trafficForecastAbsError;
+    private double weatherForecastHitRate;
     private boolean executionGatePassed = true;
+    private long modelInferenceLatencyMs;
+    private double neuralPriorScore;
+    private String neuralPriorVersion = "neural-prior-fallback-v1";
+    private long neuralPriorFreshnessMs;
+    private boolean neuralPriorUsed;
+    private long neuralPriorLatencyMs;
+    private String neuralPriorBackend = "fallback";
+    private String neuralPriorFallbackReason = "not-requested";
 
     // ── Final scoring ───────────────────────────────────────────────────
     private double totalScore;
@@ -122,7 +143,28 @@ public class DispatchPlan {
     public double getEmptyRiskAfter() { return emptyRiskAfter; }
     public double getExecutionScore() { return executionScore; }
     public double getFutureScore() { return futureScore; }
+    public double getContinuationScore() { return continuationScore; }
+    public double getCoverageScore() { return coverageScore; }
+    public double getContinuationValueScore() { return continuationValueScore; }
+    public double getEndZoneOpportunityScore() { return endZoneOpportunityScore; }
+    public double getTrafficExposureScore() { return trafficExposureScore; }
+    public double getWeatherExposureScore() { return weatherExposureScore; }
+    public double getPostDropDemandProbability() { return postDropDemandProbability; }
+    public String getServiceTier() { return serviceTier; }
+    public double getRoutePriorScore() { return routePriorScore; }
+    public double getMerchantPrepRiskScore() { return merchantPrepRiskScore; }
+    public double getBorrowSuccessProbability() { return borrowSuccessProbability; }
+    public double getTrafficForecastAbsError() { return trafficForecastAbsError; }
+    public double getWeatherForecastHitRate() { return weatherForecastHitRate; }
     public boolean isExecutionGatePassed() { return executionGatePassed; }
+    public long getModelInferenceLatencyMs() { return modelInferenceLatencyMs; }
+    public double getNeuralPriorScore() { return neuralPriorScore; }
+    public String getNeuralPriorVersion() { return neuralPriorVersion; }
+    public long getNeuralPriorFreshnessMs() { return neuralPriorFreshnessMs; }
+    public boolean isNeuralPriorUsed() { return neuralPriorUsed; }
+    public long getNeuralPriorLatencyMs() { return neuralPriorLatencyMs; }
+    public String getNeuralPriorBackend() { return neuralPriorBackend; }
+    public String getNeuralPriorFallbackReason() { return neuralPriorFallbackReason; }
     public double getTotalScore() { return totalScore; }
     public double getConfidence() { return confidence; }
     public String getTraceId() { return traceId; }
@@ -165,7 +207,7 @@ public class DispatchPlan {
         this.stressRegime = v == null ? StressRegime.NORMAL : v;
     }
     public void setRunId(String runId) {
-        this.runId = (runId == null || runId.isBlank()) ? "dispatch-live" : runId;
+        this.runId = (runId == null || runId.isBlank()) ? "run-unset" : runId;
     }
     public void setSelectionBucket(SelectionBucket selectionBucket) {
         this.selectionBucket = selectionBucket == null
@@ -188,8 +230,67 @@ public class DispatchPlan {
     public void setEmptyRiskAfter(double emptyRiskAfter) { this.emptyRiskAfter = emptyRiskAfter; }
     public void setExecutionScore(double executionScore) { this.executionScore = executionScore; }
     public void setFutureScore(double futureScore) { this.futureScore = futureScore; }
+    public void setContinuationScore(double continuationScore) { this.continuationScore = continuationScore; }
+    public void setCoverageScore(double coverageScore) { this.coverageScore = coverageScore; }
+    public void setContinuationValueScore(double continuationValueScore) {
+        this.continuationValueScore = continuationValueScore;
+    }
+    public void setEndZoneOpportunityScore(double endZoneOpportunityScore) {
+        this.endZoneOpportunityScore = endZoneOpportunityScore;
+    }
+    public void setTrafficExposureScore(double trafficExposureScore) {
+        this.trafficExposureScore = trafficExposureScore;
+    }
+    public void setWeatherExposureScore(double weatherExposureScore) {
+        this.weatherExposureScore = weatherExposureScore;
+    }
+    public void setPostDropDemandProbability(double postDropDemandProbability) {
+        this.postDropDemandProbability = postDropDemandProbability;
+    }
+    public void setServiceTier(String serviceTier) {
+        this.serviceTier = (serviceTier == null || serviceTier.isBlank()) ? "instant" : serviceTier;
+    }
+    public void setRoutePriorScore(double routePriorScore) { this.routePriorScore = routePriorScore; }
+    public void setMerchantPrepRiskScore(double merchantPrepRiskScore) {
+        this.merchantPrepRiskScore = merchantPrepRiskScore;
+    }
+    public void setBorrowSuccessProbability(double borrowSuccessProbability) {
+        this.borrowSuccessProbability = borrowSuccessProbability;
+    }
+    public void setTrafficForecastAbsError(double trafficForecastAbsError) {
+        this.trafficForecastAbsError = Math.max(0.0, trafficForecastAbsError);
+    }
+    public void setWeatherForecastHitRate(double weatherForecastHitRate) {
+        this.weatherForecastHitRate = Math.max(0.0, Math.min(1.0, weatherForecastHitRate));
+    }
     public void setExecutionGatePassed(boolean executionGatePassed) {
         this.executionGatePassed = executionGatePassed;
+    }
+    public void setModelInferenceLatencyMs(long modelInferenceLatencyMs) {
+        this.modelInferenceLatencyMs = Math.max(0L, modelInferenceLatencyMs);
+    }
+    public void setNeuralPriorScore(double neuralPriorScore) { this.neuralPriorScore = neuralPriorScore; }
+    public void setNeuralPriorVersion(String neuralPriorVersion) {
+        this.neuralPriorVersion = (neuralPriorVersion == null || neuralPriorVersion.isBlank())
+                ? "neural-prior-fallback-v1"
+                : neuralPriorVersion;
+    }
+    public void setNeuralPriorFreshnessMs(long neuralPriorFreshnessMs) {
+        this.neuralPriorFreshnessMs = Math.max(0L, neuralPriorFreshnessMs);
+    }
+    public void setNeuralPriorUsed(boolean neuralPriorUsed) { this.neuralPriorUsed = neuralPriorUsed; }
+    public void setNeuralPriorLatencyMs(long neuralPriorLatencyMs) {
+        this.neuralPriorLatencyMs = Math.max(0L, neuralPriorLatencyMs);
+    }
+    public void setNeuralPriorBackend(String neuralPriorBackend) {
+        this.neuralPriorBackend = (neuralPriorBackend == null || neuralPriorBackend.isBlank())
+                ? "fallback"
+                : neuralPriorBackend;
+    }
+    public void setNeuralPriorFallbackReason(String neuralPriorFallbackReason) {
+        this.neuralPriorFallbackReason = (neuralPriorFallbackReason == null || neuralPriorFallbackReason.isBlank())
+                ? "none"
+                : neuralPriorFallbackReason;
     }
     public void setTotalScore(double v) { this.totalScore = v; }
     public void setConfidence(double v) { this.confidence = v; }

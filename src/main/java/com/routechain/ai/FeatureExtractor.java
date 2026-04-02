@@ -61,16 +61,16 @@ public class FeatureExtractor {
         // 9: continuationValue
         f[9] = plan.getEndZoneOpportunity();
 
-        // 10: endZoneDemand10m
+        // 10: post-drop opportunity
         GeoPoint endPt = plan.getEndZonePoint();
-        f[10] = field != null ? Math.min(1.0, field.getForecastDemandAt(endPt, 10) / 5.0) : 0.3;
+        f[10] = field != null ? field.getPostDropOpportunityAt(endPt, 10) : 0.3;
 
         // 11: endZoneDriverDensity
         f[11] = field != null ? Math.min(1.0, field.getDriverDensityAt(endPt) / 5.0) : 0.3;
 
         // 12: congestionExposure
         f[12] = field != null
-                ? Math.min(1.0, Math.max(trafficIntensity, field.getCongestionExposureAt(endPt)))
+                ? Math.min(1.0, Math.max(trafficIntensity, field.getTrafficForecastAt(endPt, 10)))
                 : Math.min(1.0, trafficIntensity);
 
         // 13: detourRatio
@@ -96,13 +96,15 @@ public class FeatureExtractor {
         double[] f = new double[10];
 
         f[0] = field != null ? Math.min(1.0, field.getDemandAt(endPos) / 3.0) : 0.3;
-        f[1] = field != null ? Math.min(1.0, field.getForecastDemandAt(endPos, 10) / 5.0) : 0.3;
+        f[1] = field != null ? field.getPostDropOpportunityAt(endPos, 10) : 0.3;
         f[2] = field != null ? field.getSpikeAt(endPos) : 0.1;
         f[3] = field != null ? Math.min(1.0, field.getDriverDensityAt(endPos) / 5.0) : 0.3;
-        f[4] = field != null ? field.getShortageAt(endPos) : 0.3;
-        f[5] = field != null ? field.getCongestionExposureAt(endPos) : 0.3;
+        f[4] = field != null ? field.getShortageForecastAt(endPos, 10) : 0.3;
+        f[5] = field != null ? field.getTrafficForecastAt(endPos, 10) : 0.3;
         f[6] = endHour / 24.0;
-        f[7] = weather.ordinal() / 3.0;
+        f[7] = field != null
+                ? Math.max(weather.ordinal() / 3.0, field.getWeatherForecastAt(endPos, 10))
+                : weather.ordinal() / 3.0;
         f[8] = driver.getComputedUtilization();
         f[9] = Math.min(1.0, driver.getCompletedOrders() / 20.0);
 

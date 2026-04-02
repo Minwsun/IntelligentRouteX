@@ -9,9 +9,12 @@ import com.routechain.ai.LLMAdvisorClient;
 import com.routechain.ai.LLMEscalationGate;
 import com.routechain.ai.ModelArtifactProvider;
 import com.routechain.ai.OfflineFallbackLLMAdvisorClient;
+import com.routechain.ai.ModelBundleManifest;
 import com.routechain.infra.Events.*;
 import com.routechain.simulation.ReplayCompareResult;
 import com.routechain.simulation.RunReport;
+import com.routechain.simulation.DispatchOptimizer;
+import com.routechain.simulation.TimefoldOnlineOptimizer;
 
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -25,6 +28,7 @@ public final class PlatformRuntimeBootstrap {
 
     private static final LocalAdminQueryService ADMIN_QUERY_SERVICE = new LocalAdminQueryService();
     private static final InMemoryFeatureStore FEATURE_STORE = new InMemoryFeatureStore();
+    private static final DispatchOptimizer DISPATCH_OPTIMIZER = new TimefoldOnlineOptimizer();
     private static final JsonlDispatchFactSink DISPATCH_FACT_SINK =
             new JsonlDispatchFactSink(ROOT.resolve("facts"));
     private static final JsonlCanonicalEventPublisher CANONICAL_EVENT_PUBLISHER =
@@ -42,6 +46,7 @@ public final class PlatformRuntimeBootstrap {
 
     static {
         refreshLlmRuntime();
+        registerDefaultModelBundles();
     }
 
     public static void ensureInitialized(EventBus eventBus) {
@@ -64,6 +69,10 @@ public final class PlatformRuntimeBootstrap {
 
     public static FeatureStore getFeatureStore() {
         return FEATURE_STORE;
+    }
+
+    public static DispatchOptimizer getDispatchOptimizer() {
+        return DISPATCH_OPTIMIZER;
     }
 
     public static DispatchFactSink getDispatchFactSink() {
@@ -102,6 +111,54 @@ public final class PlatformRuntimeBootstrap {
                     llmAdvisorClient.mode()));
         }
         llmEscalationGate = DEFAULT_LLM_ESCALATION_GATE;
+    }
+
+    private static void registerDefaultModelBundles() {
+        MODEL_ARTIFACT_PROVIDER.registerBundle(new ModelBundleManifest(
+                "eta-model",
+                "eta-model-xgb-v1",
+                "eta-features-v2",
+                "models/onnx/eta-model-xgb-v1.onnx",
+                70,
+                "online-linear-fallback",
+                true
+        ));
+        MODEL_ARTIFACT_PROVIDER.registerBundle(new ModelBundleManifest(
+                "plan-ranker-model",
+                "dispatch-ranker-lambdamart-v1",
+                "dispatch-ranker-features-v2",
+                "models/onnx/dispatch-ranker-lambdamart-v1.onnx",
+                90,
+                "heuristic-plan-ranker-fallback",
+                true
+        ));
+        MODEL_ARTIFACT_PROVIDER.registerBundle(new ModelBundleManifest(
+                "empty-zone-risk-model",
+                "empty-zone-logit-v1",
+                "empty-zone-features-v1",
+                "models/onnx/empty-zone-logit-v1.onnx",
+                60,
+                "rule-based-empty-risk-fallback",
+                true
+        ));
+        MODEL_ARTIFACT_PROVIDER.registerBundle(new ModelBundleManifest(
+                "neural-route-prior-model",
+                "routefinder-v1",
+                "neural-route-prior-features-v1",
+                "models/routefinder/checkpoints/50/rf-transformer.ckpt",
+                30000,
+                "deterministic-no-prior",
+                true
+        ));
+        MODEL_ARTIFACT_PROVIDER.registerBundle(new ModelBundleManifest(
+                "neural-route-prior-model",
+                "rrnco-v1",
+                "neural-route-prior-features-v1",
+                "models/rrnco/checkpoints/rcvrptw/epoch_199.ckpt",
+                30000,
+                "deterministic-no-prior",
+                false
+        ));
     }
 
     static synchronized void overrideLlmRuntimeForTesting(LLMAdvisorClient client,

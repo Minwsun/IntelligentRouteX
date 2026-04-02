@@ -1,5 +1,8 @@
 package com.routechain.simulation;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * Result of comparing two simulation runs (baseline vs AI or run A vs run B).
  * All deltas are computed as (runB - runA).
@@ -36,13 +39,25 @@ public record ReplayCompareResult(
         double avgAssignedDeadheadKmDelta,
         double deadheadPerCompletedOrderKmDelta,
         double deadheadPerAssignedOrderKmDelta,
+        double postDropOrderHitRateDelta,
         double borrowedDeadheadPerExecutedOrderKmDelta,
         double fallbackDeadheadPerExecutedOrderKmDelta,
         double waveDeadheadPerExecutedOrderKmDelta,
+        LatencyBreakdownDelta latencyDelta,
+        IntelligenceScorecardDelta intelligenceDelta,
+        ScenarioAcceptanceDelta acceptanceDelta,
+        String dominantServiceTierA,
+        String dominantServiceTierB,
+        Map<String, ServiceTierMetricsDelta> serviceTierBreakdownDelta,
+        ForecastCalibrationSummaryDelta forecastCalibrationSummaryDelta,
         DispatchRecoveryDecompositionDelta recoveryDelta,
         String verdict,
         double overallGainPercent
 ) {
+    public String schemaVersion() {
+        return BenchmarkSchema.VERSION;
+    }
+
     /**
      * Create a comparison from two RunReports.
      */
@@ -55,7 +70,7 @@ public record ReplayCompareResult(
         double earnDelta = ai.avgNetEarningPerHour() - baseline.avgNetEarningPerHour();
         double bundleDelta = ai.bundleRate() - baseline.bundleRate();
         double etaDelta = ai.etaMAE() - baseline.etaMAE();
-        double latencyDelta = ai.avgAssignmentLatencyMs() - baseline.avgAssignmentLatencyMs();
+        double assignmentLatencyDelta = ai.avgAssignmentLatencyMs() - baseline.avgAssignmentLatencyMs();
         double visibleThreePlusDelta = ai.visibleBundleThreePlusRate() - baseline.visibleBundleThreePlusRate();
         double corridorDelta = ai.deliveryCorridorQuality() - baseline.deliveryCorridorQuality();
         double goodLastDelta = ai.lastDropGoodZoneRate() - baseline.lastDropGoodZoneRate();
@@ -78,12 +93,30 @@ public record ReplayCompareResult(
                 ai.deadheadPerCompletedOrderKm() - baseline.deadheadPerCompletedOrderKm();
         double deadheadPerAssignedOrderKmDelta =
                 ai.deadheadPerAssignedOrderKm() - baseline.deadheadPerAssignedOrderKm();
+        double postDropOrderHitRateDelta =
+                ai.postDropOrderHitRate() - baseline.postDropOrderHitRate();
         double borrowedDeadheadPerExecutedOrderKmDelta =
                 ai.borrowedDeadheadPerExecutedOrderKm() - baseline.borrowedDeadheadPerExecutedOrderKm();
         double fallbackDeadheadPerExecutedOrderKmDelta =
                 ai.fallbackDeadheadPerExecutedOrderKm() - baseline.fallbackDeadheadPerExecutedOrderKm();
         double waveDeadheadPerExecutedOrderKmDelta =
                 ai.waveDeadheadPerExecutedOrderKm() - baseline.waveDeadheadPerExecutedOrderKm();
+        LatencyBreakdownDelta latencyDelta = LatencyBreakdownDelta.compare(
+                baseline.latency(),
+                ai.latency());
+        IntelligenceScorecardDelta intelligenceDelta = IntelligenceScorecardDelta.compare(
+                baseline.intelligence(),
+                ai.intelligence());
+        ScenarioAcceptanceDelta acceptanceDelta = ScenarioAcceptanceDelta.compare(
+                baseline.acceptance(),
+                ai.acceptance());
+        Map<String, ServiceTierMetricsDelta> serviceTierBreakdownDelta = compareServiceTiers(
+                baseline.serviceTierBreakdown(),
+                ai.serviceTierBreakdown());
+        ForecastCalibrationSummaryDelta forecastCalibrationSummaryDelta =
+                ForecastCalibrationSummaryDelta.compare(
+                        baseline.forecastCalibrationSummary(),
+                        ai.forecastCalibrationSummary());
         DispatchRecoveryDecompositionDelta recoveryFunnelDelta =
                 DispatchRecoveryDecompositionDelta.compare(baseline.recovery(), ai.recovery());
 
@@ -110,7 +143,11 @@ public record ReplayCompareResult(
                 augmentDelta * 0.006 +
                 (-holdOnlyDelta) * 0.006 +
                 steadyAssignmentDelta * 0.010 +
-                (-deadheadPerCompletedOrderKmDelta) * 0.05;
+                (-deadheadPerCompletedOrderKmDelta) * 0.05 +
+                postDropOrderHitRateDelta * 0.02 +
+                intelligenceDelta.businessScoreDelta() * 2.5 +
+                intelligenceDelta.forecastScoreDelta() * 0.8 +
+                (-latencyDelta.dispatchP95MsDelta()) * 0.0015;
 
         String verdict;
         if (gain > 1.0) {
@@ -134,7 +171,7 @@ public record ReplayCompareResult(
                 earnDelta,
                 bundleDelta,
                 etaDelta,
-                latencyDelta,
+                assignmentLatencyDelta,
                 visibleThreePlusDelta,
                 corridorDelta,
                 goodLastDelta,
@@ -153,9 +190,17 @@ public record ReplayCompareResult(
                 avgAssignedDeadheadKmDelta,
                 deadheadPerCompletedOrderKmDelta,
                 deadheadPerAssignedOrderKmDelta,
+                postDropOrderHitRateDelta,
                 borrowedDeadheadPerExecutedOrderKmDelta,
                 fallbackDeadheadPerExecutedOrderKmDelta,
                 waveDeadheadPerExecutedOrderKmDelta,
+                latencyDelta,
+                intelligenceDelta,
+                acceptanceDelta,
+                baseline.dominantServiceTier(),
+                ai.dominantServiceTier(),
+                serviceTierBreakdownDelta,
+                forecastCalibrationSummaryDelta,
                 recoveryFunnelDelta,
                 verdict,
                 Math.round(gain * 10) / 10.0
@@ -191,7 +236,7 @@ public record ReplayCompareResult(
                         + "completion=%+.1f%% onTime=%+.1f%% cancel=%+.1f%% deadhead=%+.1f%% util=%+.2f | "
                         + "3plus=%+.1fpp corridor=%+.2f goodLast=%+.1fpp emptyKm=%+.2f | "
                         + "realAssign=%+.1fpp steadyAssign=%+.1fpp wait3=%+.1fpp launch3=%+.1fpp recover3=%+.1fpp sub3=%+.1fpp downgrade=%+.1fpp augment=%+.1fpp holdOnly=%+.1fpp | "
-                        + "waveExec=%+d holdConv=%+d fallbackDirect=%+d borrowedExec=%+d dh/completed=%+.2fkm",
+                        + "tier=%s->%s waveExec=%+d holdConv=%+d fallbackDirect=%+d borrowedExec=%+d dh/completed=%+.2fkm postDropHit=%+.1fpp prepMae=%+.2fm contGap=%+.2f dispatchP95=%+.1fms biz=%+.2f bal=%+.2f",
                 scenarioA,
                 scenarioB,
                 verdict,
@@ -214,11 +259,46 @@ public record ReplayCompareResult(
                 stressDowngradeRateDelta,
                 prePickupAugmentRateDelta,
                 holdOnlySelectionRateDelta,
+                dominantServiceTierA,
+                dominantServiceTierB,
                 recoveryDelta == null ? 0 : recoveryDelta.executedWaveCountDelta(),
                 recoveryDelta == null ? 0 : recoveryDelta.holdConvertedToWaveCountDelta(),
                 recoveryDelta == null ? 0 : recoveryDelta.executedFallbackCountDelta(),
                 recoveryDelta == null ? 0 : recoveryDelta.executedBorrowedCountDelta(),
-                deadheadPerCompletedOrderKmDelta
+                deadheadPerCompletedOrderKmDelta,
+                postDropOrderHitRateDelta,
+                forecastCalibrationSummaryDelta == null ? 0.0 : forecastCalibrationSummaryDelta.merchantPrepMaeMinutesDelta(),
+                forecastCalibrationSummaryDelta == null ? 0.0 : forecastCalibrationSummaryDelta.continuationCalibrationGapDelta(),
+                latencyDelta == null ? 0.0 : latencyDelta.dispatchP95MsDelta(),
+                intelligenceDelta == null ? 0.0 : intelligenceDelta.businessScoreDelta(),
+                intelligenceDelta == null ? 0.0 : ((intelligenceDelta.businessScoreDelta()
+                        + intelligenceDelta.routingScoreDelta()
+                        + intelligenceDelta.networkScoreDelta()
+                        + intelligenceDelta.forecastScoreDelta()) / 4.0)
         );
+    }
+
+    private static Map<String, ServiceTierMetricsDelta> compareServiceTiers(
+            Map<String, ServiceTierMetrics> baseline,
+            Map<String, ServiceTierMetrics> candidate) {
+        Map<String, ServiceTierMetrics> safeBaseline = baseline == null ? Map.of() : baseline;
+        Map<String, ServiceTierMetrics> safeCandidate = candidate == null ? Map.of() : candidate;
+        Map<String, ServiceTierMetricsDelta> delta = new LinkedHashMap<>();
+        java.util.Set<String> keys = new java.util.TreeSet<>();
+        keys.addAll(safeBaseline.keySet());
+        keys.addAll(safeCandidate.keySet());
+        for (String key : keys) {
+            ServiceTierMetrics left = safeBaseline.get(key);
+            ServiceTierMetrics right = safeCandidate.get(key);
+            delta.put(key, new ServiceTierMetricsDelta(
+                    key,
+                    (right == null ? 0 : right.orderCount()) - (left == null ? 0 : left.orderCount()),
+                    (right == null ? 0 : right.completedOrderCount()) - (left == null ? 0 : left.completedOrderCount()),
+                    (right == null ? 0.0 : right.completionRate()) - (left == null ? 0.0 : left.completionRate()),
+                    (right == null ? 0.0 : right.avgPromisedEtaMinutes()) - (left == null ? 0.0 : left.avgPromisedEtaMinutes()),
+                    (right == null ? 0.0 : right.avgQuotedFee()) - (left == null ? 0.0 : left.avgQuotedFee())
+            ));
+        }
+        return delta;
     }
 }
