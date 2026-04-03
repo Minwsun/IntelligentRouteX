@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: routechain-api
+server:
+  port: 8081
+management:
+  health:
+    neo4j:
+      enabled: false
+    redis:
+      enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+routechain:
+  persistence:
+    jdbc:
+      enabled: false
+      url: jdbc:postgresql://localhost:5432/routechain
+      username: routechain
+      password: routechain
+      driver-class-name: org.postgresql.Driver
+      max-pool-size: 8
+      min-idle: 1
+      connection-timeout-ms: 10000
+    redis:
+      enabled: false
+      host: localhost
+      port: 6379
+      password: ""
+      database: 0
+      key-prefix: routechain
+      connect-timeout-ms: 2000
