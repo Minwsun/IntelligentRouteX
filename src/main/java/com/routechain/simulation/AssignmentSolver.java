@@ -255,6 +255,7 @@ public class AssignmentSolver {
         score += Math.max(0.0, plan.getExecutionScore()) * 0.12;
         score += Math.max(0.0, plan.getContinuationScore()) * 0.04;
         score += Math.max(0.0, plan.getCoverageScore()) * 0.02;
+        score += Math.max(0.0, plan.getGraphAffinityScore()) * 0.05;
         score -= plan.getPredictedDeadheadKm() * 0.10;
         score -= plan.getExpectedPostCompletionEmptyKm() * 0.08;
         score -= plan.getBorrowedDependencyScore() * 0.12;

@@ -33,7 +33,10 @@ class ControlRoomFrameBuilderTest {
         assertNotNull(frame.routePolicyProfile());
         assertNotNull(frame.forecastDrift());
         assertFalse(frame.cityTwinCells().isEmpty());
+        assertFalse(frame.futureCellValues().isEmpty());
         assertFalse(frame.driverFutureValues().isEmpty());
+        assertFalse(frame.graphAffinities().isEmpty());
+        assertFalse(frame.graphExplanations().isEmpty());
         assertFalse(frame.marketplaceEdges().isEmpty());
         assertFalse(frame.riderCopilot().isEmpty());
         assertFalse(frame.modelPromotions().isEmpty());

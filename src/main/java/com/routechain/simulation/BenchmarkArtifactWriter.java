@@ -1,6 +1,9 @@
 package com.routechain.simulation;
 
 import com.google.gson.Gson;
+import com.routechain.graph.FutureCellValue;
+import com.routechain.graph.GraphAffinitySnapshot;
+import com.routechain.graph.GraphExplanationTrace;
 import com.routechain.infra.EventContractCatalog;
 import com.routechain.infra.GsonSupport;
 import com.routechain.infra.PlatformRuntimeBootstrap;
@@ -38,7 +41,10 @@ public final class BenchmarkArtifactWriter {
     private static final Path LATENCY_CSV = ROOT.resolve("latency_breakdown.csv");
     private static final Path ACCEPTANCE_CSV = ROOT.resolve("scenario_acceptance.csv");
     private static final Path CITY_TWIN_CSV = CONTROL_ROOM_DIR.resolve("city_twin_cells.csv");
+    private static final Path FUTURE_CELL_VALUE_CSV = CONTROL_ROOM_DIR.resolve("future_cell_values.csv");
     private static final Path DRIVER_FUTURE_VALUE_CSV = CONTROL_ROOM_DIR.resolve("driver_future_values.csv");
+    private static final Path GRAPH_AFFINITY_CSV = CONTROL_ROOM_DIR.resolve("graph_affinities.csv");
+    private static final Path GRAPH_EXPLANATION_CSV = CONTROL_ROOM_DIR.resolve("graph_explanations.csv");
     private static final Path MARKETPLACE_EDGE_CSV = CONTROL_ROOM_DIR.resolve("marketplace_edges.csv");
     private static final Path RIDER_COPILOT_CSV = CONTROL_ROOM_DIR.resolve("rider_copilot.csv");
     private static final Path MODEL_PROMOTION_CSV = CONTROL_ROOM_DIR.resolve("model_promotion.csv");
@@ -523,12 +529,74 @@ public final class BenchmarkArtifactWriter {
                         )
                 );
             }
+            for (FutureCellValue futureCellValue : frame.futureCellValues()) {
+                appendCsv(
+                        FUTURE_CELL_VALUE_CSV,
+                        "runId,scenario,cellId,serviceTier,horizonMinutes,demandScore,postDropOpportunity,emptyRisk,graphCentralityScore,futureValueScore,rationale",
+                        String.format(
+                                "%s,%s,%s,%s,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%s",
+                                safe(frame.runId()),
+                                safe(frame.scenarioName()),
+                                safe(futureCellValue.cellId()),
+                                safe(futureCellValue.serviceTier()),
+                                futureCellValue.horizonMinutes(),
+                                futureCellValue.demandScore(),
+                                futureCellValue.postDropOpportunity(),
+                                futureCellValue.emptyRisk(),
+                                futureCellValue.graphCentralityScore(),
+                                futureCellValue.futureValueScore(),
+                                safe(futureCellValue.rationale())
+                        )
+                );
+            }
+            for (GraphAffinitySnapshot affinity : frame.graphAffinities()) {
+                appendCsv(
+                        GRAPH_AFFINITY_CSV,
+                        "runId,scenario,relationType,sourceType,sourceId,sourceCellId,targetType,targetId,targetCellId,affinityScore,explanation",
+                        String.format(
+                                "%s,%s,%s,%s,%s,%s,%s,%s,%s,%.4f,%s",
+                                safe(frame.runId()),
+                                safe(frame.scenarioName()),
+                                safe(affinity.relationType()),
+                                safe(affinity.source().nodeType()),
+                                safe(affinity.source().nodeId()),
+                                safe(affinity.source().cellId()),
+                                safe(affinity.target().nodeType()),
+                                safe(affinity.target().nodeId()),
+                                safe(affinity.target().cellId()),
+                                affinity.affinityScore(),
+                                safe(affinity.explanation())
+                        )
+                );
+            }
+            for (GraphExplanationTrace trace : frame.graphExplanations()) {
+                appendCsv(
+                        GRAPH_EXPLANATION_CSV,
+                        "runId,scenario,traceId,driverId,orderKey,sourceCellId,targetCellId,graphAffinityScore,topologyScore,bundleCompatibilityScore,futureCellScore,congestionPropagationScore,explanation",
+                        String.format(
+                                "%s,%s,%s,%s,%s,%s,%s,%.4f,%.4f,%.4f,%.4f,%.4f,%s",
+                                safe(frame.runId()),
+                                safe(frame.scenarioName()),
+                                safe(trace.traceId()),
+                                safe(trace.driverId()),
+                                safe(trace.orderKey()),
+                                safe(trace.sourceCellId()),
+                                safe(trace.targetCellId()),
+                                trace.graphAffinityScore(),
+                                trace.topologyScore(),
+                                trace.bundleCompatibilityScore(),
+                                trace.futureCellScore(),
+                                trace.congestionPropagationScore(),
+                                safe(trace.explanation())
+                        )
+                );
+            }
             for (MarketplaceEdge edge : frame.marketplaceEdges()) {
                 appendCsv(
                         MARKETPLACE_EDGE_CSV,
-                        "runId,scenario,edgeId,driverId,orderId,serviceTier,pickupCellId,dropoffCellId,pickupEtaMinutes,deadheadKm,executionScore,continuationScore,edgeScore,borrowed,rationale",
+                        "runId,scenario,edgeId,driverId,orderId,serviceTier,pickupCellId,dropoffCellId,pickupEtaMinutes,deadheadKm,executionScore,continuationScore,graphAffinityScore,edgeScore,borrowed,rationale,graphExplanation",
                         String.format(
-                                "%s,%s,%s,%s,%s,%s,%s,%s,%.4f,%.4f,%.4f,%.4f,%.4f,%s,%s",
+                                "%s,%s,%s,%s,%s,%s,%s,%s,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s,%s,%s",
                                 safe(frame.runId()),
                                 safe(frame.scenarioName()),
                                 safe(edge.edgeId()),
@@ -541,9 +609,11 @@ public final class BenchmarkArtifactWriter {
                                 edge.deadheadKm(),
                                 edge.executionScore(),
                                 edge.continuationScore(),
+                                edge.graphAffinityScore(),
                                 edge.edgeScore(),
                                 Boolean.toString(edge.borrowed()),
-                                safe(edge.rationale())
+                                safe(edge.rationale()),
+                                safe(edge.graphExplanationTrace().explanation())
                         )
                 );
             }
@@ -707,6 +777,17 @@ public final class BenchmarkArtifactWriter {
         }
         builder.append(System.lineSeparator());
 
+        builder.append("## Future Cell Values").append(System.lineSeparator());
+        for (FutureCellValue futureCellValue : frame.futureCellValues()) {
+            builder.append("- ").append(futureCellValue.cellId())
+                    .append(" future=").append(String.format("%.2f", futureCellValue.futureValueScore()))
+                    .append(" centrality=").append(String.format("%.2f", futureCellValue.graphCentralityScore()))
+                    .append(" postDrop=").append(String.format("%.2f", futureCellValue.postDropOpportunity()))
+                    .append(" :: ").append(futureCellValue.rationale())
+                    .append(System.lineSeparator());
+        }
+        builder.append(System.lineSeparator());
+
         builder.append("## Marketplace Edges").append(System.lineSeparator());
         for (MarketplaceEdge edge : frame.marketplaceEdges()) {
             builder.append("- ").append(edge.driverId())
@@ -714,8 +795,32 @@ public final class BenchmarkArtifactWriter {
                     .append(" score=").append(String.format("%.2f", edge.edgeScore()))
                     .append(" exec=").append(String.format("%.2f", edge.executionScore()))
                     .append(" cont=").append(String.format("%.2f", edge.continuationScore()))
+                    .append(" graph=").append(String.format("%.2f", edge.graphAffinityScore()))
                     .append(" borrowed=").append(edge.borrowed())
                     .append(" :: ").append(edge.rationale())
+                    .append(System.lineSeparator());
+        }
+        builder.append(System.lineSeparator());
+
+        builder.append("## Graph Affinities").append(System.lineSeparator());
+        for (GraphAffinitySnapshot affinity : frame.graphAffinities().stream().limit(8).toList()) {
+            builder.append("- ").append(affinity.relationType())
+                    .append(" ").append(affinity.source().nodeId())
+                    .append(" -> ").append(affinity.target().nodeId())
+                    .append(" score=").append(String.format("%.2f", affinity.affinityScore()))
+                    .append(" :: ").append(affinity.explanation())
+                    .append(System.lineSeparator());
+        }
+        builder.append(System.lineSeparator());
+
+        builder.append("## Graph Explanations").append(System.lineSeparator());
+        for (GraphExplanationTrace trace : frame.graphExplanations().stream().limit(8).toList()) {
+            builder.append("- ").append(trace.driverId())
+                    .append(" / ").append(trace.orderKey())
+                    .append(" graph=").append(String.format("%.2f", trace.graphAffinityScore()))
+                    .append(" topology=").append(String.format("%.2f", trace.topologyScore()))
+                    .append(" future=").append(String.format("%.2f", trace.futureCellScore()))
+                    .append(" :: ").append(trace.explanation())
                     .append(System.lineSeparator());
         }
         builder.append(System.lineSeparator());

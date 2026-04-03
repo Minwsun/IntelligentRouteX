@@ -3,6 +3,9 @@ package com.routechain.ai;
 import com.routechain.ai.model.*;
 import com.routechain.domain.*;
 import com.routechain.domain.Enums.*;
+import com.routechain.graph.GraphExplanationTrace;
+import com.routechain.graph.GraphFeatureNamespaces;
+import com.routechain.graph.GraphShadowSnapshot;
 import com.routechain.infra.DispatchFactSink;
 import com.routechain.infra.EventContractCatalog;
 import com.routechain.infra.FeatureStore;
@@ -101,6 +104,14 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
     private ExecutionProfile executionProfile = ExecutionProfile.MAINLINE_REALISTIC;
     private String activeRunId = "run-unset";
     private String activeRouteLatencyMode = SimulationEngine.RouteLatencyMode.SIMULATED_ASYNC.name();
+    private GraphShadowSnapshot activeGraphShadowSnapshot = new GraphShadowSnapshot(
+            "run-unset",
+            "dispatch-live",
+            "instant",
+            "in-memory-shadow",
+            List.of(),
+            List.of(),
+            List.of());
     private static final double EMERGENCY_DEADHEAD_CAP_KM = 4.5;
 
     public OmegaDispatchAgent(List<Region> regions) {
@@ -186,6 +197,16 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 availableDrivers.size(), surge);
 
         PolicyProfile activePolicy = policySelector.select(contextFeatures);
+        String dominantServiceTier = DeliveryServiceTier
+                .dominantForOrders(pendingOrders, executionProfile.name())
+                .wireValue();
+        activeGraphShadowSnapshot = PlatformRuntimeBootstrap.getGraphShadowProjector().project(
+                activeRunId,
+                "dispatch-live",
+                dominantServiceTier,
+                allDrivers,
+                pendingOrders,
+                field);
 
         // ── Step 3: Build spatial order index (NEW) ─────────────────────
         contextBuilder.rebuildIndex(pendingOrders);
@@ -558,6 +579,28 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             plan.setModelInferenceLatencyMs((System.nanoTime() - inferenceStartedNanos) / 1_000_000L);
             return false;
         }
+        GraphExplanationTrace graphTrace = PlatformRuntimeBootstrap.getGraphAffinityScorer().scorePlan(
+                activeRunId,
+                activeGraphShadowSnapshot,
+                ctx,
+                plan,
+                field,
+                weather,
+                traffic);
+        plan.setGraphAffinityScore(graphTrace.graphAffinityScore());
+        plan.setGraphExplanationTrace(graphTrace);
+        featureStore.put(
+                GraphFeatureNamespaces.GRAPH_FEATURES,
+                "run:" + activeRunId + ":driver:" + driver.getId() + ":bundle:" + bundle.bundleId(),
+                Map.of(
+                        "serviceTier", plan.getServiceTier(),
+                        "graphAffinityScore", graphTrace.graphAffinityScore(),
+                        "topologyScore", graphTrace.topologyScore(),
+                        "bundleCompatibilityScore", graphTrace.bundleCompatibilityScore(),
+                        "futureCellScore", graphTrace.futureCellScore(),
+                        "congestionPropagationScore", graphTrace.congestionPropagationScore(),
+                        "sourceCellId", graphTrace.sourceCellId(),
+                        "targetCellId", graphTrace.targetCellId()));
         double executionScore = computeExecutionScore(plan, effectiveRegime, weather);
         double continuationScore = computeContinuationScore(plan, effectiveRegime);
         double coverageScore = computeCoverageScore(plan, ctx, effectiveRegime);
@@ -621,6 +664,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 + coverageScore * 0.04
                 + utilityScore * blend[3]
                 + neuralPriorComponent
+                + plan.getGraphAffinityScore() * 0.05
                 + resilientExecutionBonus(plan, effectiveRegime)
                 - executionStabilityPenalty(plan, effectiveRegime, weather, pred.confidence());
 
@@ -2376,6 +2420,8 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         summary.put("neuralPriorUsed", plan.isNeuralPriorUsed());
         summary.put("neuralPriorVersion", plan.getNeuralPriorVersion());
         summary.put("neuralPriorFreshnessMs", plan.getNeuralPriorFreshnessMs());
+        summary.put("graphAffinityScore", plan.getGraphAffinityScore());
+        summary.put("graphExplanation", plan.getGraphExplanationTrace());
         summary.put("marginalDeadheadPerAddedOrder", plan.getMarginalDeadheadPerAddedOrder());
         summary.put("routeAlternative", routeAlternative);
         summary.put("policyEvaluation", policyEvaluation);

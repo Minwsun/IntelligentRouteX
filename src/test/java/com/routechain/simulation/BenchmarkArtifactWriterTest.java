@@ -1,6 +1,10 @@
 package com.routechain.simulation;
 
 import com.routechain.domain.Enums.DeliveryServiceTier;
+import com.routechain.graph.FutureCellValue;
+import com.routechain.graph.GraphAffinitySnapshot;
+import com.routechain.graph.GraphExplanationTrace;
+import com.routechain.graph.GraphNodeRef;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -235,6 +239,17 @@ class BenchmarkArtifactWriterTest {
                         0.34,
                         0.82
                 )),
+                List.of(new FutureCellValue(
+                        "8a1f94d6b59ffff",
+                        "instant",
+                        10,
+                        1.9,
+                        0.78,
+                        0.22,
+                        0.73,
+                        0.84,
+                        "futureCell=0.84 graphCentrality=0.73 demand10=1.90 postDrop=0.78"
+                )),
                 List.of(new DriverFutureValue(
                         "DRV-1",
                         "8a1f94d6b59fff0",
@@ -249,6 +264,26 @@ class BenchmarkArtifactWriterTest {
                         0.79,
                         "Shift DRV-1 to 8a1f94d6b59ffff because futureValue=0.79"
                 )),
+                List.of(new GraphAffinitySnapshot(
+                        "DRIVER_IN_ZONE",
+                        new GraphNodeRef("DRIVER", "driver-DRV-1", "DRV-1", "8a1f94d6b59fff0", 10.771, 106.700),
+                        new GraphNodeRef("ZONE", "zone-8a1f94d6b59ffff", "Zone 8a1f94d6b59ffff", "8a1f94d6b59ffff", 10.772, 106.701),
+                        0.81,
+                        "driver-zone affinity=0.81 postDrop=0.78 emptyRisk=0.22 demand10=1.90"
+                )),
+                List.of(new GraphExplanationTrace(
+                        "graph-control-room-run-DRV-1-bundle-1",
+                        "DRV-1",
+                        "ORD-1",
+                        "8a1f94d6b59ffaa",
+                        "8a1f94d6b59ffff",
+                        0.77,
+                        0.81,
+                        0.70,
+                        0.82,
+                        0.76,
+                        "graphAffinity=0.77 topology=0.81 bundleCompat=0.70 futureCell=0.82 congestionSafe=0.76 endCell=8a1f94d6b59ffff"
+                )),
                 List.of(new MarketplaceEdge(
                         "edge-DRV-1-ORD-1",
                         "DRV-1",
@@ -260,9 +295,23 @@ class BenchmarkArtifactWriterTest {
                         1.1,
                         0.84,
                         0.72,
+                        0.77,
                         0.81,
                         false,
-                        "local edge with dh=1.10km eta=3.6m postDrop=0.78 emptyRisk=0.22"
+                        "local edge with dh=1.10km eta=3.6m postDrop=0.78 emptyRisk=0.22 graph=0.77",
+                        new GraphExplanationTrace(
+                                "graph-control-room-run-DRV-1-bundle-1",
+                                "DRV-1",
+                                "ORD-1",
+                                "8a1f94d6b59ffaa",
+                                "8a1f94d6b59ffff",
+                                0.77,
+                                0.81,
+                                0.70,
+                                0.82,
+                                0.76,
+                                "graphAffinity=0.77 topology=0.81 bundleCompat=0.70 futureCell=0.82 congestionSafe=0.76 endCell=8a1f94d6b59ffff"
+                        )
                 )),
                 List.of(new RiderCopilotRecommendation(
                         "copilot-1-8a1f94d6b59ffff",
@@ -299,7 +348,10 @@ class BenchmarkArtifactWriterTest {
         assertTrue(Files.exists(root.resolve("control-room").resolve("control_room_latest.json")));
         assertTrue(Files.exists(root.resolve("control-room").resolve("control_room_latest.md")));
         assertTrue(Files.exists(root.resolve("control-room").resolve("city_twin_cells.csv")));
+        assertTrue(Files.exists(root.resolve("control-room").resolve("future_cell_values.csv")));
         assertTrue(Files.exists(root.resolve("control-room").resolve("driver_future_values.csv")));
+        assertTrue(Files.exists(root.resolve("control-room").resolve("graph_affinities.csv")));
+        assertTrue(Files.exists(root.resolve("control-room").resolve("graph_explanations.csv")));
         assertTrue(Files.exists(root.resolve("control-room").resolve("marketplace_edges.csv")));
         assertTrue(Files.exists(root.resolve("control-room").resolve("rider_copilot.csv")));
         assertTrue(Files.exists(root.resolve("control-room").resolve("model_promotion.csv")));
@@ -309,7 +361,10 @@ class BenchmarkArtifactWriterTest {
         String markdown = Files.readString(root.resolve("control-room").resolve("control_room_latest.md"));
         assertTrue(markdown.contains("RouteChain Control Room"));
         assertTrue(markdown.contains("Driver Future Value"));
+        assertTrue(markdown.contains("Future Cell Values"));
         assertTrue(markdown.contains("Marketplace Edges"));
+        assertTrue(markdown.contains("Graph Affinities"));
+        assertTrue(markdown.contains("Graph Explanations"));
         assertTrue(markdown.contains("Rider Copilot"));
         assertTrue(markdown.contains("Model Ops"));
     }

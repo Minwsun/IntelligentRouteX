@@ -52,6 +52,17 @@ public final class Events {
                                     long dispatchDecisionLatencyMs,
                                     int holdTtlRemaining,
                                     double marginalDeadheadPerAddedOrder) {}
+    public record OfferBatchCreated(String offerBatchId, String orderId, String serviceTier,
+                                    int fanout, Instant createdAt, Instant expiresAt) {}
+    public record DriverOfferCreated(String offerId, String offerBatchId, String orderId,
+                                     String driverId, double score, double acceptanceProbability,
+                                     Instant expiresAt) {}
+    public record DriverOfferAccepted(String offerId, String offerBatchId, String orderId,
+                                      String driverId, Instant acceptedAt) {}
+    public record DriverOfferDeclined(String offerId, String offerBatchId, String orderId,
+                                      String driverId, String reason, Instant decidedAt) {}
+    public record DriverOfferExpired(String offerId, String offerBatchId, String orderId,
+                                     String driverId, Instant expiredAt) {}
     public record ReDispatchTriggered(String orderId, String reason) {}
 
     // ── AI Insight events ───────────────────────────────────────────────

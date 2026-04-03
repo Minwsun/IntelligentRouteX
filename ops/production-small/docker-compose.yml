@@ -47,6 +47,16 @@ services:
     ports:
       - "6379:6379"
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    container_name: routechain-keycloak
+    command: start-dev --http-port=8080
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin123
+    ports:
+      - "8088:8080"
+
   postgis:
     image: postgis/postgis:16-3.4
     container_name: routechain-postgis
@@ -96,6 +106,20 @@ services:
     volumes:
       - clickhouse-data:/var/lib/clickhouse
 
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: routechain-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/routechain123
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_PLUGINS: '["graph-data-science"]'
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j-data:/data
+
   mlflow:
     build:
       context: ./mlflow
@@ -120,3 +144,4 @@ volumes:
   minio-data:
   clickhouse-data:
   mlflow-data:
+  neo4j-data:

@@ -12,6 +12,8 @@ import com.routechain.domain.Enums.OrderStatus;
 import com.routechain.domain.Enums.SurgeSeverity;
 import com.routechain.domain.Order;
 import com.routechain.domain.Region;
+import com.routechain.graph.GraphExplanationTrace;
+import com.routechain.graph.GraphShadowSnapshot;
 import com.routechain.infra.AdminQueryService;
 import com.routechain.infra.PlatformRuntimeBootstrap;
 
@@ -52,11 +54,21 @@ public final class ControlRoomFrameBuilder {
 
         String serviceTier = report.dominantServiceTier();
         List<CellValueSnapshot> topCells = field.topCellSnapshots(serviceTier, 8);
+        GraphShadowSnapshot graphShadow = PlatformRuntimeBootstrap.getGraphShadowProjector().project(
+                report.runId(),
+                report.scenarioName(),
+                serviceTier,
+                engine.getDrivers(),
+                engine.getActiveOrders(),
+                field);
         RoutePolicyProfile policyProfile = buildPolicyProfile(engine, report, omegaAgent);
         ForecastDriftSnapshot forecastDrift = buildForecastDrift(report);
         List<ModelPromotionDecision> modelPromotions = buildModelPromotions(report, forecastDrift);
         List<DriverFutureValue> driverFutureValues = buildDriverFutureValues(engine, field, serviceTier, topCells);
-        List<MarketplaceEdge> marketplaceEdges = buildMarketplaceEdges(engine, field);
+        List<MarketplaceEdge> marketplaceEdges = buildMarketplaceEdges(engine, field, graphShadow, report.runId());
+        List<GraphExplanationTrace> graphExplanations = marketplaceEdges.stream()
+                .map(MarketplaceEdge::graphExplanationTrace)
+                .toList();
         List<RiderCopilotRecommendation> copilot = buildCopilotRecommendations(serviceTier, topCells);
         AdminQueryService.SystemAdminSnapshot adminSnapshot =
                 PlatformRuntimeBootstrap.getAdminQueryService().snapshot();
@@ -70,14 +82,17 @@ public final class ControlRoomFrameBuilder {
                 omegaAgent.getActivePolicy(),
                 engine.getRouteLatencyMode().name(),
                 buildHeadline(report, forecastDrift),
-                buildEvidence(report, topCells, forecastDrift, modelPromotions),
+                buildEvidence(report, topCells, forecastDrift, modelPromotions, graphShadow, marketplaceEdges),
                 report.latency(),
                 report.intelligence(),
                 report.acceptance(),
                 forecastDrift,
                 policyProfile,
                 topCells,
+                graphShadow.futureCellValues(),
                 driverFutureValues,
+                graphShadow.affinities(),
+                graphExplanations,
                 marketplaceEdges,
                 copilot,
                 modelPromotions,
@@ -297,7 +312,9 @@ public final class ControlRoomFrameBuilder {
     }
 
     private static List<MarketplaceEdge> buildMarketplaceEdges(SimulationEngine engine,
-                                                               SpatiotemporalField field) {
+                                                               SpatiotemporalField field,
+                                                               GraphShadowSnapshot graphShadow,
+                                                               String runId) {
         List<Order> pendingOrders = engine.getActiveOrders().stream()
                 .filter(order -> order.getStatus() == OrderStatus.CONFIRMED
                         || order.getStatus() == OrderStatus.PENDING_ASSIGNMENT)
@@ -343,10 +360,53 @@ public final class ControlRoomFrameBuilder {
                                 dropPostDrop * 0.58
                                         + (1.0 - dropEmptyRisk) * 0.30
                                         + Math.min(1.0, field.getForecastDemandAt(order.getDropoffPoint(), 10) / 4.5) * 0.12);
+                        double coverageScore = clamp01(
+                                (borrowed ? 0.22 : 0.46)
+                                        + Math.max(0.0, 1.0 - field.getShortageAt(order.getPickupPoint())) * 0.24
+                                        + Math.max(0.0, 1.0 - deadheadKm / 3.5) * 0.18
+                                        + Math.max(0.0, 1.0 - pickupTraffic) * 0.12);
+                        double linehaulKm = order.getPickupPoint().distanceTo(order.getDropoffPoint()) / 1000.0;
+                        double dropoffEtaMinutes = pickupEtaMinutes + linehaulKm / speedKmh * 60.0;
+                        DispatchPlan edgePlan = new DispatchPlan(
+                                driver,
+                                new DispatchPlan.Bundle(
+                                        "marketplace-" + driver.getId() + "-" + order.getId(),
+                                        List.of(order),
+                                        0.0,
+                                        1),
+                                List.of(
+                                        new DispatchPlan.Stop(
+                                                order.getId(),
+                                                order.getPickupPoint(),
+                                                DispatchPlan.Stop.StopType.PICKUP,
+                                                pickupEtaMinutes),
+                                        new DispatchPlan.Stop(
+                                                order.getId(),
+                                                order.getDropoffPoint(),
+                                                DispatchPlan.Stop.StopType.DROPOFF,
+                                                dropoffEtaMinutes)));
+                        edgePlan.setServiceTier(tier.wireValue());
+                        edgePlan.setPredictedDeadheadKm(deadheadKm);
+                        edgePlan.setPredictedTotalMinutes(dropoffEtaMinutes);
+                        edgePlan.setPostDropDemandProbability(dropPostDrop);
+                        edgePlan.setEmptyRiskAfter(dropEmptyRisk);
+                        edgePlan.setExecutionScore(executionScore);
+                        edgePlan.setContinuationScore(continuationScore);
+                        edgePlan.setCoverageScore(coverageScore);
+                        GraphExplanationTrace graphTrace = PlatformRuntimeBootstrap.getGraphAffinityScorer().scorePlan(
+                                runId,
+                                graphShadow,
+                                null,
+                                edgePlan,
+                                field,
+                                engine.getWeatherProfile(),
+                                engine.getTrafficIntensity());
                         double edgeScore = clamp01(
-                                executionScore * 0.62
-                                        + continuationScore * 0.28
-                                        + (borrowed ? 0.0 : 0.10));
+                                executionScore * 0.48
+                                        + continuationScore * 0.24
+                                        + coverageScore * 0.08
+                                        + graphTrace.graphAffinityScore() * 0.20
+                                        - (borrowed ? 0.06 : 0.0));
                         edges.add(new MarketplaceEdge(
                                 "edge-" + driver.getId() + "-" + order.getId(),
                                 driver.getId(),
@@ -358,15 +418,18 @@ public final class ControlRoomFrameBuilder {
                                 deadheadKm,
                                 executionScore,
                                 continuationScore,
+                                graphTrace.graphAffinityScore(),
                                 edgeScore,
                                 borrowed,
                                 String.format(Locale.ROOT,
-                                        "%s edge with dh=%.2fkm eta=%.1fm postDrop=%.2f emptyRisk=%.2f",
+                                        "%s edge with dh=%.2fkm eta=%.1fm postDrop=%.2f emptyRisk=%.2f graph=%.2f",
                                         borrowed ? "borrowed" : "local",
                                         deadheadKm,
                                         pickupEtaMinutes,
                                         dropPostDrop,
-                                        dropEmptyRisk))
+                                        dropEmptyRisk,
+                                        graphTrace.graphAffinityScore()),
+                                graphTrace)
                         );
                     });
         }
@@ -395,7 +458,9 @@ public final class ControlRoomFrameBuilder {
     private static List<String> buildEvidence(RunReport report,
                                               List<CellValueSnapshot> topCells,
                                               ForecastDriftSnapshot forecastDrift,
-                                              List<ModelPromotionDecision> promotions) {
+                                              List<ModelPromotionDecision> promotions,
+                                              GraphShadowSnapshot graphShadow,
+                                              List<MarketplaceEdge> marketplaceEdges) {
         List<String> evidence = new ArrayList<>();
         if (!topCells.isEmpty()) {
             CellValueSnapshot hotspot = topCells.get(0);
@@ -406,6 +471,26 @@ public final class ControlRoomFrameBuilder {
                     hotspot.postDropOpportunity10m(),
                     hotspot.emptyZoneRisk10m(),
                     hotspot.demandForecast10m()));
+        }
+        if (graphShadow != null) {
+            evidence.add(String.format(
+                    Locale.ROOT,
+                    "Graph shadow export=%s nodes=%d affinities=%d futureCells=%d",
+                    graphShadow.exportMode(),
+                    graphShadow.nodes().size(),
+                    graphShadow.affinities().size(),
+                    graphShadow.futureCellValues().size()));
+        }
+        if (marketplaceEdges != null && !marketplaceEdges.isEmpty()) {
+            MarketplaceEdge bestEdge = marketplaceEdges.get(0);
+            evidence.add(String.format(
+                    Locale.ROOT,
+                    "Top graph edge %s -> %s score=%.2f graph=%.2f borrowed=%s",
+                    bestEdge.driverId(),
+                    bestEdge.orderId(),
+                    bestEdge.edgeScore(),
+                    bestEdge.graphAffinityScore(),
+                    bestEdge.borrowed()));
         }
         evidence.add(String.format(
                 Locale.ROOT,

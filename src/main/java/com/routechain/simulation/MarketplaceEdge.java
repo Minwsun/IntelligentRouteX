@@ -1,5 +1,7 @@
 package com.routechain.simulation;
 
+import com.routechain.graph.GraphExplanationTrace;
+
 /**
  * Read-only marketplace edge used by control-room network views.
  */
@@ -14,9 +16,11 @@ public record MarketplaceEdge(
         double deadheadKm,
         double executionScore,
         double continuationScore,
+        double graphAffinityScore,
         double edgeScore,
         boolean borrowed,
-        String rationale
+        String rationale,
+        GraphExplanationTrace graphExplanationTrace
 ) {
     public MarketplaceEdge {
         edgeId = edgeId == null || edgeId.isBlank() ? "edge-unknown" : edgeId;
@@ -26,5 +30,9 @@ public record MarketplaceEdge(
         pickupCellId = pickupCellId == null || pickupCellId.isBlank() ? "cell-unknown" : pickupCellId;
         dropoffCellId = dropoffCellId == null || dropoffCellId.isBlank() ? "cell-unknown" : dropoffCellId;
         rationale = rationale == null ? "" : rationale;
+        graphExplanationTrace = graphExplanationTrace == null
+                ? new GraphExplanationTrace("graph-trace-unknown", driverId, orderId, pickupCellId, dropoffCellId,
+                0.0, 0.0, 0.0, 0.0, 0.0, "")
+                : graphExplanationTrace;
     }
 }

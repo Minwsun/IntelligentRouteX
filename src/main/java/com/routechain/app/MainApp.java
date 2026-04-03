@@ -9,6 +9,7 @@ import com.routechain.infra.MapBridge;
 import com.routechain.simulation.SimulationEngine;
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.beans.property.*;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -19,6 +20,7 @@ import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import com.routechain.domain.GeoPoint;
 import com.routechain.infra.NativeMapPane;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.scene.Node;
 
@@ -184,14 +186,31 @@ public class MainApp extends Application {
         root.getChildren().addAll(nativeMap, floatingLayer);
 
         // ── Scene & Stage ───────────────────────────────────────────────
-        Scene scene = new Scene(root, 1600, 960);
+        Rectangle2D screenBounds = Screen.getPrimary().getVisualBounds();
+        double initialWidth = Math.max(1180, Math.min(1600, screenBounds.getWidth() * 0.96));
+        double initialHeight = Math.max(760, Math.min(960, screenBounds.getHeight() * 0.94));
+        Scene scene = new Scene(root, initialWidth, initialHeight);
         scene.getStylesheets().add(getClass().getResource("/css/app-theme.css").toExternalForm());
         scene.setFill(Color.valueOf("#0c0e10"));
+        leftStack.prefWidthProperty().bind(Bindings.createDoubleBinding(
+                () -> ResponsiveLayoutProfiles.profileFor(scene.getWidth(), scene.getHeight()).leftRailWidth(),
+                scene.widthProperty(), scene.heightProperty()));
+        leftStack.maxWidthProperty().bind(leftStack.prefWidthProperty());
+        leftScroll.prefWidthProperty().bind(leftStack.prefWidthProperty().add(16));
+        leftScroll.maxWidthProperty().bind(leftScroll.prefWidthProperty());
+        rightStack.prefWidthProperty().bind(Bindings.createDoubleBinding(
+                () -> ResponsiveLayoutProfiles.profileFor(scene.getWidth(), scene.getHeight()).rightRailWidth(),
+                scene.widthProperty(), scene.heightProperty()));
+        rightStack.maxWidthProperty().bind(rightStack.prefWidthProperty());
+        scene.widthProperty().addListener((obs, oldValue, newValue) ->
+                applyViewportProfile(scene, leftScroll, leftToggle, rightStack, rightToggle));
+        scene.heightProperty().addListener((obs, oldValue, newValue) ->
+                applyViewportProfile(scene, leftScroll, leftToggle, rightStack, rightToggle));
 
         stage.setTitle("RouteChain AI — Delivery Intelligence");
         stage.setScene(scene);
-        stage.setMinWidth(1280);
-        stage.setMinHeight(800);
+        stage.setMinWidth(1100);
+        stage.setMinHeight(700);
         stage.setOnCloseRequest(e -> {
             simEngine.stop();
             if (uiUpdater != null) uiUpdater.shutdownNow();
@@ -199,6 +218,7 @@ public class MainApp extends Application {
             System.exit(0);
         });
         stage.show();
+        applyViewportProfile(scene, leftScroll, leftToggle, rightStack, rightToggle);
 
         // ── Subscribe to events ─────────────────────────────────────────
         subscribeToEvents();
@@ -1125,6 +1145,23 @@ public class MainApp extends Application {
         });
 
         if (mapBridge != null) mapBridge.focusDriver(driverId);
+    }
+
+    private void applyViewportProfile(Scene scene,
+                                      ScrollPane leftScroll,
+                                      Button leftToggle,
+                                      VBox rightStack,
+                                      Button rightToggle) {
+        ControlRoomViewportProfile profile = ResponsiveLayoutProfiles.profileFor(scene.getWidth(), scene.getHeight());
+        boolean showLeft = !profile.collapseLeft();
+        boolean showRight = !profile.collapseRight();
+
+        leftScroll.setVisible(showLeft);
+        leftScroll.setManaged(showLeft);
+        rightStack.setVisible(showRight);
+        rightStack.setManaged(showRight);
+        leftToggle.setText(showLeft ? "◀" : "▶");
+        rightToggle.setText(showRight ? "▶" : "◀");
     }
 
     // ═══════════════════════════════════════════════════════════════════

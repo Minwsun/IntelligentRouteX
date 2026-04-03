@@ -10,6 +10,8 @@ import com.routechain.ai.LLMEscalationGate;
 import com.routechain.ai.ModelArtifactProvider;
 import com.routechain.ai.OfflineFallbackLLMAdvisorClient;
 import com.routechain.ai.ModelBundleManifest;
+import com.routechain.graph.GraphAffinityScorer;
+import com.routechain.graph.GraphShadowProjector;
 import com.routechain.infra.Events.*;
 import com.routechain.simulation.ReplayCompareResult;
 import com.routechain.simulation.RunReport;
@@ -28,6 +30,8 @@ public final class PlatformRuntimeBootstrap {
 
     private static final LocalAdminQueryService ADMIN_QUERY_SERVICE = new LocalAdminQueryService();
     private static final InMemoryFeatureStore FEATURE_STORE = new InMemoryFeatureStore();
+    private static final GraphShadowProjector GRAPH_SHADOW_PROJECTOR = new GraphShadowProjector(FEATURE_STORE);
+    private static final GraphAffinityScorer GRAPH_AFFINITY_SCORER = new GraphAffinityScorer();
     private static final DispatchOptimizer DISPATCH_OPTIMIZER = new TimefoldOnlineOptimizer();
     private static final JsonlDispatchFactSink DISPATCH_FACT_SINK =
             new JsonlDispatchFactSink(ROOT.resolve("facts"));
@@ -69,6 +73,14 @@ public final class PlatformRuntimeBootstrap {
 
     public static FeatureStore getFeatureStore() {
         return FEATURE_STORE;
+    }
+
+    public static GraphShadowProjector getGraphShadowProjector() {
+        return GRAPH_SHADOW_PROJECTOR;
+    }
+
+    public static GraphAffinityScorer getGraphAffinityScorer() {
+        return GRAPH_AFFINITY_SCORER;
     }
 
     public static DispatchOptimizer getDispatchOptimizer() {
@@ -214,6 +226,11 @@ public final class PlatformRuntimeBootstrap {
             case DriverShortageDetected ignored -> "alerts.shortage";
             case AlertRaised ignored -> "alerts.raised";
             case DispatchDecision ignored -> "dispatch.selected";
+            case OfferBatchCreated ignored -> "dispatch.offer_batch";
+            case DriverOfferCreated ignored -> "dispatch.offer_created";
+            case DriverOfferAccepted ignored -> "dispatch.offer_accepted";
+            case DriverOfferDeclined ignored -> "dispatch.offer_declined";
+            case DriverOfferExpired ignored -> "dispatch.offer_expired";
             case ReDispatchTriggered ignored -> "dispatch.redispatch";
             case AiInsight ignored -> "ai.insight";
             case TimelineSnapshot ignored -> "simulation.timeline";

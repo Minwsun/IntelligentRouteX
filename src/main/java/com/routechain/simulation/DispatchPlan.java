@@ -2,6 +2,7 @@ package com.routechain.simulation;
 
 import com.routechain.ai.StressRegime;
 import com.routechain.domain.*;
+import com.routechain.graph.GraphExplanationTrace;
 
 import java.util.*;
 
@@ -62,6 +63,8 @@ public class DispatchPlan {
     private double postDropDemandProbability;
     private String serviceTier = "instant";
     private double routePriorScore;
+    private double graphAffinityScore;
+    private GraphExplanationTrace graphExplanationTrace;
     private double merchantPrepRiskScore;
     private double borrowSuccessProbability;
     private double trafficForecastAbsError;
@@ -152,6 +155,8 @@ public class DispatchPlan {
     public double getPostDropDemandProbability() { return postDropDemandProbability; }
     public String getServiceTier() { return serviceTier; }
     public double getRoutePriorScore() { return routePriorScore; }
+    public double getGraphAffinityScore() { return graphAffinityScore; }
+    public GraphExplanationTrace getGraphExplanationTrace() { return graphExplanationTrace; }
     public double getMerchantPrepRiskScore() { return merchantPrepRiskScore; }
     public double getBorrowSuccessProbability() { return borrowSuccessProbability; }
     public double getTrafficForecastAbsError() { return trafficForecastAbsError; }
@@ -251,6 +256,10 @@ public class DispatchPlan {
         this.serviceTier = (serviceTier == null || serviceTier.isBlank()) ? "instant" : serviceTier;
     }
     public void setRoutePriorScore(double routePriorScore) { this.routePriorScore = routePriorScore; }
+    public void setGraphAffinityScore(double graphAffinityScore) { this.graphAffinityScore = graphAffinityScore; }
+    public void setGraphExplanationTrace(GraphExplanationTrace graphExplanationTrace) {
+        this.graphExplanationTrace = graphExplanationTrace;
+    }
     public void setMerchantPrepRiskScore(double merchantPrepRiskScore) {
         this.merchantPrepRiskScore = merchantPrepRiskScore;
     }
