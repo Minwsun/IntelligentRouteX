@@ -71,6 +71,9 @@ public class IdempotencyService {
             if (record.isCompleted()) {
                 return gson.fromJson(record.responseJson(), type);
             }
+            if (record.isFailed()) {
+                throw new IllegalStateException("Idempotent request previously failed: " + scope + "/" + actorId);
+            }
             return waitForCompleted(scope, actorId, idempotencyKey, type, DEFAULT_WAIT);
         }
 

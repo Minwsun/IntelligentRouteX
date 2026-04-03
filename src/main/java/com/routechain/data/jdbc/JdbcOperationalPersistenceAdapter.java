@@ -38,7 +38,7 @@ public class JdbcOperationalPersistenceAdapter implements OperationalStore,
         WalletRepository,
         IdempotencyRepository,
         OutboxRepository {
-    private static final String IN_PROGRESS_RESPONSE = "{\"_idempotency\":\"IN_PROGRESS\"}";
+    private static final java.time.Duration IDEMPOTENCY_STALE_TTL = java.time.Duration.ofSeconds(5);
     private final NamedParameterJdbcTemplate jdbc;
 
     public JdbcOperationalPersistenceAdapter(NamedParameterJdbcTemplate jdbc) {
@@ -595,6 +595,34 @@ public class JdbcOperationalPersistenceAdapter implements OperationalStore,
                 .addValue("createdAt", ts(record.createdAt()))
                 .addValue("completedAt", ts(record.completedAt())));
         if (updated > 0) {
+            return Optional.empty();
+        }
+        int reclaimed = jdbc.update("""
+                UPDATE idempotency_records
+                   SET status = :status,
+                       claim_token = :claimToken,
+                       response_json = CAST(:responseJson AS jsonb),
+                       created_at = :createdAt,
+                       completed_at = :completedAt
+                 WHERE scope = :scope
+                   AND actor_id = :actorId
+                   AND idempotency_key = :idempotencyKey
+                   AND (
+                       status = 'FAILED'
+                       OR (status = 'IN_PROGRESS' AND created_at < :staleBefore)
+                   )
+                """,
+                new MapSqlParameterSource()
+                        .addValue("scope", record.scope())
+                        .addValue("actorId", record.actorId())
+                        .addValue("idempotencyKey", record.idempotencyKey())
+                        .addValue("status", record.status().name())
+                        .addValue("claimToken", record.claimToken())
+                        .addValue("responseJson", record.responseJson().isBlank() ? "{}" : record.responseJson())
+                        .addValue("createdAt", ts(record.createdAt()))
+                        .addValue("completedAt", ts(record.completedAt()))
+                        .addValue("staleBefore", ts(record.createdAt().minus(IDEMPOTENCY_STALE_TTL))));
+        if (reclaimed > 0) {
             return Optional.empty();
         }
         return jdbc.query("""

@@ -39,7 +39,7 @@ public class InMemoryOperationalStore implements OperationalStore,
         WalletRepository,
         IdempotencyRepository,
         OutboxRepository {
-    private static final String IN_PROGRESS_RESPONSE = "{\"_idempotency\":\"IN_PROGRESS\"}";
+    private static final java.time.Duration IDEMPOTENCY_STALE_TTL = java.time.Duration.ofSeconds(5);
     private final Map<String, Order> ordersById = new ConcurrentHashMap<>();
     private final Map<QuoteSnapshotKey, QuoteSnapshot> quotesById = new ConcurrentHashMap<>();
     private final Map<String, DriverSessionState> driverSessionsByDriverId = new ConcurrentHashMap<>();
@@ -212,10 +212,20 @@ public class InMemoryOperationalStore implements OperationalStore,
         synchronized (idempotencyClaimsByCompositeKey) {
             IdempotencyRecord existing = idempotencyByCompositeKey.get(compositeKey);
             if (existing != null) {
+                if (existing.isFailed() || isStale(existing, record.createdAt())) {
+                    idempotencyClaimsByCompositeKey.put(compositeKey, record.createdAt());
+                    idempotencyByCompositeKey.put(compositeKey, record);
+                    return Optional.empty();
+                }
                 return Optional.of(existing);
             }
             Instant existingClaim = idempotencyClaimsByCompositeKey.putIfAbsent(compositeKey, record.createdAt());
             if (existingClaim != null) {
+                if (existingClaim.plus(IDEMPOTENCY_STALE_TTL).isBefore(record.createdAt())) {
+                    idempotencyClaimsByCompositeKey.put(compositeKey, record.createdAt());
+                    idempotencyByCompositeKey.put(compositeKey, record);
+                    return Optional.empty();
+                }
                 return Optional.of(IdempotencyRecord.claimed(
                         record.scope(),
                         record.actorId(),
@@ -255,6 +265,13 @@ public class InMemoryOperationalStore implements OperationalStore,
 
     private String idempotencyKey(String scope, String actorId, String key) {
         return (scope == null ? "" : scope) + "::" + (actorId == null ? "" : actorId) + "::" + (key == null ? "" : key);
+    }
+
+    private boolean isStale(IdempotencyRecord record, Instant now) {
+        return record != null
+                && record.isInProgress()
+                && record.createdAt() != null
+                && record.createdAt().plus(IDEMPOTENCY_STALE_TTL).isBefore(now);
     }
 
 }

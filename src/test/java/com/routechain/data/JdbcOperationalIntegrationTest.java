@@ -32,6 +32,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -505,6 +507,81 @@ class JdbcOperationalIntegrationTest {
         }
     }
 
+    @Test
+    void failedIdempotencyRecordCanBeReclaimedBySameKey() {
+        seedIdempotency("user.create_order", "cust-reclaim-failed", "idem-failed",
+                "FAILED", "claim-old", "{}", Instant.now().minusSeconds(30), Instant.now().minusSeconds(29));
+        driverFleetRepository.saveDriverSession(new DriverSessionState(
+                "drv-reclaim-failed", "device-reclaim-failed", true, 10.775, 106.701, Instant.now(), ""));
+
+        var response = userOrderingService.createOrder(new UserOrderRequest(
+                "cust-reclaim-failed",
+                "pickup-r1",
+                "drop-r9",
+                10.776,
+                106.700,
+                10.780,
+                106.710,
+                "instant",
+                25,
+                "merchant-reclaim-failed"
+        ), "idem-failed");
+
+        assertNotNull(response.orderId());
+        assertEquals(1, count("orders"));
+        assertEquals("COMPLETED", idempotencyStatus("user.create_order", "cust-reclaim-failed", "idem-failed"));
+    }
+
+    @Test
+    void staleInProgressIdempotencyRecordCanBeReclaimedBySameKey() {
+        seedIdempotency("user.create_order", "cust-reclaim-stale", "idem-stale",
+                "IN_PROGRESS", "claim-stale", "{}", Instant.now().minus(Duration.ofSeconds(30)), null);
+        driverFleetRepository.saveDriverSession(new DriverSessionState(
+                "drv-reclaim-stale", "device-reclaim-stale", true, 10.775, 106.701, Instant.now(), ""));
+
+        var response = userOrderingService.createOrder(new UserOrderRequest(
+                "cust-reclaim-stale",
+                "pickup-r1",
+                "drop-r9",
+                10.776,
+                106.700,
+                10.780,
+                106.710,
+                "instant",
+                25,
+                "merchant-reclaim-stale"
+        ), "idem-stale");
+
+        assertNotNull(response.orderId());
+        assertEquals(1, count("orders"));
+        assertEquals("COMPLETED", idempotencyStatus("user.create_order", "cust-reclaim-stale", "idem-stale"));
+    }
+
+    @Test
+    void freshInProgressIdempotencyRecordTimesOutWithoutCreatingOrder() {
+        seedIdempotency("user.create_order", "cust-in-progress", "idem-in-progress",
+                "IN_PROGRESS", "claim-fresh", "{}", Instant.now(), null);
+
+        try {
+            userOrderingService.createOrder(new UserOrderRequest(
+                    "cust-in-progress",
+                    "pickup-r1",
+                    "drop-r9",
+                    10.776,
+                    106.700,
+                    10.780,
+                    106.710,
+                    "instant",
+                    25,
+                    "merchant-in-progress"
+            ), "idem-in-progress");
+        } catch (IllegalStateException expected) {
+            assertEquals(0, count("orders"));
+            return;
+        }
+        throw new AssertionError("Expected in-progress idempotency request to time out");
+    }
+
     private int count(String tableName) {
         return count(tableName, null, Map.of());
     }
@@ -513,5 +590,44 @@ class JdbcOperationalIntegrationTest {
         String sql = "SELECT COUNT(*) FROM " + tableName + (whereClause == null ? "" : " WHERE " + whereClause);
         Integer value = jdbc.queryForObject(sql, params, Integer.class);
         return value == null ? 0 : value;
+    }
+
+    private void seedIdempotency(String scope,
+                                 String actorId,
+                                 String key,
+                                 String status,
+                                 String claimToken,
+                                 String responseJson,
+                                 Instant createdAt,
+                                 Instant completedAt) {
+        jdbc.update("""
+                INSERT INTO idempotency_records (
+                    id, scope, actor_id, idempotency_key, status, claim_token, response_json, created_at, completed_at
+                ) VALUES (
+                    :id, :scope, :actorId, :key, :status, :claimToken, CAST(:responseJson AS jsonb), :createdAt, :completedAt
+                )
+                """,
+                new org.springframework.jdbc.core.namedparam.MapSqlParameterSource()
+                        .addValue("id", java.util.UUID.randomUUID())
+                        .addValue("scope", scope)
+                        .addValue("actorId", actorId)
+                        .addValue("key", key)
+                        .addValue("status", status)
+                        .addValue("claimToken", claimToken)
+                        .addValue("responseJson", responseJson)
+                        .addValue("createdAt", Timestamp.from(createdAt))
+                        .addValue("completedAt", completedAt == null ? null : Timestamp.from(completedAt)));
+    }
+
+    private String idempotencyStatus(String scope, String actorId, String key) {
+        return jdbc.queryForObject("""
+                SELECT status
+                  FROM idempotency_records
+                 WHERE scope = :scope
+                   AND actor_id = :actorId
+                   AND idempotency_key = :key
+                """,
+                Map.of("scope", scope, "actorId", actorId, "key", key),
+                String.class);
     }
 }

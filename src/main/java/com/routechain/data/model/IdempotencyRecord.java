@@ -60,6 +60,10 @@ public record IdempotencyRecord(
         return status == Status.IN_PROGRESS;
     }
 
+    public boolean isFailed() {
+        return status == Status.FAILED;
+    }
+
     public enum Status {
         IN_PROGRESS,
         COMPLETED,
