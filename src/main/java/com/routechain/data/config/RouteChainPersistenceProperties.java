@@ -2,6 +2,8 @@ package com.routechain.data.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.time.Duration;
+
 @ConfigurationProperties(prefix = "routechain.persistence")
 public class RouteChainPersistenceProperties {
     private final Jdbc jdbc = new Jdbc();
@@ -98,6 +100,7 @@ public class RouteChainPersistenceProperties {
         private int database = 0;
         private String keyPrefix = "routechain";
         private long connectTimeoutMs = 2_000L;
+        private Duration driverPresenceTtl = Duration.ofMinutes(2);
 
         public boolean isEnabled() {
             return enabled;
@@ -153,6 +156,14 @@ public class RouteChainPersistenceProperties {
 
         public void setConnectTimeoutMs(long connectTimeoutMs) {
             this.connectTimeoutMs = connectTimeoutMs;
+        }
+
+        public Duration getDriverPresenceTtl() {
+            return driverPresenceTtl;
+        }
+
+        public void setDriverPresenceTtl(Duration driverPresenceTtl) {
+            this.driverPresenceTtl = driverPresenceTtl;
         }
     }
 }

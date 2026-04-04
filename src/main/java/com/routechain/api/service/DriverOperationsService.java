@@ -8,8 +8,10 @@ import com.routechain.backend.offer.DriverOfferStatus;
 import com.routechain.backend.offer.DriverSessionState;
 import com.routechain.backend.offer.OfferBrokerService;
 import com.routechain.backend.offer.OfferDecision;
+import com.routechain.data.config.RouteChainPersistenceProperties;
 import com.routechain.data.model.OrderStatusHistoryRecord;
 import com.routechain.data.port.DriverFleetRepository;
+import com.routechain.data.port.DriverPresenceStore;
 import com.routechain.data.port.OrderRepository;
 import com.routechain.data.service.IdempotencyService;
 import com.routechain.data.service.OperationalEventPublisher;
@@ -20,31 +22,37 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 
 @Service
 public class DriverOperationsService {
     private final DriverFleetRepository driverFleetRepository;
+    private final DriverPresenceStore driverPresenceStore;
     private final OrderRepository orderRepository;
     private final OfferBrokerService offerBrokerService;
     private final OpsArtifactService opsArtifactService;
     private final IdempotencyService idempotencyService;
     private final OperationalEventPublisher eventPublisher;
+    private final Duration driverPresenceTtl;
 
     public DriverOperationsService(DriverFleetRepository driverFleetRepository,
+                                   DriverPresenceStore driverPresenceStore,
                                    OrderRepository orderRepository,
                                    OfferBrokerService offerBrokerService,
                                    OpsArtifactService opsArtifactService,
                                    IdempotencyService idempotencyService,
-                                   OperationalEventPublisher eventPublisher) {
+                                   OperationalEventPublisher eventPublisher,
+                                   RouteChainPersistenceProperties persistenceProperties) {
         this.driverFleetRepository = driverFleetRepository;
+        this.driverPresenceStore = driverPresenceStore;
         this.orderRepository = orderRepository;
         this.offerBrokerService = offerBrokerService;
         this.opsArtifactService = opsArtifactService;
         this.idempotencyService = idempotencyService;
         this.eventPublisher = eventPublisher;
+        this.driverPresenceTtl = persistenceProperties.getRedis().getDriverPresenceTtl();
     }
 
     public DriverSessionState login(DriverLoginRequest request) {
@@ -58,6 +66,7 @@ public class DriverOperationsService {
                 ""
         );
         driverFleetRepository.saveDriverSession(state);
+        refreshPresence(state);
         eventPublisher.publish("driver.session_started.v1", "DRIVER", request.driverId(), new Events.DriverOnline(request.driverId()));
         return state;
     }
@@ -66,6 +75,7 @@ public class DriverOperationsService {
         return driverFleetRepository.findDriverSession(driverId).map(existing -> {
             DriverSessionState updated = existing.withHeartbeat();
             driverFleetRepository.saveDriverSession(updated);
+            refreshPresence(updated);
             return updated;
         });
     }
@@ -74,6 +84,7 @@ public class DriverOperationsService {
         return driverFleetRepository.findDriverSession(driverId).map(existing -> {
             DriverSessionState updated = existing.withAvailability(request.available());
             driverFleetRepository.saveDriverSession(updated);
+            refreshPresence(updated);
             return updated;
         });
     }
@@ -84,6 +95,7 @@ public class DriverOperationsService {
             DriverSessionState updated = existing.withLocation(request.lat(), request.lng());
             driverFleetRepository.saveDriverSession(updated);
             driverFleetRepository.recordDriverLocation(driverId, new GeoPoint(request.lat(), request.lng()), now);
+            refreshPresence(updated);
             eventPublisher.publish("driver.location_updated.v1", "DRIVER", driverId,
                     new Events.DriverLocationUpdated(driverId, new GeoPoint(request.lat(), request.lng()), request.speedKmh()));
             return updated;
@@ -160,6 +172,16 @@ public class DriverOperationsService {
                 status,
                 reason,
                 recordedAt
+        );
+    }
+
+    private void refreshPresence(DriverSessionState sessionState) {
+        driverPresenceStore.heartbeat(
+                sessionState.driverId(),
+                sessionState.lastLat(),
+                sessionState.lastLng(),
+                sessionState.available(),
+                driverPresenceTtl
         );
     }
 }

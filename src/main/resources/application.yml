@@ -35,3 +35,4 @@ routechain:
       database: 0
       key-prefix: routechain
       connect-timeout-ms: 2000
+      driver-presence-ttl: 2m

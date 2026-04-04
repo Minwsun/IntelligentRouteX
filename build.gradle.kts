@@ -60,6 +60,7 @@ dependencies {
     // Testing
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.testcontainers:testcontainers:1.20.4")
     testImplementation("org.testcontainers:junit-jupiter:1.20.4")
     testImplementation("org.testcontainers:postgresql:1.20.4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
