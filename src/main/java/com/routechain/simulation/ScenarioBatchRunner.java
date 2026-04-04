@@ -94,6 +94,18 @@ public class ScenarioBatchRunner {
             runStressTuneBatch();
             return;
         }
+        if (args.length > 0 && "certification".equalsIgnoreCase(args[0])) {
+            runConfiguredComparisonBatch("certification");
+            return;
+        }
+        if (args.length > 0 && "nightly".equalsIgnoreCase(args[0])) {
+            runConfiguredComparisonBatch("nightly");
+            return;
+        }
+        if (args.length > 0 && "smoke".equalsIgnoreCase(args[0])) {
+            runConfiguredComparisonBatch("smoke");
+            return;
+        }
 
         System.out.println("=================================================");
         System.out.println("   ROUTECHAIN AI - SCENARIO BATCH COMPARISON");
@@ -118,6 +130,57 @@ public class ScenarioBatchRunner {
             System.out.println("  Legacy : " + legacy.toSummary());
             System.out.println("  Omega  : " + omega.toSummary());
             System.out.println("  Compare: " + compare.toSummary());
+        }
+
+        System.out.println("=================================================");
+    }
+
+    private static void runConfiguredComparisonBatch(String laneName) {
+        BenchmarkCertificationScenarioMatrix.LaneDefinition lane =
+                BenchmarkCertificationConfigLoader.loadScenarioMatrix().lane(laneName);
+        List<ScenarioConfig> scenarios = SCENARIOS.stream()
+                .filter(scenario -> lane.scenarioBuckets().stream()
+                        .anyMatch(bucket -> BenchmarkCertificationSupport.matchesScenario(
+                                scenario.name(), bucket.scenarioMatchers())))
+                .toList();
+
+        System.out.println("=================================================");
+        System.out.println("   ROUTECHAIN AI - SCENARIO BATCH (" + laneName.toUpperCase() + ")");
+        System.out.println("=================================================");
+
+        for (ScenarioConfig scenario : scenarios) {
+            List<RunReport> legacyRuns = new ArrayList<>();
+            List<RunReport> omegaRuns = new ArrayList<>();
+            List<ReplayCompareResult> compares = new ArrayList<>();
+
+            System.out.println();
+            System.out.println("Scenario: " + scenario.name());
+            for (long seed : lane.seeds()) {
+                RunReport legacy = runScenario(
+                        scenario,
+                        SimulationEngine.DispatchMode.LEGACY,
+                        OmegaDispatchAgent.AblationMode.FULL,
+                        OmegaDispatchAgent.ExecutionProfile.MAINLINE_REALISTIC,
+                        seed);
+                RunReport omega = runScenario(
+                        scenario,
+                        SimulationEngine.DispatchMode.OMEGA,
+                        OmegaDispatchAgent.AblationMode.FULL,
+                        OmegaDispatchAgent.ExecutionProfile.MAINLINE_REALISTIC,
+                        seed);
+                ReplayCompareResult compare = ReplayCompareResult.compare(legacy, omega);
+                BenchmarkArtifactWriter.writeCompare(compare);
+
+                legacyRuns.add(legacy);
+                omegaRuns.add(omega);
+                compares.add(compare);
+
+                System.out.println("  Seed " + seed + ": " + compare.toSummary());
+            }
+
+            System.out.println("  Mean Legacy : " + formatAveragedReport(legacyRuns));
+            System.out.println("  Mean Omega  : " + formatAveragedReport(omegaRuns));
+            System.out.println("  Mean Delta  : " + formatAveragedCompare(compares));
         }
 
         System.out.println("=================================================");

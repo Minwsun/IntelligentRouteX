@@ -186,31 +186,165 @@ val routeAiRegressionSmoke by tasks.registering(Test::class) {
 
 val routeAiCertificationSmokeSummary by tasks.registering(JavaExec::class) {
     group = "verification"
-    description = "Summarizes and enforces the Beat Legacy smoke gate."
+    description = "Summarizes and enforces the absolute smoke route gate with Legacy as reference."
     mainClass.set("com.routechain.simulation.RouteAiCertificationRunner")
     classpath = sourceSets["main"].runtimeClasspath
     args("smoke")
 }
 
+val cleanBenchmarkArtifacts by tasks.registering(Delete::class) {
+    group = "verification"
+    description = "Removes benchmark artifacts so each lane certifies a clean run."
+    delete(layout.buildDirectory.dir("routechain-apex/benchmarks"))
+}
+
+val scenarioBatchCertification by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Runs the seeded certification scenario batch."
+    mainClass.set("com.routechain.simulation.ScenarioBatchRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("certification")
+}
+
+val scenarioBatchNightly by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Runs the deep nightly scenario batch."
+    mainClass.set("com.routechain.simulation.ScenarioBatchRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("nightly")
+}
+
+val hybridBenchmarkTrackA by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Runs the production-realism Track A hybrid benchmark."
+    mainClass.set("com.routechain.simulation.HybridBenchmarkRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("production")
+}
+
+val repoIntelligenceSmokeSummary by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Aggregates the smoke lane into one repo intelligence verdict."
+    mainClass.set("com.routechain.simulation.RepoIntelligenceCertificationRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("smoke")
+}
+
+val repoIntelligenceCertificationSummary by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Aggregates the certification lane into one repo intelligence verdict."
+    mainClass.set("com.routechain.simulation.RepoIntelligenceCertificationRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("certification")
+}
+
+val repoIntelligenceNightlySummary by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Aggregates the nightly lane into one repo intelligence verdict."
+    mainClass.set("com.routechain.simulation.RepoIntelligenceCertificationRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("nightly")
+}
+
 tasks.named("performanceBenchmarkSmoke") {
     mustRunAfter(routeAiRegressionSmoke)
+    mustRunAfter("microDispatchBenchmark")
+    mustRunAfter(cleanBenchmarkArtifacts)
 }
 
 tasks.named("counterfactualArenaSmoke") {
     mustRunAfter("performanceBenchmarkSmoke")
+    mustRunAfter(cleanBenchmarkArtifacts)
 }
 
 routeAiCertificationSmokeSummary.configure {
     mustRunAfter("counterfactualArenaSmoke")
+    mustRunAfter(cleanBenchmarkArtifacts)
+}
+
+tasks.named("microDispatchBenchmark") {
+    mustRunAfter(routeAiRegressionSmoke)
+    mustRunAfter(cleanBenchmarkArtifacts)
+}
+
+tasks.named("test") {
+    mustRunAfter(cleanBenchmarkArtifacts)
+}
+
+scenarioBatchCertification.configure {
+    mustRunAfter("repoIntelligenceSmoke")
+}
+
+hybridBenchmarkTrackA.configure {
+    mustRunAfter(scenarioBatchCertification)
+}
+
+repoIntelligenceSmokeSummary.configure {
+    mustRunAfter(routeAiCertificationSmokeSummary)
+}
+
+repoIntelligenceCertificationSummary.configure {
+    mustRunAfter(hybridBenchmarkTrackA)
+}
+
+scenarioBatchNightly.configure {
+    mustRunAfter("repoIntelligenceCertification")
+}
+
+tasks.named("researchBenchmark") {
+    mustRunAfter(scenarioBatchNightly)
+}
+
+tasks.named("omegaAblation") {
+    mustRunAfter("researchBenchmark")
+}
+
+repoIntelligenceNightlySummary.configure {
+    mustRunAfter("soakBenchmark")
 }
 
 tasks.register("routeAiCertificationSmoke") {
     group = "verification"
-    description = "Runs route regressions, smoke benchmarks, and the Beat Legacy certification gate."
+    description = "Runs route regressions, smoke benchmarks, and the absolute smoke certification gate."
     dependsOn(routeAiRegressionSmoke)
     dependsOn("performanceBenchmarkSmoke")
     dependsOn("counterfactualArenaSmoke")
     dependsOn(routeAiCertificationSmokeSummary)
+}
+
+tasks.register("repoIntelligenceSmoke") {
+    group = "verification"
+    description = "Runs the fast repo-wide intelligence smoke lane."
+    dependsOn(cleanBenchmarkArtifacts)
+    dependsOn("test")
+    dependsOn(routeAiRegressionSmoke)
+    dependsOn("microDispatchBenchmark")
+    dependsOn("performanceBenchmarkSmoke")
+    dependsOn("counterfactualArenaSmoke")
+    dependsOn(routeAiCertificationSmokeSummary)
+    dependsOn(repoIntelligenceSmokeSummary)
+}
+
+tasks.register("repoIntelligenceCertification") {
+    group = "verification"
+    description = "Runs the full repo-wide intelligence certification lane."
+    dependsOn(cleanBenchmarkArtifacts)
+    dependsOn("repoIntelligenceSmoke")
+    dependsOn(scenarioBatchCertification)
+    dependsOn(hybridBenchmarkTrackA)
+    dependsOn(repoIntelligenceCertificationSummary)
+}
+
+tasks.register("repoIntelligenceNightly") {
+    group = "verification"
+    description = "Runs the deep nightly repo-wide intelligence certification lane."
+    dependsOn(cleanBenchmarkArtifacts)
+    dependsOn("repoIntelligenceCertification")
+    dependsOn(scenarioBatchNightly)
+    dependsOn("researchBenchmark")
+    dependsOn("omegaAblation")
+    dependsOn("soakBenchmark")
+    dependsOn(repoIntelligenceNightlySummary)
 }
 
 tasks.register<JavaExec>("soakBenchmark") {
@@ -218,6 +352,10 @@ tasks.register<JavaExec>("soakBenchmark") {
     mainClass.set("com.routechain.simulation.PerformanceBenchmarkRunner")
     classpath = sourceSets["main"].runtimeClasspath
     args("soak")
+}
+
+tasks.named("soakBenchmark") {
+    mustRunAfter("omegaAblation")
 }
 
 tasks.register<JavaExec>("controlRoomConsole") {

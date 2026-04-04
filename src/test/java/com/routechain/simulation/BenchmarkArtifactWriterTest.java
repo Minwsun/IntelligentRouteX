@@ -226,6 +226,70 @@ class BenchmarkArtifactWriterTest {
     }
 
     @Test
+    void shouldPersistRepoIntelligenceCertificationArtifacts() throws IOException {
+        Path root = Path.of("build", "routechain-apex", "benchmarks");
+        deleteRecursively(root);
+
+        RepoIntelligenceCertificationSummary summary = new RepoIntelligenceCertificationSummary(
+                BenchmarkSchema.VERSION,
+                "repo-intelligence-smoke",
+                Instant.parse("2026-04-04T00:00:00Z"),
+                "abc123",
+                "21.0.2",
+                "local-production-small-50",
+                List.of(42L),
+                List.of("CLEAR"),
+                new CertificationGateResult("Correctness", true, List.of()),
+                new CertificationGateResult("Latency", true, List.of()),
+                new CertificationGateResult("Route Quality", true, List.of()),
+                new CertificationGateResult("Continuity", true, List.of()),
+                new CertificationGateResult("Stress/Safety", true, List.of()),
+                new CertificationGateResult("Auxiliary", true, List.of()),
+                new LegacyReferenceResult(false, 0, 1.2, 0.4, -2.0, List.of("legacy reference healthy")),
+                List.of(new ScenarioGroupCertificationResult(
+                        "CLEAR",
+                        1,
+                        List.of(42L),
+                        8.0,
+                        12.0,
+                        20.0,
+                        88.0,
+                        60.0,
+                        0.0,
+                        99.0,
+                        32.0,
+                        1.4,
+                        98.0,
+                        0.76,
+                        0.8,
+                        0.14,
+                        0.92,
+                        100.0,
+                        20.0,
+                        0.0,
+                        0.0,
+                        12.0,
+                        1.5,
+                        true,
+                        true,
+                        true,
+                        List.of()
+                )),
+                true,
+                "PASS",
+                List.of("smoke lane green")
+        );
+
+        BenchmarkArtifactWriter.writeRepoIntelligenceCertificationSummary(summary);
+
+        assertTrue(Files.exists(root.resolve("certification").resolve("repo-intelligence-smoke.json")));
+        assertTrue(Files.exists(root.resolve("certification").resolve("repo-intelligence-smoke.md")));
+        String csv = Files.readString(root.resolve("repo_intelligence_certification.csv"));
+        assertTrue(csv.contains("repo-intelligence-smoke"));
+        assertTrue(csv.contains("legacyUnderperforming"));
+    }
+
+    @Test
     void shouldPersistControlRoomArtifacts() throws IOException {
         Path root = Path.of("build", "routechain-apex", "benchmarks");
         deleteRecursively(root);

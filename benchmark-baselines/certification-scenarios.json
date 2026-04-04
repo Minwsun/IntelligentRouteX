@@ -1,0 +1,113 @@
+{
+  "schemaVersion": "v1",
+  "lanes": {
+    "smoke": {
+      "laneName": "smoke",
+      "seeds": [42],
+      "scenarioBuckets": [
+        {
+          "scenarioGroup": "CLEAR",
+          "scenarioMatchers": [
+            "normal",
+            "instant-normal",
+            "counterfactual-normal"
+          ]
+        }
+      ]
+    },
+    "certification": {
+      "laneName": "certification",
+      "seeds": [42, 77, 123],
+      "scenarioBuckets": [
+        {
+          "scenarioGroup": "CLEAR",
+          "scenarioMatchers": [
+            "normal",
+            "instant-normal"
+          ]
+        },
+        {
+          "scenarioGroup": "LIGHT_RAIN",
+          "scenarioMatchers": [
+            "instant-rain_onset"
+          ]
+        },
+        {
+          "scenarioGroup": "RUSH_HOUR",
+          "scenarioMatchers": [
+            "rush_hour",
+            "instant-rush_hour"
+          ]
+        },
+        {
+          "scenarioGroup": "DEMAND_SPIKE",
+          "scenarioMatchers": [
+            "demand_spike",
+            "instant-demand_spike"
+          ]
+        },
+        {
+          "scenarioGroup": "HEAVY_RAIN",
+          "scenarioMatchers": [
+            "heavy_rain"
+          ]
+        },
+        {
+          "scenarioGroup": "SHORTAGE",
+          "scenarioMatchers": [
+            "shortage",
+            "post_drop_shortage"
+          ]
+        }
+      ]
+    },
+    "nightly": {
+      "laneName": "nightly",
+      "seeds": [42, 77, 123, 211, 307, 509, 701, 809, 907, 1009],
+      "scenarioBuckets": [
+        {
+          "scenarioGroup": "CLEAR",
+          "scenarioMatchers": [
+            "normal",
+            "instant-normal"
+          ]
+        },
+        {
+          "scenarioGroup": "LIGHT_RAIN",
+          "scenarioMatchers": [
+            "instant-rain_onset"
+          ]
+        },
+        {
+          "scenarioGroup": "RUSH_HOUR",
+          "scenarioMatchers": [
+            "rush_hour",
+            "instant-rush_hour"
+          ]
+        },
+        {
+          "scenarioGroup": "DEMAND_SPIKE",
+          "scenarioMatchers": [
+            "demand_spike",
+            "instant-demand_spike",
+            "merchant_cluster"
+          ]
+        },
+        {
+          "scenarioGroup": "HEAVY_RAIN",
+          "scenarioMatchers": [
+            "heavy_rain",
+            "storm"
+          ]
+        },
+        {
+          "scenarioGroup": "SHORTAGE",
+          "scenarioMatchers": [
+            "shortage",
+            "post_drop_shortage"
+          ]
+        }
+      ]
+    }
+  }
+}

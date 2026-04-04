@@ -44,6 +44,7 @@ public final class BenchmarkArtifactWriter {
     private static final Path STAGE_LATENCY_CSV = ROOT.resolve("dispatch_stage_breakdown.csv");
     private static final Path ACCEPTANCE_CSV = ROOT.resolve("scenario_acceptance.csv");
     private static final Path CERTIFICATION_CSV = ROOT.resolve("route_ai_certification.csv");
+    private static final Path REPO_CERTIFICATION_CSV = ROOT.resolve("repo_intelligence_certification.csv");
     private static final Path CITY_TWIN_CSV = CONTROL_ROOM_DIR.resolve("city_twin_cells.csv");
     private static final Path FUTURE_CELL_VALUE_CSV = CONTROL_ROOM_DIR.resolve("future_cell_values.csv");
     private static final Path DRIVER_FUTURE_VALUE_CSV = CONTROL_ROOM_DIR.resolve("driver_future_values.csv");
@@ -519,6 +520,60 @@ public final class BenchmarkArtifactWriter {
         }
     }
 
+    public static void writeRepoIntelligenceCertificationSummary(RepoIntelligenceCertificationSummary summary) {
+        if (summary == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(CERTIFICATION_DIR);
+            Path jsonPath = CERTIFICATION_DIR.resolve(safe(summary.laneName()) + ".json");
+            Path markdownPath = CERTIFICATION_DIR.resolve(safe(summary.laneName()) + ".md");
+            Files.writeString(
+                    jsonPath,
+                    GSON.toJson(summary),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            Files.writeString(
+                    markdownPath,
+                    renderRepoIntelligenceCertificationMarkdown(summary),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            boolean legacyUnderperforming = summary.legacyReference() != null
+                    && (summary.legacyReference().latestOverallGainPercent() < 0.0
+                    || summary.legacyReference().latestCompletionDelta() < 0.0
+                    || summary.legacyReference().latestDeadheadDelta() > 0.0);
+            appendCsv(
+                    REPO_CERTIFICATION_CSV,
+                    "laneName,generatedAt,gitRevision,javaVersion,environmentProfile,overallVerdict,overallPass,correctnessPass,latencyPass,routeQualityPass,continuityPass,legacyUnderperforming,consecutiveUnderperformCount,legacyWarning,stressSafetyPass,auxiliaryPass",
+                    String.format(
+                            "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,%s,%s,%s",
+                            safe(summary.laneName()),
+                            safe(String.valueOf(summary.generatedAt())),
+                            safe(summary.gitRevision()),
+                            safe(summary.javaVersion()),
+                            safe(summary.environmentProfile()),
+                            safe(summary.overallVerdict()),
+                            Boolean.toString(summary.overallPass()),
+                            Boolean.toString(summary.correctnessGate() != null && summary.correctnessGate().pass()),
+                            Boolean.toString(summary.latencyGate() != null && summary.latencyGate().pass()),
+                            Boolean.toString(summary.routeQualityGate() != null && summary.routeQualityGate().pass()),
+                            Boolean.toString(summary.continuityGate() != null && summary.continuityGate().pass()),
+                            Boolean.toString(legacyUnderperforming),
+                            summary.legacyReference() == null ? 0 : summary.legacyReference().consecutiveUnderperformCount(),
+                            Boolean.toString(summary.legacyReference() != null && summary.legacyReference().warning()),
+                            Boolean.toString(summary.stressSafetyGate() != null && summary.stressSafetyGate().pass()),
+                            Boolean.toString(summary.auxiliaryGate() != null && summary.auxiliaryGate().pass())
+                    )
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to write repo intelligence certification summary", e);
+        }
+    }
+
     public static void writeControlRoomFrame(ControlRoomFrame frame) {
         if (frame == null) {
             return;
@@ -874,6 +929,79 @@ public final class BenchmarkArtifactWriter {
             }
         }
         return builder.toString();
+    }
+
+    private static String renderRepoIntelligenceCertificationMarkdown(RepoIntelligenceCertificationSummary summary) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# Repo Intelligence Certification").append(System.lineSeparator()).append(System.lineSeparator());
+        builder.append("- Lane: ").append(summary.laneName()).append(System.lineSeparator());
+        builder.append("- Verdict: ").append(summary.overallVerdict()).append(System.lineSeparator());
+        builder.append("- Generated: ").append(summary.generatedAt()).append(System.lineSeparator());
+        builder.append("- Git SHA: ").append(summary.gitRevision()).append(System.lineSeparator());
+        builder.append("- Java: ").append(summary.javaVersion()).append(System.lineSeparator());
+        builder.append("- Environment: ").append(summary.environmentProfile()).append(System.lineSeparator());
+        builder.append("- Seeds: ").append(joinList(summary.seedSet())).append(System.lineSeparator());
+        builder.append("- Scenario groups: ").append(joinList(summary.scenarioSet())).append(System.lineSeparator());
+        builder.append(System.lineSeparator()).append("## Gates").append(System.lineSeparator());
+        renderGate(builder, summary.correctnessGate());
+        renderGate(builder, summary.latencyGate());
+        renderGate(builder, summary.routeQualityGate());
+        renderGate(builder, summary.continuityGate());
+        renderGate(builder, summary.stressSafetyGate());
+        renderGate(builder, summary.auxiliaryGate());
+        if (summary.legacyReference() != null) {
+            builder.append(System.lineSeparator()).append("## Legacy Reference").append(System.lineSeparator());
+            builder.append("- Warning: ").append(summary.legacyReference().warning()).append(System.lineSeparator());
+            builder.append("- Consecutive underperform count: ")
+                    .append(summary.legacyReference().consecutiveUnderperformCount())
+                    .append(System.lineSeparator());
+            builder.append("- Gain/completion/deadhead: ")
+                    .append(String.format("%.2f / %+.2f / %+.2f",
+                            summary.legacyReference().latestOverallGainPercent(),
+                            summary.legacyReference().latestCompletionDelta(),
+                            summary.legacyReference().latestDeadheadDelta()))
+                    .append(System.lineSeparator());
+            for (String note : summary.legacyReference().notes()) {
+                builder.append("- ").append(note).append(System.lineSeparator());
+            }
+        }
+        builder.append(System.lineSeparator()).append("## Scenario Groups").append(System.lineSeparator());
+        for (ScenarioGroupCertificationResult group : summary.scenarioGroups()) {
+            builder.append("- ").append(group.scenarioGroup())
+                    .append(": samples=").append(group.sampleCount())
+                    .append(" seeds=").append(joinList(group.observedSeeds()))
+                    .append(" completion=").append(String.format("%.1f%%", group.completionRate()))
+                    .append(" onTime=").append(String.format("%.1f%%", group.onTimeRate()))
+                    .append(" deadhead=").append(String.format("%.1f%%", group.deadheadDistanceRatio()))
+                    .append(" postDrop=").append(String.format("%.1f%%", group.postDropOrderHitRate()))
+                    .append(" route=").append(group.routeQualityPass())
+                    .append(" continuity=").append(group.continuityPass())
+                    .append(" stress=").append(group.stressSafetyPass())
+                    .append(System.lineSeparator());
+            for (String note : group.notes()) {
+                builder.append("  - ").append(note).append(System.lineSeparator());
+            }
+        }
+        if (!summary.notes().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
+            for (String note : summary.notes()) {
+                builder.append("- ").append(note).append(System.lineSeparator());
+            }
+        }
+        return builder.toString();
+    }
+
+    private static void renderGate(StringBuilder builder, CertificationGateResult gate) {
+        if (gate == null) {
+            return;
+        }
+        builder.append("- ").append(gate.gateName())
+                .append(": ")
+                .append(gate.pass() ? "PASS" : "FAIL")
+                .append(System.lineSeparator());
+        for (String note : gate.notes()) {
+            builder.append("  - ").append(note).append(System.lineSeparator());
+        }
     }
 
     private static String renderControlRoomMarkdown(ControlRoomFrame frame) {
