@@ -1,81 +1,83 @@
-# RouteChain X - Core Status Summary (2026-04-03)
+# RouteChain X - Full Handoff Summary (2026-04-04)
 
-## 1. Muc tieu dang khoa
+## 0. Muc dich cua file nay
 
-Trang thai hien tai cua repo da chuyen tu `dispatch simulator + JavaFX demo` sang huong:
+File nay la handoff tong hop day du de dua sang session khac lam tiep ma khong mat ngu canh.
 
-- `core` la loi AI routing/backend
-- `api` la cua vao cho mobile/app/ops
-- `data` la tang persistence + event + modelops adapter
-- `ops demo` chi con la consumer shell, khong duoc giu business logic
+Muc tieu:
 
-Muc tieu uu tien cua vong hien tai:
+- tom tat repo dang o trang thai nao
+- ghi ro da lam duoc gi toi ngay `2026-04-04`
+- ghi ro da verify gi
+- ghi ro commit nao da push
+- ghi ro phan nao con thieu
+- ghi ro thu tu nen lam tiep de khong di lac huong
 
-1. Hoan thien core production-first
-2. Khoa DB/API/schema/event contracts de sau nay chi can mo rong, khong lam lai
-3. Giu huong AI-first cho dispatch, khong quay lai nearest-driver / spam broadcast
+Neu session sau can mot diem bat dau nhanh, doc:
 
-North star van giu:
+1. `Section 2` - He thong hien dang co gi
+2. `Section 3` - Nhung gi da lam trong session nay
+3. `Section 4` - Da verify gi
+4. `Section 6` - Viec can lam tiep
+
+## 1. North Star va huong di dang khoa
+
+Repo da chuyen ro tu:
+
+- `dispatch simulator + JavaFX demo`
+
+sang:
+
+- `core` = loi AI routing / dispatch / optimization
+- `api` = cua vao cho mobile / app / ops
+- `data` = persistence + idempotency + outbox + adapters
+- `ops demo` = consumer shell / control-room artifact viewer, khong giu business logic
+
+North star KPI van giu:
 
 - `deadheadPerCompletedOrderKm`
 - `postDropOrderHitRate`
 - `completion`
 - `offersSentPerAcceptedOrder`
 
-## 2. He thong da lam duoc den dau
+Nguyen tac van giu:
 
-### 2.1 Loi dispatch/AI da co hinh dang cua mot backend that
+- production-first
+- khoa schema / API / event contracts som
+- giu huong AI-first dispatch
+- khong quay lai nearest-driver / broadcast spam
 
-Repo da co cac lane loi sau:
+## 2. Trang thai he thong hien tai
+
+### 2.1 Core dispatch / algorithm
+
+Repo hien co cac lane dispatch/AI chinh:
 
 - `OmegaDispatchAgent`
-  - execution / continuation / coverage / route-prior scoring
 - `AssignmentSolver`
-  - network-level selection, khong chi nearest-driver
 - `MarketplaceEdge`
-  - candidate edge de online matching va explainability
 - `DriverFutureValue`
-  - gia tri tuong lai sau khi driver hoan tat route
-- `Graph shadow`
-  - affinity / future cell / graph explanation / control-room artifacts
-- `Dynamic Offer Broker`
-  - screened offer fanout
-  - first-accept-wins
-  - khong broadcast spam hang loat
+- graph shadow lane:
+  - `GraphShadowProjector`
+  - `GraphAffinityScorer`
+  - `GraphExplanationTrace`
+  - `FutureCellValue`
+- benchmark / replay / control-room:
+  - `CounterfactualArenaRunner`
+  - `HybridBenchmarkRunner`
+  - `PerformanceBenchmarkRunner`
+  - `BenchmarkArtifactWriter`
+  - `ControlRoomFrameBuilder`
 
-Dieu nay co nghia la he thong da khong con la mot app demo route don gian. No da co:
+Graph lane hien dang:
 
-- lane planning
-- lane dispatch
-- lane offer execution
-- lane replay/control-room
-- lane API de noi ra app that
+- song trong `shadow + bounded online influence`
+- co artifact explainability / replay
+- chua dua `Neo4j GDS` vao hot path assignment
 
-### 2.2 Graph + AI lane da vao code
+### 2.2 Offer execution lane
 
-Da co:
-
-- `GraphShadowProjector`
-- `GraphAffinityScorer`
-- `GraphExplanationTrace`
-- `FutureCellValue`
-- `graphAffinityScore` duoc dua vao `DispatchPlan`
-- H3 that trong city twin artifacts
-- control-room artifacts:
-  - `future_cell_values.csv`
-  - `graph_affinities.csv`
-  - `graph_explanations.csv`
-  - `marketplace_edges.csv`
-
-Trang thai hien tai:
-
-- graph lane da song trong `shadow + bounded online influence`
-- chua dua `Neo4j GDS` vao hot path
-- day la huong dung cho production-small: giai thich duoc, replay duoc, nhung chua de graph database cham assignment truc tiep
-
-### 2.3 Dynamic Offer Broker da vao execution path
-
-Da co cac contract va service:
+Dynamic Offer Broker da co:
 
 - `OfferBrokerService`
 - `DriverOfferBatch`
@@ -85,26 +87,24 @@ Da co cac contract va service:
 - `OfferReservation`
 - `DriverSessionState`
 
-Hanh vi da co:
+Hanh vi hien co:
 
-- `instant`: fanout 1-2
-- cap fanout toi da: `3`
-- accept dau tien hop le se thang
-- sibling offers bi dong ngay
+- `instant` fanout 1-2
+- tran fanout = `3`
+- first-accept-wins
+- sibling offers bi dong ngay khi co accept hop le
 - duplicate accept khong tao double assignment
-- co event publishing cho:
+- event publishing:
   - `offer.created.v1`
   - `offer.resolved.v1`
 
-Day la buoc rat quan trong vi no thay direct fallback/spam bang execution flow gan voi app that.
+### 2.3 API backend
 
-### 2.4 API backend da boot doc lap
-
-Da co Spring Boot entrypoint:
+Spring Boot API entrypoint:
 
 - `com.routechain.api.RouteChainApiApplication`
 
-API hien tai da mo cac nhom endpoint sau:
+Endpoint hien co:
 
 #### User API
 
@@ -139,19 +139,17 @@ API hien tai da mo cac nhom endpoint sau:
 
 #### Realtime
 
-- WebSocket user / driver / ops streams da co qua `RealtimeStreamService`
+- WebSocket streams da co qua `RealtimeStreamService`
+- co user / driver / ops handlers
 
-Swagger da boot duoc tai:
+Runtime endpoints da tung verify:
 
 - `/swagger-ui.html`
-
-Health da boot duoc tai:
-
 - `/actuator/health`
 
-### 2.5 Persistence boundary da duoc production-hoa mot buoc lon
+### 2.4 Persistence boundary
 
-Da co persistence ports ro rang:
+Ports da co:
 
 - `OrderRepository`
 - `QuoteRepository`
@@ -160,273 +158,503 @@ Da co persistence ports ro rang:
 - `IdempotencyRepository`
 - `OutboxRepository`
 - `OfferStateStore`
+- them placeholder/runtime ports cho Redis phase:
+  - `DriverPresenceStore`
+  - `OfferRuntimeStore`
 
-Da co in-memory adapters de local mode van chay:
+Adapters da co:
 
-- `InMemoryOperationalStore`
-- `InMemoryOfferStateStore`
+- in-memory:
+  - `InMemoryOperationalStore`
+  - `InMemoryOfferStateStore`
+  - `InMemoryDriverPresenceStore`
+  - `InMemoryOfferRuntimeStore`
+- JDBC:
+  - `JdbcOperationalPersistenceAdapter`
+  - `JdbcOfferStateStore`
 
-Da co JDBC adapters de chuyen sang Postgres/PostGIS:
-
-- `JdbcOperationalPersistenceAdapter`
-- `JdbcOfferStateStore`
-
-Da co persistence config co the bat/tat:
+Config da co:
 
 - `RouteChainPersistenceProperties`
 - `OperationalPersistenceConfiguration`
+- `NoOpTransactionManager` cho local mode
 
-Trang thai rat quan trong:
+Trang thai:
 
-- default local mode van chay bang in-memory
-- JDBC mode da co bean wiring + Flyway path
-- service layer da bat dau goi qua ports thay vi bam chat vao store cu
+- local mode mac dinh van chay in-memory
+- JDBC mode da co bean wiring + Flyway
+- service layer da di qua ports thay vi bam chat vao store cu
 
-### 2.6 Schema production-small da duoc khoa tu som
+### 2.5 Schema / migrations
 
-Da co migration moi:
+Da co migrations:
 
 - `V1__operational_schema.sql`
 - `V2__production_foundation.sql`
 - `V3__production_indexes.sql`
+- `V4__idempotency_claims.sql`
 
-Schema hien tai da co shape de di production-small:
+Schema shape hien tai da co:
 
-- identity/auth
-- merchant/geo
+- auth / identity
+- merchant / geo
 - driver fleet
-- ordering
-- dispatch/offers/reservation
+- quotes / orders
+- offers / reservations / decisions
 - tracking
-- finance/wallet/ledger
-- ops/model/outbox/idempotency
+- wallet / ledger
+- outbox
+- idempotency
 
-Nhung diem dung:
+Luu y:
 
-- dung `UUID` noi bo
-- co `public_id` cho API/runtime string IDs
+- noi bo dung `UUID`
+- API/runtime dung `public_id`
 - co `version`, `created_at`, `updated_at`
-- co H3 + PostGIS geometry song song
+- co `PostGIS`
 - co `outbox_events`
 - co `idempotency_records`
-- co `wallet_accounts`, `wallet_transactions`, `ledger_entries`
 
-Day la phan rat co gia tri vi no giam nguy co phai dap schema tai chinh va operational sau nay.
+## 3. Nhung gi da lam trong session nay
 
-### 2.7 Wallet / idempotency / outbox da vao runtime
+Session ngay `2026-04-03` den `2026-04-04` da lam xong nhung viec quan trong sau.
 
-Da co:
+### 3.1 Dua backend/API/data path vao repo va push len remote
 
-- `WalletQueryService`
-- `IdempotencyService`
-- `OperationalEventPublisher`
-- DTOs:
-  - `WalletBalanceView`
-  - `WalletTransactionView`
+Session nay da dua len repo mot batch backend/API/data rat lon, gom:
 
-Hien tai:
-
-- create order da co lane idempotency
-- cancel order da co lane idempotency
-- accept offer da co lane idempotency
-- outbox publisher da duoc dong bo vao backend services
-
-### 2.8 Benchmark / replay / control-room / production-small stack van duoc giu
-
-Nen tang benchmark tu sprint truoc van con:
-
-- `CounterfactualArenaRunner`
-- `HybridBenchmarkRunner`
-- `PerformanceBenchmarkRunner`
-- `BenchmarkArtifactWriter`
-- `ControlRoomFrameBuilder`
-
-Production-small stack shape da co trong repo:
-
-- Kafka
-- Flink
-- Redis
-- Postgres/PostGIS
-- MinIO + Iceberg
-- ClickHouse
-- MLflow
-- Neo4j
-- Keycloak
+- package `com.routechain.api`
+- package `com.routechain.backend.offer`
+- package `com.routechain.data`
+- package `com.routechain.graph`
+- config/resources cho Spring Boot + Flyway
+- test cho API / backend / data
 
 Noi ngan gon:
 
-- loi backend da tien gan production
-- benchmark/replay/modelops shape van giu de danh gia va mo rong tiep
+- repo khong con chi la simulation lane
+- backend mobile-facing da co hinh dang ro rang
 
-## 3. Nhung gi da verify duoc
+### 3.2 Transaction boundaries cho write path
 
-Da pass trong repo hien tai:
+Da them transaction management cho:
+
+- `createOrder`
+- `cancel`
+- `accept`
+- `updateTaskStatus`
+
+File lien quan:
+
+- `src/main/java/com/routechain/api/service/UserOrderingService.java`
+- `src/main/java/com/routechain/api/service/DriverOperationsService.java`
+- `src/main/java/com/routechain/data/config/OperationalPersistenceConfiguration.java`
+- `src/main/java/com/routechain/data/config/NoOpTransactionManager.java`
+
+Muc tieu da dat:
+
+- local mode van chay
+- JDBC mode co transaction manager that
+
+### 3.3 JDBC adapter da duoc production-hoa them
+
+Da sua JDBC adapters de:
+
+- ghi du ca `UUID` noi bo va `public_id`
+- khop voi schema migration hien tai
+- support order / driver session / locations / wallet / outbox / idempotency / offers
+
+File lien quan:
+
+- `src/main/java/com/routechain/data/jdbc/JdbcOperationalPersistenceAdapter.java`
+- `src/main/java/com/routechain/data/jdbc/JdbcOfferStateStore.java`
+
+### 3.4 Test infrastructure that voi Postgres/PostGIS + Flyway
+
+Da them:
+
+- `Testcontainers`
+- integration test that cho JDBC/Flyway
+- contract tests / controller tests cho API layer
+
+Files test chinh:
+
+- `src/test/java/com/routechain/data/JdbcOperationalIntegrationTest.java`
+- `src/test/java/com/routechain/api/controller/UserOrderControllerContractTest.java`
+- `src/test/java/com/routechain/api/controller/DriverControllerContractTest.java`
+- `src/test/java/com/routechain/api/controller/UserOrderControllerIdempotencyTest.java`
+- `src/test/java/com/routechain/api/service/UserOrderingServiceTest.java`
+- `src/test/java/com/routechain/backend/offer/OfferBrokerServiceTest.java`
+
+### 3.5 Atomic idempotency da duoc harden hoa
+
+Day la phan rat quan trong cua session nay.
+
+Ban dau:
+
+- `create order`
+- `cancel`
+- `accept`
+
+chi dung kieu:
+
+- `replay(...)`
+- business action
+- `remember(...)`
+
+Kieu nay khong race-safe neu request duplicate den dong thoi.
+
+Da sua lai thanh pattern moi:
+
+- `claim`
+- neu da `COMPLETED` thi replay
+- neu claim thanh cong thi moi chay business action
+- xong thi `complete`
+
+File lien quan:
+
+- `src/main/java/com/routechain/data/model/IdempotencyRecord.java`
+- `src/main/java/com/routechain/data/port/IdempotencyRepository.java`
+- `src/main/java/com/routechain/data/service/IdempotencyService.java`
+- `src/main/java/com/routechain/api/store/InMemoryOperationalStore.java`
+- `src/main/java/com/routechain/data/jdbc/JdbcOperationalPersistenceAdapter.java`
+- `src/main/resources/db/migration/V4__idempotency_claims.sql`
+
+### 3.6 Write paths da dung atomic idempotency flow
+
+Hien tai 3 flow sau da dung atomic idempotency:
+
+1. `user.create_order`
+2. `user.cancel_order`
+3. `driver.accept_offer`
+
+File lien quan:
+
+- `src/main/java/com/routechain/api/service/UserOrderingService.java`
+- `src/main/java/com/routechain/api/service/DriverOperationsService.java`
+
+### 3.7 Policy hien tai cho idempotency
+
+`IdempotencyRecord` hien co cac state:
+
+- `IN_PROGRESS`
+- `COMPLETED`
+- `FAILED`
+
+Policy hien tai:
+
+- `COMPLETED`
+  - replay payload cu
+- `IN_PROGRESS` con moi
+  - request moi se doi trong mot cua so ngan
+  - neu khong xong thi nem `IllegalStateException`
+- `FAILED`
+  - co the reclaim lai key
+- `IN_PROGRESS` stale
+  - co the reclaim lai key
+
+Gia tri hardcoded hien tai:
+
+- stale TTL = `5s`
+- wait window trong `IdempotencyService` = `2s`
+- poll interval = `25ms`
+
+Noi dat:
+
+- `IdempotencyService.DEFAULT_WAIT`
+- `IdempotencyService.POLL_INTERVAL_MS`
+- `InMemoryOperationalStore.IDEMPOTENCY_STALE_TTL`
+- `JdbcOperationalPersistenceAdapter.IDEMPOTENCY_STALE_TTL`
+
+Day la phan co the can config-hoa o session sau.
+
+### 3.8 Recovery semantics da duoc them test
+
+Da them test cho:
+
+- reclaim tu `FAILED`
+- reclaim tu stale `IN_PROGRESS`
+- chan `IN_PROGRESS` con moi
+
+Dieu nay rat quan trong vi bay gio idempotency khong chi cover happy path ma da co semantics recovery toi thieu.
+
+### 3.9 Redis phase moi chi o muc placeholder
+
+Da co placeholder contracts va in-memory implementations cho:
+
+- `DriverPresenceStore`
+- `OfferRuntimeStore`
+
+Nhung:
+
+- chua co Redis adapter that
+- chua co Redis connection config that
+- chua co wire runtime that cho presence / cooldown / offer TTL
+
+## 4. Da verify gi
+
+### 4.1 Command da pass trong session nay
+
+Da chay thanh cong trong cac buoc khac nhau:
 
 - `./gradlew.bat --no-daemon compileJava`
-- `./gradlew.bat --no-daemon test --tests com.routechain.api.RouteChainApiApplicationTest --tests com.routechain.api.service.UserOrderingServiceTest --tests com.routechain.backend.offer.OfferBrokerServiceTest`
+- `./gradlew.bat --no-daemon test`
+- `./gradlew.bat --no-daemon test --tests com.routechain.data.JdbcOperationalIntegrationTest`
+- `./gradlew.bat --no-daemon test --tests com.routechain.api.service.UserOrderingServiceTest --tests com.routechain.data.JdbcOperationalIntegrationTest`
+- `./gradlew.bat --no-daemon test --tests com.routechain.api.controller.UserOrderControllerContractTest --tests com.routechain.api.controller.DriverControllerContractTest --tests com.routechain.api.controller.UserOrderControllerIdempotencyTest --tests com.routechain.data.JdbcOperationalIntegrationTest`
 
-Da verify runtime:
+Trang thai sau cung cua repo local khi ket thuc session:
+
+- working tree clean
+- da push len `origin/main`
+
+### 4.2 Test coverage dang co
+
+Da cover:
+
+- create order idempotency
+- cancel order idempotency
+- accept offer idempotency
+- concurrent create order duplicate key
+- concurrent cancel duplicate key
+- repeated accept same key
+- concurrent accept race
+- wallet persistence/query path
+- task status lifecycle
+- API contract co ban cho validation / 404 / idempotency
+- stale/failed idempotency recovery
+
+### 4.3 Runtime da tung verify
+
+Trong cac buoc truoc do da verify:
 
 - API boot thanh cong
 - `GET /actuator/health = 200`
 - `GET /swagger-ui.html = 200`
 
-Trang thai benchmark/artifact gan nhat:
+## 5. Commit da push
 
-- `dispatchP95 ~= 519.75ms`
-- `dispatchP99 ~= 599.0ms`
-- `measurementValid = true`
-- `control room` van bao:
-  - `Business verdict: WEAK`
-  - `Balanced verdict: PASSING`
+Nhung commit quan trong vua push trong session nay:
 
-Dieu nay co nghia la:
+### `95f5ce6`
 
-- platform/backend lane dang dung
-- algorithm/business lane van chua thang KPI cuoi
+`Add backend API persistence and idempotency hardening`
 
-## 4. Phan loi da sach hon, nhung chua hoan tat 100%
+Noi dung:
 
-### 4.1 Nhung gi da tach duoc
+- dua backend API / data / graph / tests vao repo
+- transaction boundaries
+- JDBC/Flyway path
+- testcontainers / integration tests
+- atomic idempotency cho `create order`
+- API/controller tests
 
-- JavaFX khong con la trung tam he thong
-- API da boot doc lap
-- service layer tren duong nong da chuyen sang ports ro rang hon
-- persistence da co in-memory mode va JDBC mode
+### `13919e9`
 
-### 4.2 Nhung gi chua tach xong hoan toan
+`Commit remaining workspace changes`
 
-- repo van chua split thanh multi-module Gradle vat ly:
+Noi dung:
+
+- push not phan con lai trong working tree luc do
+- gom simulation/control-room/docs/module cleanup va cac thay doi lien quan khac
+
+### `6dc7c68`
+
+`Handle stale and failed idempotency recovery`
+
+Noi dung:
+
+- idempotency recovery semantics cho `FAILED` va stale `IN_PROGRESS`
+- them tests recovery JDBC
+
+Remote hien tai:
+
+- `origin/main`
+
+HEAD hien tai:
+
+- `6dc7c68`
+
+## 6. Nhung gi con thieu / can lam tiep
+
+### 6.1 Uu tien 1 - Redis runtime adapter that
+
+Day la buoc hop ly nhat de lam tiep.
+
+Nen lam theo thu tu:
+
+1. `DriverPresenceStore` that bang Redis
+2. `OfferRuntimeStore` that cho offer TTL
+3. cooldown / anti-spam
+4. soft reservation support neu can
+
+Muc tieu:
+
+- Redis la runtime acceleration / coordination
+- DB van la source of truth cho order / wallet / final reservation
+
+Files co kha nang can tao/sua:
+
+- `src/main/java/com/routechain/data/redis/...`
+- `src/main/java/com/routechain/data/config/OperationalPersistenceConfiguration.java`
+- `src/main/java/com/routechain/data/config/RouteChainPersistenceProperties.java`
+- `src/main/resources/application.yml`
+- `src/main/java/com/routechain/api/service/DriverOperationsService.java`
+- `src/main/java/com/routechain/backend/offer/OfferBrokerService.java`
+
+### 6.2 Uu tien 2 - Kafka outbox relay that
+
+Hien tai:
+
+- moi co append vao `outbox_events`
+- chua co worker relay ra Kafka
+
+Can lam:
+
+- background relay doc `PENDING`
+- publish ra Kafka
+- mark `SENT` / `FAILED`
+- retry / backoff
+- test restart-safe va khong double publish
+
+### 6.3 Uu tien 3 - Config-hoa idempotency recovery
+
+Hien tai:
+
+- stale TTL = hardcoded `5s`
+- wait = hardcoded `2s`
+
+Can lam:
+
+- dua vao config properties
+- can nhac them `expires_at` hoac `updated_at` cho `idempotency_records`
+- can nhac policy ro hon cho `FAILED`
+
+### 6.4 Uu tien 4 - Failure-path tests va repository contract tests
+
+Can lam them:
+
+- test action throw exception sau khi claim
+- verify rollback khong de partial write
+- contract test chung cho `IdempotencyRepository`
+  - in-memory
+  - JDBC
+
+### 6.5 Uu tien 5 - Auth / API production-ready contracts
+
+Can lam:
+
+- Keycloak / JWT role guards
+- error model on dinh
+- correlation IDs
+- OpenAPI cleanup
+- idempotency contract ro rang trong docs / schema
+- websocket auth
+
+### 6.6 Uu tien 6 - Offer broker hardening
+
+Can lam:
+
+- cooldown that bang Redis
+- anti-spam audit
+- KPI runtime:
+  - `offersSentPerAcceptedOrder`
+  - `offerConflictRate`
+  - `offerTimeoutRate`
+  - `fallbackDirectRate`
+- ket noi chat hon `MarketplaceEdge -> OfferBatchPlanner -> OfferBrokerService`
+
+### 6.7 Uu tien 7 - Architecture split vat ly
+
+Van con thieu:
+
+- tach multi-module Gradle that:
   - `routechain-core`
   - `routechain-api`
   - `routechain-data`
   - `routechain-ops-demo`
-- `OperationalStore` van ton tai nhu bridge legacy
-- `OfferBrokerService` van co default constructor local-first de support local mode
-- JavaFX code van con nam chung repo/runtime, du vai tro da bi day ra ngoai
+- dua JavaFX/demo ra khoi runtime backend
+- de `ops-demo` chi consume API/WebSocket
 
-Noi cach khac:
+## 7. Nhung KPI / risk chua dat
 
-- boundary logic da ro hon nhieu
-- boundary build/deployment van chua split tan goc
+Phan chua dat hien tai khong nam o cho "co backend hay chua", ma nam o:
 
-## 5. Nhung viec can lam tiep (uu tien thuc dung)
+- business KPI algorithm chua thang baseline cuoi
+- Redis/Kafka runtime that chua vao
+- auth production-ready chua co
+- module split vat ly chua xong
 
-### 5.1 Uu tien 1 - Hoan tat data/runtime cho production-small
-
-Can lam tiep:
-
-1. Noi `Redis` that cho:
-   - offer TTL
-   - soft reservation
-   - cooldown
-   - idempotency short-term
-   - driver presence
-2. Chay integration test that voi `Postgres + Flyway`
-3. Khoa transaction boundaries cho:
-   - create order
-   - accept offer
-   - task status update
-   - wallet transaction append
-4. Noi `Kafka outbox consumer/publisher` that thay vi chi outbox append trong local mode
-
-Neu 4 viec nay xong, backend se tu “dev-ready” len “production-small ready” ro rang hon rat nhieu.
-
-### 5.2 Uu tien 2 - Hoan tat mobile-ready API contracts
-
-Can lam tiep:
-
-1. JWT auth/role guards bang Keycloak
-2. OpenAPI cleanup:
-   - request validation
-   - error model
-   - correlation IDs
-3. WebSocket contract on dinh cho:
-   - user stream
-   - driver stream
-   - ops stream
-4. idempotency key contract ro rang trong docs/API
-
-### 5.3 Uu tien 3 - Day Dynamic Offer Broker thanh execution champion that
-
-Can lam tiep:
-
-1. Lien thong `MarketplaceEdge -> OfferBatchPlanner` that hon
-2. Them `cooldown` va `anti-spam` that trong Redis + DB audit
-3. Ghi them KPI:
-   - `offersSentPerAcceptedOrder`
-   - `offerConflictRate`
-   - `offerTimeoutRate`
-   - `fallbackDirectRate`
-4. Giam borrowed edge dominance
-
-### 5.4 Uu tien 4 - Day algorithm champion path
-
-Can lam tiep:
-
-1. Noi `jsprit` vao bundle construction that
-2. Day `OR-Tools` thanh challenger/champion matching lane thuc te hon
-3. Tiep tuc retune:
-   - local executable edge win rate
-   - completion
-   - deadhead per completed
-   - borrowed ratio
-4. Dung graph artifacts hien co de tune selection thay vi chi de demo
-
-### 5.5 Uu tien 5 - Chot architecture split vat ly
-
-Can lam tiep:
-
-1. Tach thanh multi-module Gradle that
-2. Cat import JavaFX khoi runtime phia backend
-3. De `ops-demo` chi goi API/WebSocket
-4. Khong cho demo doc truc tiep engine state nua
-
-## 6. Nhung KPI/van de chua dat
-
-Phan chua dat hien tai khong nam o “co backend hay khong”, ma nam o chat luong kinh doanh cua algorithm:
+KPI/business risk van con:
 
 - `Business verdict` van `WEAK`
 - `completion` chua dat muc mong muon
-- `noDriverFoundRate` van can giam them
-- `deadheadPerCompletedOrderKm` van can giam ro
+- `deadheadPerCompletedOrderKm` can giam them
+- `noDriverFoundRate` can giam them
 - `borrowed edge dominance` van la van de
-- performance benchmark chua dat target p95/p99 nghiem khac
 
-Noi thang:
+Noi ngan gon:
 
-- he thong da co khung backend va data de di tiep rat nhanh
-- nhung de goi la “AI core thang baseline” thi van can them mot vong toi uu algorithm that
+- backend/data lane da tien rat xa
+- algorithm/business lane van can them vong tuning that
 
-## 7. Kien nghi huong di tiep
+## 8. Thu tu nen lam tiep o session sau
 
-Thu tu nen lam tiep:
+Thu tu de xac suat thanh cong cao va it dap di lam lai:
 
-1. Redis + Postgres integration tests
-2. Keycloak + JWT role guards
-3. Offer broker hardening
-4. Marketplace edge -> solver -> offer flow that hon
-5. Retune algorithm theo `completion + deadhead + noDriverFound`
-6. Sau do moi split demo/JFX thanh module consumer rieng
+1. Redis `DriverPresenceStore` that
+2. Redis `OfferRuntimeStore` that cho offer TTL
+3. cooldown / anti-spam bang Redis
+4. Kafka outbox relay
+5. config-hoa stale TTL / wait cua idempotency
+6. failure-path / contract tests cho idempotency
+7. auth / OpenAPI / correlation IDs
+8. offer broker KPI hardening
+9. sau cung moi quay lai split module va algorithm deep tuning
 
-## 8. Chot ngan gon
+## 9. Neu session sau can bat dau ngay
 
-RouteChain hien tai da vuot qua muc “demo route”.
+Task de bat dau nhanh nhat va dung huong:
+
+### Task de nghi
+
+Implement Redis `DriverPresenceStore` that.
+
+### Cach vao viec
+
+1. Doc:
+   - `src/main/java/com/routechain/data/port/DriverPresenceStore.java`
+   - `src/main/java/com/routechain/data/memory/InMemoryDriverPresenceStore.java`
+   - `src/main/java/com/routechain/data/config/RouteChainPersistenceProperties.java`
+   - `src/main/java/com/routechain/data/config/OperationalPersistenceConfiguration.java`
+2. Tao Redis adapter moi trong:
+   - `src/main/java/com/routechain/data/redis/...`
+3. Wire bean khi:
+   - `routechain.persistence.redis.enabled=true`
+4. Sau do sua `DriverOperationsService` de login/heartbeat/location/availability cap nhat presence store
+5. Them test integration / smoke cho Redis mode
+
+## 10. Chot ngan gon
+
+RouteChain hien tai da vuot xa muc demo.
 
 No da co:
 
-- AI dispatch core
-- graph shadow/explanation lane
-- screened offer execution
-- Spring API
-- wallet/idempotency/outbox shape
-- Postgres/Flyway/JDBC path
-- benchmark/replay/control-room/modelops shape
+- AI dispatch / graph shadow / offer broker lane
+- Spring Boot API doc lap
+- persistence ports ro rang
+- JDBC/Flyway/Postgres path
+- idempotency claim/complete semantics
+- stale/failed recovery cho idempotency
+- API contract tests + JDBC integration tests
+- code da push len `origin/main`
 
-Phan con thieu de goi la production-small hoan chinh:
+Phan con thieu de di tiep theo huong production-small:
 
-- Redis/Kafka runtime adapters that
-- Postgres integration test that
-- auth that
-- multi-module split that
-- algorithm business KPI pass that
+- Redis adapters that
+- Kafka outbox relay that
+- auth / OpenAPI hardening
+- offer broker runtime KPI / cooldown
+- algorithm tuning business KPI
+
+Neu session sau muon tiep tuc dung huong, hay bat dau tu Redis `DriverPresenceStore`.
