@@ -311,13 +311,13 @@ class JdbcOperationalIntegrationTest {
         OfferDecision accepted = driverOperationsService.accept("drv-task", offerId, "idem-accept-task");
         assertEquals(DriverOfferStatus.ACCEPTED, accepted.status());
 
-        assertTrue(driverOperationsService.updateTaskStatus("task-" + created.orderId(),
+        assertTrue(driverOperationsService.updateTaskStatus("drv-task", "task-" + created.orderId(),
                 new DriverTaskStatusUpdate("pickup_en_route")).isPresent());
-        assertTrue(driverOperationsService.updateTaskStatus("task-" + created.orderId(),
+        assertTrue(driverOperationsService.updateTaskStatus("drv-task", "task-" + created.orderId(),
                 new DriverTaskStatusUpdate("picked_up")).isPresent());
-        assertTrue(driverOperationsService.updateTaskStatus("task-" + created.orderId(),
+        assertTrue(driverOperationsService.updateTaskStatus("drv-task", "task-" + created.orderId(),
                 new DriverTaskStatusUpdate("dropoff_en_route")).isPresent());
-        assertTrue(driverOperationsService.updateTaskStatus("task-" + created.orderId(),
+        assertTrue(driverOperationsService.updateTaskStatus("drv-task", "task-" + created.orderId(),
                 new DriverTaskStatusUpdate("delivered")).isPresent());
 
         assertEquals("DELIVERED", orderRepository.findOrder(created.orderId()).orElseThrow().getStatus().name());

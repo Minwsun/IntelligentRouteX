@@ -1,6 +1,7 @@
 package com.routechain.data.service;
 
 import com.google.gson.Gson;
+import com.routechain.api.http.CorrelationIdContext;
 import com.routechain.data.model.OutboxEventRecord;
 import com.routechain.data.port.OutboxRepository;
 import com.routechain.infra.EventBus;
@@ -27,16 +28,16 @@ public class OperationalEventPublisher {
         if (event == null) {
             return;
         }
-        outboxRepository.append(new OutboxEventRecord(
+        Instant createdAt = Instant.now();
+        outboxRepository.append(OutboxEventRecord.pending(
                 "outbox-" + UUID.randomUUID(),
                 topicKey,
                 aggregateType,
                 aggregateId,
                 event.getClass().getSimpleName(),
                 gson.toJson(event),
-                "PENDING",
-                Instant.now(),
-                null
+                createdAt,
+                CorrelationIdContext.currentId().orElse("")
         ));
         eventBus.publish(event);
     }

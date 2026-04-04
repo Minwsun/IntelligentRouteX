@@ -1,16 +1,19 @@
 package com.routechain.data.config;
 
+import com.routechain.config.RouteChainRuntimeProperties;
 import com.routechain.data.jdbc.JdbcOfferStateStore;
 import com.routechain.data.jdbc.JdbcOperationalPersistenceAdapter;
 import com.routechain.data.port.DriverFleetRepository;
 import com.routechain.data.port.DriverPresenceStore;
 import com.routechain.data.port.IdempotencyRepository;
+import com.routechain.data.port.OfferRuntimeStore;
 import com.routechain.data.port.OfferStateStore;
 import com.routechain.data.port.OrderRepository;
 import com.routechain.data.port.OutboxRepository;
 import com.routechain.data.port.QuoteRepository;
 import com.routechain.data.port.WalletRepository;
 import com.routechain.data.redis.RedisDriverPresenceStore;
+import com.routechain.data.redis.RedisOfferRuntimeStore;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.flywaydb.core.Flyway;
@@ -34,7 +37,7 @@ import java.time.Duration;
 
 @Configuration
 @EnableTransactionManagement
-@EnableConfigurationProperties(RouteChainPersistenceProperties.class)
+@EnableConfigurationProperties({RouteChainPersistenceProperties.class, RouteChainRuntimeProperties.class})
 public class OperationalPersistenceConfiguration {
 
     @Bean
@@ -82,8 +85,12 @@ public class OperationalPersistenceConfiguration {
 
     @Bean
     @ConditionalOnProperty(prefix = "routechain.persistence.jdbc", name = "enabled", havingValue = "true")
-    public JdbcOperationalPersistenceAdapter jdbcOperationalPersistenceAdapter(NamedParameterJdbcTemplate routeChainJdbcTemplate) {
-        return new JdbcOperationalPersistenceAdapter(routeChainJdbcTemplate);
+    public JdbcOperationalPersistenceAdapter jdbcOperationalPersistenceAdapter(NamedParameterJdbcTemplate routeChainJdbcTemplate,
+                                                                               RouteChainRuntimeProperties runtimeProperties) {
+        return new JdbcOperationalPersistenceAdapter(
+                routeChainJdbcTemplate,
+                runtimeProperties.getIdempotency().getStaleTtl()
+        );
     }
 
     @Bean
@@ -166,5 +173,12 @@ public class OperationalPersistenceConfiguration {
                 redis.getKeyPrefix(),
                 redis.getDriverPresenceTtl()
         );
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "routechain.persistence.redis", name = "enabled", havingValue = "true")
+    public OfferRuntimeStore offerRuntimeStore(StringRedisTemplate stringRedisTemplate,
+                                               RouteChainPersistenceProperties properties) {
+        return new RedisOfferRuntimeStore(stringRedisTemplate, properties.getRedis().getKeyPrefix());
     }
 }

@@ -20,7 +20,7 @@ public record DriverOfferBatch(
         offerBatchId = offerBatchId == null || offerBatchId.isBlank() ? "offer-batch-unknown" : offerBatchId;
         orderId = orderId == null || orderId.isBlank() ? "order-unknown" : orderId;
         serviceTier = serviceTier == null || serviceTier.isBlank() ? "instant" : serviceTier;
-        fanout = Math.max(1, Math.min(3, fanout));
+        fanout = Math.max(0, Math.min(3, fanout));
         createdAt = createdAt == null ? Instant.now() : createdAt;
         expiresAt = expiresAt == null ? createdAt : expiresAt;
         offerIds = offerIds == null ? List.of() : List.copyOf(offerIds);

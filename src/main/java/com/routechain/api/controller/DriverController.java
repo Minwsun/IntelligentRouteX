@@ -1,6 +1,7 @@
 package com.routechain.api.controller;
 
 import com.routechain.api.dto.*;
+import com.routechain.api.security.ActorAccessGuard;
 import com.routechain.api.service.DriverOperationsService;
 import com.routechain.data.service.WalletQueryService;
 import com.routechain.backend.offer.DriverSessionState;
@@ -8,8 +9,9 @@ import com.routechain.backend.offer.OfferBrokerService;
 import com.routechain.backend.offer.OfferDecision;
 import com.routechain.domain.Order;
 import jakarta.validation.Valid;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
@@ -18,43 +20,48 @@ import java.util.List;
 public class DriverController {
     private final DriverOperationsService driverOperationsService;
     private final WalletQueryService walletQueryService;
+    private final ActorAccessGuard actorAccessGuard;
 
     public DriverController(DriverOperationsService driverOperationsService,
-                            WalletQueryService walletQueryService) {
+                            WalletQueryService walletQueryService,
+                            ActorAccessGuard actorAccessGuard) {
         this.driverOperationsService = driverOperationsService;
         this.walletQueryService = walletQueryService;
+        this.actorAccessGuard = actorAccessGuard;
     }
 
     @PostMapping("/session/login")
     public DriverSessionState login(@Valid @RequestBody DriverLoginRequest request) {
+        actorAccessGuard.requireDriver(request.driverId());
         return driverOperationsService.login(request);
     }
 
     @PostMapping("/session/heartbeat")
-    public ResponseEntity<DriverSessionState> heartbeat(@Valid @RequestBody DriverHeartbeatRequest request) {
+    public DriverSessionState heartbeat(@Valid @RequestBody DriverHeartbeatRequest request) {
+        actorAccessGuard.requireDriver(request.driverId());
         return driverOperationsService.heartbeat(request.driverId())
-                .map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Driver session not found"));
     }
 
     @PatchMapping("/availability")
-    public ResponseEntity<DriverSessionState> availability(@RequestParam String driverId,
-                                                           @Valid @RequestBody DriverAvailabilityUpdate request) {
+    public DriverSessionState availability(@RequestParam String driverId,
+                                           @Valid @RequestBody DriverAvailabilityUpdate request) {
+        actorAccessGuard.requireDriver(driverId);
         return driverOperationsService.setAvailability(driverId, request)
-                .map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Driver session not found"));
     }
 
     @PostMapping("/location")
-    public ResponseEntity<DriverSessionState> location(@RequestParam String driverId,
-                                                       @Valid @RequestBody DriverLocationUpdate request) {
+    public DriverSessionState location(@RequestParam String driverId,
+                                       @Valid @RequestBody DriverLocationUpdate request) {
+        actorAccessGuard.requireDriver(driverId);
         return driverOperationsService.updateLocation(driverId, request)
-                .map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Driver session not found"));
     }
 
     @GetMapping("/offers")
     public List<OfferBrokerService.OfferView> offers(@RequestParam String driverId) {
+        actorAccessGuard.requireDriver(driverId);
         return driverOperationsService.offers(driverId);
     }
 
@@ -62,6 +69,7 @@ public class DriverController {
     public OfferDecision accept(@RequestParam String driverId,
                                 @PathVariable String offerId,
                                 @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        actorAccessGuard.requireDriver(driverId);
         return driverOperationsService.accept(driverId, offerId, idempotencyKey);
     }
 
@@ -69,24 +77,27 @@ public class DriverController {
     public OfferDecision decline(@RequestParam String driverId,
                                  @PathVariable String offerId,
                                  @RequestBody(required = false) DriverOfferDecisionRequest request) {
+        actorAccessGuard.requireDriver(driverId);
         return driverOperationsService.decline(driverId, offerId, request == null ? null : request.reason());
     }
 
     @PostMapping("/tasks/{taskId}/status")
-    public ResponseEntity<Order> updateTaskStatus(@PathVariable String taskId,
-                                                  @Valid @RequestBody DriverTaskStatusUpdate request) {
-        return driverOperationsService.updateTaskStatus(taskId, request)
-                .map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+    public Order updateTaskStatus(@PathVariable String taskId,
+                                  @Valid @RequestBody DriverTaskStatusUpdate request) {
+        String driverId = actorAccessGuard.currentSubject();
+        return driverOperationsService.updateTaskStatus(driverId, taskId, request)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Task not found"));
     }
 
     @GetMapping("/copilot")
     public List<?> copilot(@RequestParam String driverId) {
+        actorAccessGuard.requireDriver(driverId);
         return driverOperationsService.copilot(driverId);
     }
 
     @GetMapping("/wallet")
     public WalletBalanceView wallet(@RequestParam String driverId) {
+        actorAccessGuard.requireDriver(driverId);
         return walletQueryService.driverWallet(driverId);
     }
 }

@@ -136,9 +136,14 @@ public class DriverOperationsService {
     }
 
     @Transactional
-    public Optional<Order> updateTaskStatus(String taskId, DriverTaskStatusUpdate request) {
+    public Optional<Order> updateTaskStatus(String driverId, String taskId, DriverTaskStatusUpdate request) {
         String orderId = taskId.startsWith("task-") ? taskId.substring("task-".length()) : taskId;
         return orderRepository.findOrder(orderId).map(order -> {
+            if (driverId != null && !driverId.isBlank()
+                    && order.getAssignedDriverId() != null
+                    && !driverId.equals(order.getAssignedDriverId())) {
+                throw new org.springframework.security.access.AccessDeniedException("Driver does not own this task");
+            }
             Instant now = Instant.now();
             String status = request.status().trim().toUpperCase();
             switch (status) {

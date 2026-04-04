@@ -22,6 +22,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -38,11 +39,17 @@ public class JdbcOperationalPersistenceAdapter implements OperationalStore,
         WalletRepository,
         IdempotencyRepository,
         OutboxRepository {
-    private static final java.time.Duration IDEMPOTENCY_STALE_TTL = java.time.Duration.ofSeconds(5);
+    private static final Duration DEFAULT_IDEMPOTENCY_STALE_TTL = Duration.ofSeconds(5);
     private final NamedParameterJdbcTemplate jdbc;
+    private final Duration idempotencyStaleTtl;
 
     public JdbcOperationalPersistenceAdapter(NamedParameterJdbcTemplate jdbc) {
+        this(jdbc, DEFAULT_IDEMPOTENCY_STALE_TTL);
+    }
+
+    public JdbcOperationalPersistenceAdapter(NamedParameterJdbcTemplate jdbc, Duration idempotencyStaleTtl) {
         this.jdbc = jdbc;
+        this.idempotencyStaleTtl = normalizeDuration(idempotencyStaleTtl, DEFAULT_IDEMPOTENCY_STALE_TTL);
     }
 
     @Override
@@ -621,7 +628,7 @@ public class JdbcOperationalPersistenceAdapter implements OperationalStore,
                         .addValue("responseJson", record.responseJson().isBlank() ? "{}" : record.responseJson())
                         .addValue("createdAt", ts(record.createdAt()))
                         .addValue("completedAt", ts(record.completedAt()))
-                        .addValue("staleBefore", ts(record.createdAt().minus(IDEMPOTENCY_STALE_TTL))));
+                        .addValue("staleBefore", ts(record.createdAt().minus(idempotencyStaleTtl))));
         if (reclaimed > 0) {
             return Optional.empty();
         }
@@ -660,10 +667,12 @@ public class JdbcOperationalPersistenceAdapter implements OperationalStore,
         jdbc.update("""
                 INSERT INTO outbox_events (
                     id, public_id, topic_key, aggregate_type, aggregate_public_id, event_type,
-                    payload_json, status, created_at, published_at
+                    payload_json, status, attempt_count, created_at, published_at, next_attempt_at,
+                    last_error, claimed_by, claimed_at, correlation_id
                 ) VALUES (
                     :id, :publicId, :topicKey, :aggregateType, :aggregatePublicId, :eventType,
-                    :payloadJson, :status, :createdAt, :publishedAt
+                    CAST(:payloadJson AS jsonb), :status, :attemptCount, :createdAt, :publishedAt, :nextAttemptAt,
+                    :lastError, :claimedBy, :claimedAt, :correlationId
                 )
                 ON CONFLICT (public_id) DO NOTHING
                 """, new MapSqlParameterSource()
@@ -675,31 +684,139 @@ public class JdbcOperationalPersistenceAdapter implements OperationalStore,
                 .addValue("eventType", eventRecord.eventType())
                 .addValue("payloadJson", eventRecord.payloadJson())
                 .addValue("status", eventRecord.status())
+                .addValue("attemptCount", eventRecord.attemptCount())
                 .addValue("createdAt", ts(eventRecord.createdAt()))
-                .addValue("publishedAt", ts(eventRecord.publishedAt())));
+                .addValue("publishedAt", ts(eventRecord.publishedAt()))
+                .addValue("nextAttemptAt", ts(eventRecord.nextAttemptAt()))
+                .addValue("lastError", eventRecord.lastError())
+                .addValue("claimedBy", blankToNull(eventRecord.claimedBy()))
+                .addValue("claimedAt", ts(eventRecord.claimedAt()))
+                .addValue("correlationId", blankToNull(eventRecord.correlationId())));
     }
 
     @Override
     public List<OutboxEventRecord> recent(int limit) {
         return jdbc.query("""
                         SELECT public_id, topic_key, aggregate_type, aggregate_public_id, event_type,
-                               payload_json, status, created_at, published_at
+                               payload_json, status, attempt_count, created_at, published_at, next_attempt_at,
+                               last_error, claimed_by, claimed_at, correlation_id
                           FROM outbox_events
                       ORDER BY created_at DESC
                          LIMIT :limit
                         """,
                 new MapSqlParameterSource("limit", Math.max(1, limit)),
-                (rs, rowNum) -> new OutboxEventRecord(
-                        rs.getString("public_id"),
-                        rs.getString("topic_key"),
-                        rs.getString("aggregate_type"),
-                        rs.getString("aggregate_public_id"),
-                        rs.getString("event_type"),
-                        rs.getString("payload_json"),
-                        rs.getString("status"),
-                        instant(rs.getTimestamp("created_at")),
-                        instant(rs.getTimestamp("published_at"))
-                ));
+                (rs, rowNum) -> mapOutboxRecord(rs));
+    }
+
+    @Override
+    public List<OutboxEventRecord> claimBatch(String claimerId, Instant now, int limit, Duration staleClaimTtl) {
+        Instant effectiveNow = now == null ? Instant.now() : now;
+        Duration effectiveStaleClaimTtl = normalizeDuration(staleClaimTtl, Duration.ofSeconds(30));
+        List<String> candidateIds = jdbc.query("""
+                        SELECT public_id
+                          FROM outbox_events
+                         WHERE (
+                               (
+                                   status IN ('PENDING', 'FAILED')
+                                   AND COALESCE(next_attempt_at, created_at) <= :now
+                               )
+                               OR (
+                                   status = 'IN_PROGRESS'
+                                   AND claimed_at < :staleBefore
+                               )
+                           )
+                      ORDER BY created_at ASC
+                         LIMIT :limit
+                         FOR UPDATE SKIP LOCKED
+                        """,
+                new MapSqlParameterSource()
+                        .addValue("now", ts(effectiveNow))
+                        .addValue("staleBefore", ts(effectiveNow.minus(effectiveStaleClaimTtl)))
+                        .addValue("limit", Math.max(1, limit)),
+                (rs, rowNum) -> rs.getString("public_id"));
+        if (candidateIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<OutboxEventRecord> claimed = new java.util.ArrayList<>();
+        for (String eventId : candidateIds) {
+            int updated = jdbc.update("""
+                    UPDATE outbox_events
+                       SET status = 'IN_PROGRESS',
+                           attempt_count = attempt_count + 1,
+                           claimed_by = :claimedBy,
+                           claimed_at = :claimedAt,
+                           last_error = NULL
+                     WHERE public_id = :eventId
+                       AND (
+                           (
+                               status IN ('PENDING', 'FAILED')
+                               AND COALESCE(next_attempt_at, created_at) <= :now
+                           )
+                           OR (
+                               status = 'IN_PROGRESS'
+                               AND claimed_at < :staleBefore
+                           )
+                       )
+                    """,
+                    new MapSqlParameterSource()
+                            .addValue("claimedBy", claimerId)
+                            .addValue("claimedAt", ts(effectiveNow))
+                            .addValue("eventId", eventId)
+                            .addValue("now", ts(effectiveNow))
+                            .addValue("staleBefore", ts(effectiveNow.minus(effectiveStaleClaimTtl))));
+            if (updated > 0) {
+                jdbc.query("""
+                                SELECT public_id, topic_key, aggregate_type, aggregate_public_id, event_type,
+                                       payload_json, status, attempt_count, created_at, published_at, next_attempt_at,
+                                       last_error, claimed_by, claimed_at, correlation_id
+                                  FROM outbox_events
+                                 WHERE public_id = :eventId
+                                """,
+                        new MapSqlParameterSource("eventId", eventId),
+                        rs -> {
+                            if (rs.next()) {
+                                claimed.add(mapOutboxRecord(rs));
+                            }
+                            return null;
+                        });
+            }
+        }
+        return List.copyOf(claimed);
+    }
+
+    @Override
+    public void markSent(String eventId, Instant publishedAt) {
+        jdbc.update("""
+                UPDATE outbox_events
+                   SET status = 'SENT',
+                       published_at = :publishedAt,
+                       next_attempt_at = NULL,
+                       last_error = NULL,
+                       claimed_by = NULL,
+                       claimed_at = NULL
+                 WHERE public_id = :eventId
+                """,
+                new MapSqlParameterSource()
+                        .addValue("eventId", eventId)
+                        .addValue("publishedAt", ts(publishedAt == null ? Instant.now() : publishedAt)));
+    }
+
+    @Override
+    public void markFailed(String eventId, String claimerId, String error, Instant nextAttemptAt) {
+        jdbc.update("""
+                UPDATE outbox_events
+                   SET status = 'FAILED',
+                       next_attempt_at = :nextAttemptAt,
+                       last_error = :lastError,
+                       claimed_by = NULL,
+                       claimed_at = NULL
+                 WHERE public_id = :eventId
+                """,
+                new MapSqlParameterSource()
+                        .addValue("eventId", eventId)
+                        .addValue("nextAttemptAt", ts(nextAttemptAt == null ? Instant.now() : nextAttemptAt))
+                        .addValue("lastError", truncate(error, 500)));
     }
 
     @Override
@@ -730,5 +847,43 @@ public class JdbcOperationalPersistenceAdapter implements OperationalStore,
 
     private UUID uuidRef(String namespace, String publicId) {
         return UUID.nameUUIDFromBytes((namespace + ":" + publicId).getBytes());
+    }
+
+    private OutboxEventRecord mapOutboxRecord(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new OutboxEventRecord(
+                rs.getString("public_id"),
+                rs.getString("topic_key"),
+                rs.getString("aggregate_type"),
+                rs.getString("aggregate_public_id"),
+                rs.getString("event_type"),
+                rs.getString("payload_json"),
+                rs.getString("status"),
+                rs.getInt("attempt_count"),
+                instant(rs.getTimestamp("created_at")),
+                instant(rs.getTimestamp("published_at")),
+                instant(rs.getTimestamp("next_attempt_at")),
+                rs.getString("last_error"),
+                rs.getString("claimed_by"),
+                instant(rs.getTimestamp("claimed_at")),
+                rs.getString("correlation_id")
+        );
+    }
+
+    private Duration normalizeDuration(Duration value, Duration fallback) {
+        if (value == null || value.isZero() || value.isNegative()) {
+            return fallback;
+        }
+        return value;
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.length() <= maxLength ? value : value.substring(0, maxLength);
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 }

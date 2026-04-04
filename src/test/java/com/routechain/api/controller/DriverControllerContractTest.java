@@ -1,12 +1,15 @@
 package com.routechain.api.controller;
 
 import com.routechain.api.dto.DriverTaskStatusUpdate;
+import com.routechain.api.security.ActorAccessGuard;
 import com.routechain.api.service.DriverOperationsService;
+import com.routechain.backend.offer.OfferBrokerService;
 import com.routechain.data.port.OfferStateStore;
 import com.routechain.data.service.OperationalEventPublisher;
 import com.routechain.data.service.WalletQueryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
@@ -14,11 +17,13 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Optional;
 
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(DriverController.class)
+@AutoConfigureMockMvc(addFilters = false)
 class DriverControllerContractTest {
 
     @Autowired
@@ -31,10 +36,16 @@ class DriverControllerContractTest {
     private WalletQueryService walletQueryService;
 
     @MockBean
+    private ActorAccessGuard actorAccessGuard;
+
+    @MockBean
     private OfferStateStore offerStateStore;
 
     @MockBean
     private OperationalEventPublisher operationalEventPublisher;
+
+    @MockBean
+    private OfferBrokerService offerBrokerService;
 
     @Test
     void loginRejectsInvalidPayload() throws Exception {
@@ -53,7 +64,8 @@ class DriverControllerContractTest {
 
     @Test
     void updateTaskStatusMapsMissingOrderToNotFound() throws Exception {
-        when(driverOperationsService.updateTaskStatus("task-missing", new DriverTaskStatusUpdate("DELIVERED")))
+        when(actorAccessGuard.currentSubject()).thenReturn("drv-1");
+        when(driverOperationsService.updateTaskStatus("drv-1", "task-missing", new DriverTaskStatusUpdate("DELIVERED")))
                 .thenReturn(Optional.empty());
 
         mockMvc.perform(post("/v1/driver/tasks/task-missing/status")

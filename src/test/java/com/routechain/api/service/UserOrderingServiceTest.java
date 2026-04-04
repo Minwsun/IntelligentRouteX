@@ -1,5 +1,6 @@
 package com.routechain.api.service;
 
+import com.routechain.config.RouteChainRuntimeProperties;
 import com.routechain.api.dto.UserOrderRequest;
 import com.routechain.api.store.InMemoryOperationalStore;
 import com.routechain.backend.offer.DriverSessionState;
@@ -34,7 +35,7 @@ class UserOrderingServiceTest {
                 store,
                 offerStateStore,
                 orchestratorService,
-                new IdempotencyService(store),
+                new IdempotencyService(store, new RouteChainRuntimeProperties()),
                 eventPublisher
         );
 
@@ -82,7 +83,7 @@ class UserOrderingServiceTest {
                 store,
                 offerStateStore,
                 orchestratorService,
-                new IdempotencyService(store),
+                new IdempotencyService(store, new RouteChainRuntimeProperties()),
                 eventPublisher
         );
 

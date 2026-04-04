@@ -1,12 +1,15 @@
 package com.routechain.api.controller;
 
+import com.routechain.api.security.ActorAccessGuard;
 import com.routechain.api.dto.UserOrderResponse;
 import com.routechain.api.service.UserOrderingService;
+import com.routechain.backend.offer.OfferBrokerService;
 import com.routechain.data.port.OfferStateStore;
 import com.routechain.data.service.OperationalEventPublisher;
 import com.routechain.data.service.WalletQueryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
@@ -21,6 +24,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(UserOrderController.class)
+@AutoConfigureMockMvc(addFilters = false)
 class UserOrderControllerContractTest {
 
     @Autowired
@@ -33,10 +37,16 @@ class UserOrderControllerContractTest {
     private WalletQueryService walletQueryService;
 
     @MockBean
+    private ActorAccessGuard actorAccessGuard;
+
+    @MockBean
     private OfferStateStore offerStateStore;
 
     @MockBean
     private OperationalEventPublisher operationalEventPublisher;
+
+    @MockBean
+    private OfferBrokerService offerBrokerService;
 
     @Test
     void createOrderRejectsInvalidPayload() throws Exception {

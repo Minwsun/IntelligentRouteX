@@ -1,6 +1,7 @@
 package com.routechain.api.store;
 
 import com.routechain.backend.offer.DriverSessionState;
+import com.routechain.config.RouteChainRuntimeProperties;
 import com.routechain.data.model.IdempotencyRecord;
 import com.routechain.data.model.OrderStatusHistoryRecord;
 import com.routechain.data.model.OutboxEventRecord;
@@ -19,6 +20,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -39,7 +41,7 @@ public class InMemoryOperationalStore implements OperationalStore,
         WalletRepository,
         IdempotencyRepository,
         OutboxRepository {
-    private static final java.time.Duration IDEMPOTENCY_STALE_TTL = java.time.Duration.ofSeconds(5);
+    private final Duration idempotencyStaleTtl;
     private final Map<String, Order> ordersById = new ConcurrentHashMap<>();
     private final Map<QuoteSnapshotKey, QuoteSnapshot> quotesById = new ConcurrentHashMap<>();
     private final Map<String, DriverSessionState> driverSessionsByDriverId = new ConcurrentHashMap<>();
@@ -50,6 +52,18 @@ public class InMemoryOperationalStore implements OperationalStore,
     private final Map<String, Instant> idempotencyClaimsByCompositeKey = new ConcurrentHashMap<>();
     private final List<OutboxEventRecord> outboxEvents = new CopyOnWriteArrayList<>();
     private final List<OrderStatusHistoryRecord> orderStatusHistory = new CopyOnWriteArrayList<>();
+
+    public InMemoryOperationalStore() {
+        this(Duration.ofSeconds(5));
+    }
+
+    public InMemoryOperationalStore(RouteChainRuntimeProperties runtimeProperties) {
+        this(runtimeProperties == null ? Duration.ofSeconds(5) : runtimeProperties.getIdempotency().getStaleTtl());
+    }
+
+    public InMemoryOperationalStore(Duration idempotencyStaleTtl) {
+        this.idempotencyStaleTtl = normalizeTtl(idempotencyStaleTtl);
+    }
 
     public void saveOrder(Order order) {
         ordersById.put(order.getId(), order);
@@ -221,7 +235,7 @@ public class InMemoryOperationalStore implements OperationalStore,
             }
             Instant existingClaim = idempotencyClaimsByCompositeKey.putIfAbsent(compositeKey, record.createdAt());
             if (existingClaim != null) {
-                if (existingClaim.plus(IDEMPOTENCY_STALE_TTL).isBefore(record.createdAt())) {
+                if (existingClaim.plus(idempotencyStaleTtl).isBefore(record.createdAt())) {
                     idempotencyClaimsByCompositeKey.put(compositeKey, record.createdAt());
                     idempotencyByCompositeKey.put(compositeKey, record);
                     return Optional.empty();
@@ -257,6 +271,83 @@ public class InMemoryOperationalStore implements OperationalStore,
                 .toList();
     }
 
+    @Override
+    public List<OutboxEventRecord> claimBatch(String claimerId, Instant now, int limit, Duration staleClaimTtl) {
+        Instant effectiveNow = now == null ? Instant.now() : now;
+        Duration effectiveStaleClaimTtl = normalizeTtl(staleClaimTtl);
+        List<OutboxEventRecord> claimed = new java.util.ArrayList<>();
+        synchronized (outboxEvents) {
+            for (int index = 0; index < outboxEvents.size() && claimed.size() < Math.max(1, limit); index++) {
+                OutboxEventRecord candidate = outboxEvents.get(index);
+                if (!isClaimable(candidate, effectiveNow, effectiveStaleClaimTtl)) {
+                    continue;
+                }
+                OutboxEventRecord updated = new OutboxEventRecord(
+                        candidate.eventId(),
+                        candidate.topicKey(),
+                        candidate.aggregateType(),
+                        candidate.aggregateId(),
+                        candidate.eventType(),
+                        candidate.payloadJson(),
+                        "IN_PROGRESS",
+                        candidate.attemptCount() + 1,
+                        candidate.createdAt(),
+                        candidate.publishedAt(),
+                        candidate.nextAttemptAt(),
+                        candidate.lastError(),
+                        claimerId,
+                        effectiveNow,
+                        candidate.correlationId()
+                );
+                outboxEvents.set(index, updated);
+                claimed.add(updated);
+            }
+        }
+        return List.copyOf(claimed);
+    }
+
+    @Override
+    public void markSent(String eventId, Instant publishedAt) {
+        replaceOutboxEvent(eventId, existing -> new OutboxEventRecord(
+                existing.eventId(),
+                existing.topicKey(),
+                existing.aggregateType(),
+                existing.aggregateId(),
+                existing.eventType(),
+                existing.payloadJson(),
+                "SENT",
+                existing.attemptCount(),
+                existing.createdAt(),
+                publishedAt,
+                existing.nextAttemptAt(),
+                "",
+                "",
+                null,
+                existing.correlationId()
+        ));
+    }
+
+    @Override
+    public void markFailed(String eventId, String claimerId, String error, Instant nextAttemptAt) {
+        replaceOutboxEvent(eventId, existing -> new OutboxEventRecord(
+                existing.eventId(),
+                existing.topicKey(),
+                existing.aggregateType(),
+                existing.aggregateId(),
+                existing.eventType(),
+                existing.payloadJson(),
+                "FAILED",
+                existing.attemptCount(),
+                existing.createdAt(),
+                existing.publishedAt(),
+                nextAttemptAt,
+                error,
+                "",
+                null,
+                existing.correlationId()
+        ));
+    }
+
     private record QuoteSnapshotKey(String quoteId) {}
 
     private String walletKey(String ownerType, String ownerId) {
@@ -271,7 +362,41 @@ public class InMemoryOperationalStore implements OperationalStore,
         return record != null
                 && record.isInProgress()
                 && record.createdAt() != null
-                && record.createdAt().plus(IDEMPOTENCY_STALE_TTL).isBefore(now);
+                && record.createdAt().plus(idempotencyStaleTtl).isBefore(now);
     }
 
+    private Duration normalizeTtl(Duration ttl) {
+        if (ttl == null || ttl.isNegative() || ttl.isZero()) {
+            return Duration.ofSeconds(5);
+        }
+        return ttl;
+    }
+
+    private boolean isClaimable(OutboxEventRecord candidate, Instant now, Duration staleClaimTtl) {
+        if (candidate == null) {
+            return false;
+        }
+        if ("SENT".equalsIgnoreCase(candidate.status())) {
+            return false;
+        }
+        if ("IN_PROGRESS".equalsIgnoreCase(candidate.status())
+                && candidate.claimedAt() != null
+                && candidate.claimedAt().plus(staleClaimTtl).isAfter(now)) {
+            return false;
+        }
+        Instant nextAttemptAt = candidate.nextAttemptAt() == null ? candidate.createdAt() : candidate.nextAttemptAt();
+        return !nextAttemptAt.isAfter(now);
+    }
+
+    private void replaceOutboxEvent(String eventId, java.util.function.Function<OutboxEventRecord, OutboxEventRecord> mapper) {
+        synchronized (outboxEvents) {
+            for (int index = 0; index < outboxEvents.size(); index++) {
+                OutboxEventRecord existing = outboxEvents.get(index);
+                if (existing.eventId().equals(eventId)) {
+                    outboxEvents.set(index, mapper.apply(existing));
+                    return;
+                }
+            }
+        }
+    }
 }

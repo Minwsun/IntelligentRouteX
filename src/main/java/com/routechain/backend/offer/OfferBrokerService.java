@@ -1,7 +1,9 @@
 package com.routechain.backend.offer;
 
 import com.routechain.api.store.InMemoryOperationalStore;
+import com.routechain.data.memory.InMemoryOfferRuntimeStore;
 import com.routechain.data.memory.InMemoryOfferStateStore;
+import com.routechain.data.port.OfferRuntimeStore;
 import com.routechain.data.port.OfferStateStore;
 import com.routechain.data.service.OperationalEventPublisher;
 import com.routechain.infra.Events;
@@ -20,32 +22,62 @@ import java.util.UUID;
  */
 public class OfferBrokerService {
     private static final int MAX_FANOUT = 3;
+    private static final Duration DEFAULT_DECLINE_COOLDOWN = Duration.ofSeconds(30);
+    private static final Duration DEFAULT_EXPIRY_COOLDOWN = Duration.ofSeconds(45);
 
     private final OfferStateStore stateStore;
+    private final OfferRuntimeStore runtimeStore;
     private final OperationalEventPublisher eventPublisher;
+    private final Duration declineCooldown;
+    private final Duration expiryCooldown;
 
     public OfferBrokerService() {
-        this(new InMemoryOfferStateStore(), new OperationalEventPublisher(new InMemoryOperationalStore()));
+        this(
+                new InMemoryOfferStateStore(),
+                new InMemoryOfferRuntimeStore(),
+                new OperationalEventPublisher(new InMemoryOperationalStore()),
+                DEFAULT_DECLINE_COOLDOWN,
+                DEFAULT_EXPIRY_COOLDOWN
+        );
     }
 
     public OfferBrokerService(OfferStateStore stateStore,
                               OperationalEventPublisher eventPublisher) {
+        this(
+                stateStore,
+                new InMemoryOfferRuntimeStore(),
+                eventPublisher,
+                DEFAULT_DECLINE_COOLDOWN,
+                DEFAULT_EXPIRY_COOLDOWN
+        );
+    }
+
+    public OfferBrokerService(OfferStateStore stateStore,
+                              OfferRuntimeStore runtimeStore,
+                              OperationalEventPublisher eventPublisher,
+                              Duration declineCooldown,
+                              Duration expiryCooldown) {
         this.stateStore = stateStore;
+        this.runtimeStore = runtimeStore;
         this.eventPublisher = eventPublisher;
+        this.declineCooldown = normalizeCooldown(declineCooldown, DEFAULT_DECLINE_COOLDOWN);
+        this.expiryCooldown = normalizeCooldown(expiryCooldown, DEFAULT_EXPIRY_COOLDOWN);
     }
 
     public synchronized DriverOfferBatch publishOffers(String orderId,
                                                        String serviceTier,
                                                        List<DriverOfferCandidate> screenedCandidates,
                                                        int requestedFanout) {
+        int requestedLimit = Math.max(1, Math.min(MAX_FANOUT, requestedFanout));
         List<DriverOfferCandidate> ranked = screenedCandidates == null
                 ? List.of()
                 : screenedCandidates.stream()
+                .filter(candidate -> runtimeStore.driverCooldownUntil(candidate.driverId()).isEmpty())
                 .sorted(Comparator
                         .comparingDouble(DriverOfferCandidate::score).reversed()
                         .thenComparing(Comparator.comparingDouble(DriverOfferCandidate::acceptanceProbability).reversed())
                         .thenComparingDouble(DriverOfferCandidate::deadheadKm))
-                .limit(Math.max(1, Math.min(MAX_FANOUT, requestedFanout)))
+                .limit(requestedLimit)
                 .toList();
         String batchId = "offer-batch-" + UUID.randomUUID().toString().substring(0, 8);
         Instant createdAt = Instant.now();
@@ -69,6 +101,7 @@ public class OfferBrokerService {
                     createdAt,
                     expiresAt
             ));
+            runtimeStore.markOfferActive(offerId, expiresAt);
             eventPublisher.publish(
                     "offer.created.v1",
                     "ORDER",
@@ -87,7 +120,7 @@ public class OfferBrokerService {
                 batchId,
                 orderId,
                 serviceTier,
-                Math.max(1, Math.min(MAX_FANOUT, requestedFanout)),
+                ranked.size(),
                 createdAt,
                 expiresAt,
                 offerIds,
@@ -148,6 +181,10 @@ public class OfferBrokerService {
                             .orElse(OfferReservationDefaults.empty(entry.orderId()))
                             .reservationVersion());
         }
+        if (!runtimeStore.isOfferActive(offerId, now)) {
+            expireOffer(entry, now);
+            return new OfferDecision(offerId, entry.orderId(), driverId, DriverOfferStatus.EXPIRED, "offer-expired", now, 0);
+        }
         OfferReservation existing = stateStore.findReservation(entry.orderId()).orElse(null);
         if (existing != null && "ACCEPTED".equalsIgnoreCase(existing.status())) {
             markLost(entry.offerBatchId(), offerId, "offer-lost");
@@ -169,6 +206,7 @@ public class OfferBrokerService {
         );
         stateStore.saveReservation(reservation);
         stateStore.saveOffer(entry.withStatus(DriverOfferStatus.ACCEPTED));
+        runtimeStore.clearOffer(offerId);
         markLost(entry.offerBatchId(), offerId, "offer-lost");
         eventPublisher.publish(
                 "offer.resolved.v1",
@@ -194,6 +232,8 @@ public class OfferBrokerService {
             return new OfferDecision(offerId, entry.orderId(), driverId, entry.status(), "offer-not-pending", now, 0);
         }
         stateStore.saveOffer(entry.withStatus(DriverOfferStatus.DECLINED));
+        runtimeStore.clearOffer(offerId);
+        runtimeStore.markDriverCooldown(driverId, now.plus(declineCooldown));
         String resolvedReason = reason == null || reason.isBlank() ? "declined" : reason;
         eventPublisher.publish(
                 "offer.resolved.v1",
@@ -227,6 +267,7 @@ public class OfferBrokerService {
             }
             if (pending.status() == DriverOfferStatus.PENDING) {
                 stateStore.saveOffer(pending.withStatus(DriverOfferStatus.LOST));
+                runtimeStore.clearOffer(pending.offerId());
                 eventPublisher.publish(
                         "offer.resolved.v1",
                         "ORDER",
@@ -250,21 +291,7 @@ public class OfferBrokerService {
         Instant now = Instant.now();
         for (DriverOfferRecord entry : stateStore.allOffers()) {
             if (entry.status() == DriverOfferStatus.PENDING && entry.expiresAt().isBefore(now)) {
-                stateStore.saveOffer(entry.withStatus(DriverOfferStatus.EXPIRED));
-                eventPublisher.publish(
-                        "offer.resolved.v1",
-                        "ORDER",
-                        entry.orderId(),
-                        new Events.DriverOfferExpired(entry.offerId(), entry.offerBatchId(), entry.orderId(), entry.driverId(), now));
-                stateStore.saveDecision(new OfferDecision(
-                        entry.offerId(),
-                        entry.orderId(),
-                        entry.driverId(),
-                        DriverOfferStatus.EXPIRED,
-                        "offer-expired",
-                        now,
-                        0
-                ));
+                expireOffer(entry, now);
             }
         }
     }
@@ -276,6 +303,36 @@ public class OfferBrokerService {
             case "4h", "scheduled" -> Duration.ofSeconds(24);
             default -> Duration.ofSeconds(10);
         };
+    }
+
+    private void expireOffer(DriverOfferRecord entry, Instant now) {
+        if (entry == null || entry.status() != DriverOfferStatus.PENDING) {
+            return;
+        }
+        stateStore.saveOffer(entry.withStatus(DriverOfferStatus.EXPIRED));
+        runtimeStore.clearOffer(entry.offerId());
+        runtimeStore.markDriverCooldown(entry.driverId(), now.plus(expiryCooldown));
+        eventPublisher.publish(
+                "offer.resolved.v1",
+                "ORDER",
+                entry.orderId(),
+                new Events.DriverOfferExpired(entry.offerId(), entry.offerBatchId(), entry.orderId(), entry.driverId(), now));
+        stateStore.saveDecision(new OfferDecision(
+                entry.offerId(),
+                entry.orderId(),
+                entry.driverId(),
+                DriverOfferStatus.EXPIRED,
+                "offer-expired",
+                now,
+                0
+        ));
+    }
+
+    private Duration normalizeCooldown(Duration value, Duration fallback) {
+        if (value == null || value.isNegative() || value.isZero()) {
+            return fallback;
+        }
+        return value;
     }
 
     public record OfferView(

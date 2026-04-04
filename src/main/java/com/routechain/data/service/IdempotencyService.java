@@ -1,6 +1,7 @@
 package com.routechain.data.service;
 
 import com.google.gson.Gson;
+import com.routechain.config.RouteChainRuntimeProperties;
 import com.routechain.data.model.IdempotencyRecord;
 import com.routechain.data.port.IdempotencyRepository;
 import com.routechain.infra.GsonSupport;
@@ -16,14 +17,20 @@ import java.util.function.Supplier;
  */
 @Service
 public class IdempotencyService {
-    private static final Duration DEFAULT_WAIT = Duration.ofSeconds(2);
-    private static final long POLL_INTERVAL_MS = 25L;
-
     private final IdempotencyRepository repository;
     private final Gson gson = GsonSupport.compact();
+    private final Duration waitTimeout;
+    private final long pollIntervalMs;
 
-    public IdempotencyService(IdempotencyRepository repository) {
+    public IdempotencyService(IdempotencyRepository repository,
+                              RouteChainRuntimeProperties runtimeProperties) {
         this.repository = repository;
+        this.waitTimeout = normalizeWaitTimeout(runtimeProperties == null
+                ? null
+                : runtimeProperties.getIdempotency().getWaitTimeout());
+        this.pollIntervalMs = normalizePollInterval(runtimeProperties == null
+                ? 25L
+                : runtimeProperties.getIdempotency().getPollIntervalMs());
     }
 
     public <T> Optional<T> replay(String scope, String actorId, String idempotencyKey, Class<T> type) {
@@ -74,7 +81,7 @@ public class IdempotencyService {
             if (record.isFailed()) {
                 throw new IllegalStateException("Idempotent request previously failed: " + scope + "/" + actorId);
             }
-            return waitForCompleted(scope, actorId, idempotencyKey, type, DEFAULT_WAIT);
+            return waitForCompleted(scope, actorId, idempotencyKey, type, waitTimeout);
         }
 
         T result;
@@ -118,12 +125,23 @@ public class IdempotencyService {
                 return replay.get();
             }
             try {
-                Thread.sleep(POLL_INTERVAL_MS);
+                Thread.sleep(pollIntervalMs);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
                 break;
             }
         }
         throw new IllegalStateException("Idempotent request is still in progress: " + scope + "/" + actorId);
+    }
+
+    private Duration normalizeWaitTimeout(Duration value) {
+        if (value == null || value.isNegative() || value.isZero()) {
+            return Duration.ofSeconds(2);
+        }
+        return value;
+    }
+
+    private long normalizePollInterval(long value) {
+        return value <= 0 ? 25L : value;
     }
 }
