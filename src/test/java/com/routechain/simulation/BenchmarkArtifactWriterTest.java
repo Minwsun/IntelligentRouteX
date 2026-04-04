@@ -290,6 +290,113 @@ class BenchmarkArtifactWriterTest {
     }
 
     @Test
+    void shouldPersistRouteIntelligenceVerdictArtifacts() throws IOException {
+        Path root = Path.of("build", "routechain-apex", "benchmarks");
+        deleteRecursively(root);
+
+        RouteIntelligenceVerdictSummary summary = new RouteIntelligenceVerdictSummary(
+                BenchmarkSchema.VERSION,
+                "smoke",
+                Instant.parse("2026-04-04T00:00:00Z"),
+                "abc123",
+                "21.0.2",
+                "YES",
+                "PARTIAL",
+                "MEDIUM",
+                "INTERNAL_ONLY",
+                true,
+                true,
+                true,
+                true,
+                12,
+                12,
+                3,
+                4,
+                new RouteAiCertificationSummary(
+                        BenchmarkSchema.VERSION,
+                        "route-ai-certification-smoke",
+                        "local-production-small-smoke",
+                        "CLEAR",
+                        "Legacy",
+                        "Omega-current",
+                        true,
+                        true,
+                        8.0,
+                        12.0,
+                        120.0,
+                        180.0,
+                        true,
+                        true,
+                        -1.2,
+                        -0.4,
+                        1.6,
+                        -2.0,
+                        false,
+                        false,
+                        false,
+                        true,
+                        true,
+                        "graphAffinityScoring",
+                        List.of("legacy warning only")
+                ),
+                new RepoIntelligenceCertificationSummary(
+                        BenchmarkSchema.VERSION,
+                        "repo-intelligence-smoke",
+                        Instant.parse("2026-04-04T00:00:00Z"),
+                        "abc123",
+                        "21.0.2",
+                        "local-production-small-50",
+                        List.of(42L),
+                        List.of("CLEAR"),
+                        new CertificationGateResult("Correctness", true, List.of()),
+                        new CertificationGateResult("Latency", true, List.of()),
+                        new CertificationGateResult("Route Quality", true, List.of()),
+                        new CertificationGateResult("Continuity", true, List.of()),
+                        new CertificationGateResult("Stress/Safety", true, List.of()),
+                        new CertificationGateResult("Auxiliary", true, List.of()),
+                        new LegacyReferenceResult(true, 2, -1.2, -0.3, 2.1, List.of("legacy warning")),
+                        List.of(),
+                        true,
+                        "PASS_WITH_WARNING",
+                        List.of("smoke lane green")
+                ),
+                List.of(new AiComponentEvidence(
+                        "Neural route prior",
+                        true,
+                        true,
+                        "neuralRoutePriorClient.resolve",
+                        "Neural prior is used on the live plan path."
+                )),
+                List.of(new PolicyAblationResult(
+                        BenchmarkSchema.VERSION,
+                        "ai-influence-smoke-no_neural_prior",
+                        "ai-influence/smoke/no_neural_prior",
+                        "NO_NEURAL_PRIOR",
+                        "OMEGA_FULL",
+                        "FULL_BETTER",
+                        1.4,
+                        BenchmarkStatistics.summarize("overallGainPercent", "scope", List.of(1.4, 1.1)),
+                        BenchmarkStatistics.summarize("completionRateDelta", "scope", List.of(0.8, 0.7)),
+                        BenchmarkStatistics.summarize("deadheadDistanceRatioDelta", "scope", List.of(-1.2, -1.0)),
+                        List.of()
+                )),
+                List.of("legacy is still stronger on smoke CLEAR"),
+                List.of("smoke confidence only")
+        );
+
+        BenchmarkArtifactWriter.writeRouteIntelligenceVerdictSummary(summary);
+
+        assertTrue(Files.exists(root.resolve("certification").resolve("route-intelligence-verdict-smoke.json")));
+        assertTrue(Files.exists(root.resolve("certification").resolve("route-intelligence-verdict-smoke.md")));
+        String csv = Files.readString(root.resolve("route_intelligence_verdict.csv"));
+        String markdown = Files.readString(root.resolve("certification").resolve("route-intelligence-verdict-smoke.md"));
+        assertTrue(csv.contains("INTERNAL_ONLY"));
+        assertTrue(markdown.contains("AI And Route Intelligence Verdict"));
+        assertTrue(markdown.contains("Architecture Evidence"));
+        assertTrue(markdown.contains("Ablation Evidence"));
+    }
+
+    @Test
     void shouldPersistControlRoomArtifacts() throws IOException {
         Path root = Path.of("build", "routechain-apex", "benchmarks");
         deleteRecursively(root);

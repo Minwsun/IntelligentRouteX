@@ -45,6 +45,7 @@ public final class BenchmarkArtifactWriter {
     private static final Path ACCEPTANCE_CSV = ROOT.resolve("scenario_acceptance.csv");
     private static final Path CERTIFICATION_CSV = ROOT.resolve("route_ai_certification.csv");
     private static final Path REPO_CERTIFICATION_CSV = ROOT.resolve("repo_intelligence_certification.csv");
+    private static final Path ROUTE_INTELLIGENCE_VERDICT_CSV = ROOT.resolve("route_intelligence_verdict.csv");
     private static final Path CITY_TWIN_CSV = CONTROL_ROOM_DIR.resolve("city_twin_cells.csv");
     private static final Path FUTURE_CELL_VALUE_CSV = CONTROL_ROOM_DIR.resolve("future_cell_values.csv");
     private static final Path DRIVER_FUTURE_VALUE_CSV = CONTROL_ROOM_DIR.resolve("driver_future_values.csv");
@@ -574,6 +575,56 @@ public final class BenchmarkArtifactWriter {
         }
     }
 
+    public static void writeRouteIntelligenceVerdictSummary(RouteIntelligenceVerdictSummary summary) {
+        if (summary == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(CERTIFICATION_DIR);
+            Path jsonPath = CERTIFICATION_DIR.resolve("route-intelligence-verdict-" + safe(summary.laneName()) + ".json");
+            Path markdownPath = CERTIFICATION_DIR.resolve("route-intelligence-verdict-" + safe(summary.laneName()) + ".md");
+            Files.writeString(
+                    jsonPath,
+                    GSON.toJson(summary),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            Files.writeString(
+                    markdownPath,
+                    renderRouteIntelligenceVerdictMarkdown(summary),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            appendCsv(
+                    ROUTE_INTELLIGENCE_VERDICT_CSV,
+                    "laneName,generatedAt,gitRevision,javaVersion,aiVerdict,routingVerdict,confidence,claimReadiness,architectureAuditPass,ablationEvidencePass,repoCertificationPass,legacyReferenceWarning,detectedRequiredComponentCount,requiredComponentCount,materialAblationCount,requiredAblationCount",
+                    String.format(
+                            "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,%d,%d,%d",
+                            safe(summary.laneName()),
+                            safe(String.valueOf(summary.generatedAt())),
+                            safe(summary.gitRevision()),
+                            safe(summary.javaVersion()),
+                            safe(summary.aiVerdict()),
+                            safe(summary.routingVerdict()),
+                            safe(summary.confidence()),
+                            safe(summary.claimReadiness()),
+                            Boolean.toString(summary.architectureAuditPass()),
+                            Boolean.toString(summary.ablationEvidencePass()),
+                            Boolean.toString(summary.repoCertificationPass()),
+                            Boolean.toString(summary.legacyReferenceWarning()),
+                            summary.detectedRequiredComponentCount(),
+                            summary.requiredComponentCount(),
+                            summary.materialAblationCount(),
+                            summary.requiredAblationCount()
+                    )
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to write route intelligence verdict summary", e);
+        }
+    }
+
     public static void writeControlRoomFrame(ControlRoomFrame frame) {
         if (frame == null) {
             return;
@@ -980,6 +1031,117 @@ public final class BenchmarkArtifactWriter {
                     .append(System.lineSeparator());
             for (String note : group.notes()) {
                 builder.append("  - ").append(note).append(System.lineSeparator());
+            }
+        }
+        if (!summary.notes().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
+            for (String note : summary.notes()) {
+                builder.append("- ").append(note).append(System.lineSeparator());
+            }
+        }
+        return builder.toString();
+    }
+
+    private static String renderRouteIntelligenceVerdictMarkdown(RouteIntelligenceVerdictSummary summary) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# AI And Route Intelligence Verdict").append(System.lineSeparator()).append(System.lineSeparator());
+        builder.append("- Lane: ").append(summary.laneName()).append(System.lineSeparator());
+        builder.append("- Generated: ").append(summary.generatedAt()).append(System.lineSeparator());
+        builder.append("- Git SHA: ").append(summary.gitRevision()).append(System.lineSeparator());
+        builder.append("- Java: ").append(summary.javaVersion()).append(System.lineSeparator());
+        builder.append("- AI Verdict: ").append(summary.aiVerdict()).append(System.lineSeparator());
+        builder.append("- Routing Verdict: ").append(summary.routingVerdict()).append(System.lineSeparator());
+        builder.append("- Confidence: ").append(summary.confidence()).append(System.lineSeparator());
+        builder.append("- Claim Readiness: ").append(summary.claimReadiness()).append(System.lineSeparator());
+        builder.append("- Architecture audit: ")
+                .append(summary.architectureAuditPass())
+                .append(" (")
+                .append(summary.detectedRequiredComponentCount())
+                .append("/")
+                .append(summary.requiredComponentCount())
+                .append(")")
+                .append(System.lineSeparator());
+        builder.append("- Ablation evidence: ")
+                .append(summary.ablationEvidencePass())
+                .append(" (material ")
+                .append(summary.materialAblationCount())
+                .append("/")
+                .append(summary.requiredAblationCount())
+                .append(")")
+                .append(System.lineSeparator());
+        builder.append("- Repo certification pass: ").append(summary.repoCertificationPass()).append(System.lineSeparator());
+        builder.append("- Legacy warning: ").append(summary.legacyReferenceWarning()).append(System.lineSeparator());
+
+        if (summary.routeHotPathSummary() != null) {
+            builder.append(System.lineSeparator()).append("## Hot Path Smoke").append(System.lineSeparator());
+            builder.append("- Verdict: ").append(summary.routeHotPathSummary().overallPass() ? "PASS" : "FAIL")
+                    .append(System.lineSeparator());
+            builder.append("- Dispatch P95/P99: ")
+                    .append(String.format("%.1fms / %.1fms",
+                            summary.routeHotPathSummary().dispatchP95Ms(),
+                            summary.routeHotPathSummary().dispatchP99Ms()))
+                    .append(System.lineSeparator());
+            builder.append("- Legacy deltas: ")
+                    .append(String.format("gain %.1f, completion %+.2f, deadhead %+.2f",
+                            summary.routeHotPathSummary().overallGainPercent(),
+                            summary.routeHotPathSummary().completionDelta(),
+                            summary.routeHotPathSummary().deadheadDistanceRatioDelta()))
+                    .append(System.lineSeparator());
+        }
+
+        if (summary.repoCertificationSummary() != null) {
+            builder.append(System.lineSeparator()).append("## Repo Lane").append(System.lineSeparator());
+            builder.append("- Verdict: ").append(summary.repoCertificationSummary().overallVerdict())
+                    .append(System.lineSeparator());
+            builder.append("- Correctness: ").append(summary.repoCertificationSummary().correctnessGate().pass())
+                    .append(System.lineSeparator());
+            builder.append("- Latency: ").append(summary.repoCertificationSummary().latencyGate().pass())
+                    .append(System.lineSeparator());
+            builder.append("- Route Quality: ").append(summary.repoCertificationSummary().routeQualityGate().pass())
+                    .append(System.lineSeparator());
+            builder.append("- Continuity: ").append(summary.repoCertificationSummary().continuityGate().pass())
+                    .append(System.lineSeparator());
+            builder.append("- Stress/Safety: ").append(summary.repoCertificationSummary().stressSafetyGate().pass())
+                    .append(System.lineSeparator());
+            for (ScenarioGroupCertificationResult group : summary.repoCertificationSummary().scenarioGroups()) {
+                builder.append("- ").append(group.scenarioGroup())
+                        .append(": route=").append(group.routeQualityPass())
+                        .append(" continuity=").append(group.continuityPass())
+                        .append(" stress=").append(group.stressSafetyPass())
+                        .append(" completion=").append(String.format("%.1f%%", group.completionRate()))
+                        .append(" deadhead=").append(String.format("%.1f%%", group.deadheadDistanceRatio()))
+                        .append(System.lineSeparator());
+            }
+        }
+
+        builder.append(System.lineSeparator()).append("## Architecture Evidence").append(System.lineSeparator());
+        for (AiComponentEvidence evidence : summary.architectureEvidence()) {
+            builder.append("- ").append(evidence.componentName())
+                    .append(": ")
+                    .append(evidence.detected() ? "DETECTED" : "MISSING")
+                    .append(" :: ")
+                    .append(evidence.evidenceAnchor())
+                    .append(" :: ")
+                    .append(evidence.explanation())
+                    .append(System.lineSeparator());
+        }
+
+        builder.append(System.lineSeparator()).append("## Ablation Evidence").append(System.lineSeparator());
+        for (PolicyAblationResult result : summary.ablationEvidence()) {
+            builder.append("- ").append(result.baselinePolicy())
+                    .append(" -> ")
+                    .append(result.candidatePolicy())
+                    .append(": verdict=").append(result.verdict())
+                    .append(" gain=").append(String.format("%.2f", result.overallGainPercent()))
+                    .append(" completion=").append(String.format("%+.2f", result.completionDeltaSummary().mean()))
+                    .append(" deadhead=").append(String.format("%+.2f", result.deadheadDeltaSummary().mean()))
+                    .append(System.lineSeparator());
+        }
+
+        if (!summary.blockers().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Blockers").append(System.lineSeparator());
+            for (String blocker : summary.blockers()) {
+                builder.append("- ").append(blocker).append(System.lineSeparator());
             }
         }
         if (!summary.notes().isEmpty()) {

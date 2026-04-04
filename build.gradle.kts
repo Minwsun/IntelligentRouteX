@@ -184,6 +184,10 @@ val routeAiRegressionSmoke by tasks.registering(Test::class) {
     }
 }
 
+routeAiRegressionSmoke.configure {
+    mustRunAfter("test")
+}
+
 val routeAiCertificationSmokeSummary by tasks.registering(JavaExec::class) {
     group = "verification"
     description = "Summarizes and enforces the absolute smoke route gate with Legacy as reference."
@@ -246,23 +250,59 @@ val repoIntelligenceNightlySummary by tasks.registering(JavaExec::class) {
     args("nightly")
 }
 
+val aiInfluenceAblationSmoke by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Runs smoke AI-ablation evidence proving live model influence."
+    mainClass.set("com.routechain.simulation.AiInfluenceAblationRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("smoke")
+}
+
+val aiInfluenceAblationCertification by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Runs certification-lane AI-ablation evidence proving live model influence."
+    mainClass.set("com.routechain.simulation.AiInfluenceAblationRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("certification")
+}
+
+val routeIntelligenceVerdictSmokeSummary by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Writes a smoke-lane verdict for AI presence and route intelligence."
+    mainClass.set("com.routechain.simulation.RouteIntelligenceVerdictRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("smoke")
+}
+
+val routeIntelligenceVerdictCertificationSummary by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Writes a certification-lane verdict for AI presence and route intelligence."
+    mainClass.set("com.routechain.simulation.RouteIntelligenceVerdictRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("certification")
+}
+
 tasks.named("performanceBenchmarkSmoke") {
+    mustRunAfter("test")
     mustRunAfter(routeAiRegressionSmoke)
     mustRunAfter("microDispatchBenchmark")
     mustRunAfter(cleanBenchmarkArtifacts)
 }
 
 tasks.named("counterfactualArenaSmoke") {
+    mustRunAfter("test")
     mustRunAfter("performanceBenchmarkSmoke")
     mustRunAfter(cleanBenchmarkArtifacts)
 }
 
 routeAiCertificationSmokeSummary.configure {
+    mustRunAfter("test")
     mustRunAfter("counterfactualArenaSmoke")
     mustRunAfter(cleanBenchmarkArtifacts)
 }
 
 tasks.named("microDispatchBenchmark") {
+    mustRunAfter("test")
     mustRunAfter(routeAiRegressionSmoke)
     mustRunAfter(cleanBenchmarkArtifacts)
 }
@@ -301,6 +341,32 @@ tasks.named("omegaAblation") {
 
 repoIntelligenceNightlySummary.configure {
     mustRunAfter("soakBenchmark")
+}
+
+aiInfluenceAblationSmoke.configure {
+    mustRunAfter("test")
+    mustRunAfter("counterfactualArenaSmoke")
+    mustRunAfter(cleanBenchmarkArtifacts)
+}
+
+aiInfluenceAblationCertification.configure {
+    mustRunAfter("test")
+    mustRunAfter(hybridBenchmarkTrackA)
+    mustRunAfter(cleanBenchmarkArtifacts)
+}
+
+routeIntelligenceVerdictSmokeSummary.configure {
+    mustRunAfter("test")
+    mustRunAfter(aiInfluenceAblationSmoke)
+    mustRunAfter("counterfactualArenaSmoke")
+    mustRunAfter("performanceBenchmarkSmoke")
+}
+
+routeIntelligenceVerdictCertificationSummary.configure {
+    mustRunAfter("test")
+    mustRunAfter(aiInfluenceAblationCertification)
+    mustRunAfter(hybridBenchmarkTrackA)
+    mustRunAfter(scenarioBatchCertification)
 }
 
 tasks.register("routeAiCertificationSmoke") {
@@ -345,6 +411,31 @@ tasks.register("repoIntelligenceNightly") {
     dependsOn("omegaAblation")
     dependsOn("soakBenchmark")
     dependsOn(repoIntelligenceNightlySummary)
+}
+
+tasks.register("routeIntelligenceVerdictSmoke") {
+    group = "verification"
+    description = "Runs smoke evidence and emits a verdict on real AI influence and route intelligence."
+    dependsOn(cleanBenchmarkArtifacts)
+    dependsOn("test")
+    dependsOn(routeAiRegressionSmoke)
+    dependsOn("microDispatchBenchmark")
+    dependsOn("performanceBenchmarkSmoke")
+    dependsOn("counterfactualArenaSmoke")
+    dependsOn(routeAiCertificationSmokeSummary)
+    dependsOn(aiInfluenceAblationSmoke)
+    dependsOn(routeIntelligenceVerdictSmokeSummary)
+}
+
+tasks.register("routeIntelligenceVerdictCertification") {
+    group = "verification"
+    description = "Runs certification evidence and emits a verdict on real AI influence and route intelligence."
+    dependsOn(cleanBenchmarkArtifacts)
+    dependsOn("routeIntelligenceVerdictSmoke")
+    dependsOn(scenarioBatchCertification)
+    dependsOn(hybridBenchmarkTrackA)
+    dependsOn(aiInfluenceAblationCertification)
+    dependsOn(routeIntelligenceVerdictCertificationSummary)
 }
 
 tasks.register<JavaExec>("soakBenchmark") {
