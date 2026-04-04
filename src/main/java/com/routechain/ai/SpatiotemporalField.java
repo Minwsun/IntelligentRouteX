@@ -75,6 +75,9 @@ public class SpatiotemporalField {
 
         // 2. Count orders per cell (pending and active)
         for (Order order : allOrders) {
+            if (!contributesPickupDemand(order)) {
+                continue;
+            }
             int[] cell = cellOf(order.getPickupPoint());
             if (cell != null) {
                 orderCount[cell[0]][cell[1]]++;
@@ -169,6 +172,16 @@ public class SpatiotemporalField {
     /**
      * Apply 3×3 kernel averaging to propagate field values to neighbors.
      */
+    private boolean contributesPickupDemand(Order order) {
+        if (order == null || order.getStatus() == null) {
+            return false;
+        }
+        return switch (order.getStatus()) {
+            case CONFIRMED, PENDING_ASSIGNMENT, ASSIGNED, PICKUP_EN_ROUTE -> true;
+            default -> false;
+        };
+    }
+
     private void diffuse(double[][] field) {
         double[][] buffer = new double[ROWS][COLS];
         for (int r = 0; r < ROWS; r++) {

@@ -196,6 +196,35 @@ class OmegaStressRegimeTest {
     }
 
     @Test
+    void bundledWaveCountsAsSingleCoveragePlan() throws Exception {
+        OmegaDispatchAgent agent = new OmegaDispatchAgent(List.of());
+        Driver driver = new Driver(
+                "D-WAVE-COVERAGE",
+                "Wave Coverage Driver",
+                new GeoPoint(10.7765, 106.7009),
+                "R1",
+                VehicleType.MOTORBIKE);
+
+        DispatchPlan wave = new DispatchPlan(
+                driver,
+                new DispatchPlan.Bundle(
+                        "WAVE-COVERAGE",
+                        List.of(order("W-1", 0), order("W-2", 10), order("W-3", 20)),
+                        118000.0,
+                        3),
+                List.of());
+
+        Method method = OmegaDispatchAgent.class.getDeclaredMethod(
+                "countRealAssignedPlans",
+                List.class);
+        method.setAccessible(true);
+        int coverageUnits = (int) method.invoke(agent, List.of(wave));
+
+        assertEquals(1, coverageUnits,
+                "Coverage gating should count one executable driver-plan, not the wave bundle size");
+    }
+
+    @Test
     void minimumCoverageTargetScalesBeyondLegacyOneToThreeWindow() throws Exception {
         OmegaDispatchAgent agent = new OmegaDispatchAgent(List.of());
         Method method = OmegaDispatchAgent.class.getDeclaredMethod(

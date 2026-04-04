@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertIterableEquals;
 
 class AssignmentSolverThreeOrderPolicyTest {
 
@@ -98,12 +99,90 @@ class AssignmentSolverThreeOrderPolicyTest {
         assertEquals("COMPACT-2", selected.get(0).getBundle().bundleId());
     }
 
+    @Test
+    void quotaSkippedBorrowedPlanMustNotBlockEmergencyFallback() {
+        Driver zoneOneLeader = new Driver(
+                "DRV-A",
+                "Driver A",
+                new GeoPoint(10.7765, 106.7009),
+                "R1",
+                VehicleType.MOTORBIKE);
+        Driver zoneOneRunnerUp = new Driver(
+                "DRV-B",
+                "Driver B",
+                new GeoPoint(10.7770, 106.7013),
+                "R1",
+                VehicleType.MOTORBIKE);
+
+        DispatchPlan borrowedPrimary = plan(
+                zoneOneLeader,
+                "BORROW-A",
+                List.of(order("O-7", 0)),
+                SelectionBucket.BORROWED_COVERAGE,
+                0.91,
+                0.82,
+                0.42);
+        DispatchPlan borrowedQuotaSkipped = plan(
+                zoneOneRunnerUp,
+                "BORROW-B",
+                List.of(order("O-8", 10)),
+                SelectionBucket.BORROWED_COVERAGE,
+                0.88,
+                0.79,
+                0.40);
+        DispatchPlan emergencyRescue = plan(
+                zoneOneRunnerUp,
+                "EMERGENCY-C",
+                List.of(order("O-9", 20, "R2")),
+                SelectionBucket.EMERGENCY_COVERAGE,
+                0.74,
+                0.77,
+                0.18);
+
+        AssignmentSolver solver = new AssignmentSolver();
+        List<DispatchPlan> selected = solver.solve(List.of(
+                borrowedPrimary,
+                borrowedQuotaSkipped,
+                emergencyRescue));
+
+        assertEquals(2, selected.size());
+        assertIterableEquals(
+                List.of("BORROW-A", "EMERGENCY-C"),
+                selected.stream().map(plan -> plan.getBundle().bundleId()).toList());
+    }
+
+    private static DispatchPlan plan(Driver driver,
+                                     String bundleId,
+                                     List<Order> orders,
+                                     SelectionBucket bucket,
+                                     double totalScore,
+                                     double confidence,
+                                     double borrowedDependencyScore) {
+        GeoPoint pickup = orders.get(0).getPickupPoint();
+        GeoPoint dropoff = orders.get(0).getDropoffPoint();
+        DispatchPlan plan = new DispatchPlan(
+                driver,
+                new DispatchPlan.Bundle(bundleId, orders, 42000.0 * orders.size(), orders.size()),
+                List.of(
+                        new DispatchPlan.Stop(orders.get(0).getId(), pickup, DispatchPlan.Stop.StopType.PICKUP, 2.5),
+                        new DispatchPlan.Stop(orders.get(0).getId(), dropoff, DispatchPlan.Stop.StopType.DROPOFF, 12.0)));
+        plan.setSelectionBucket(bucket);
+        plan.setTotalScore(totalScore);
+        plan.setConfidence(confidence);
+        plan.setBorrowedDependencyScore(borrowedDependencyScore);
+        return plan;
+    }
+
     private static Order order(String id, int createdOffsetSeconds) {
+        return order(id, createdOffsetSeconds, "R1");
+    }
+
+    private static Order order(String id, int createdOffsetSeconds, String pickupRegionId) {
         Instant createdAt = Instant.parse("2026-03-25T00:00:00Z").plusSeconds(createdOffsetSeconds);
         return new Order(
                 id,
                 "CUS-" + id,
-                "R1",
+                pickupRegionId,
                 new GeoPoint(10.7768 + createdOffsetSeconds * 0.00001, 106.7011),
                 new GeoPoint(10.7825 + createdOffsetSeconds * 0.00001, 106.7078),
                 "R2",

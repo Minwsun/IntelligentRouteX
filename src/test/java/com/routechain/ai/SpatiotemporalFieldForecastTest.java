@@ -60,6 +60,32 @@ class SpatiotemporalFieldForecastTest {
         assertEquals(SpatiotemporalField.COLS, opportunity[0].length);
     }
 
+    @Test
+    void pickupDemandIgnoresOrdersAlreadyPastPickup() {
+        GeoPoint pickup = new GeoPoint(10.7775, 106.7015);
+
+        SpatiotemporalField pendingField = new SpatiotemporalField();
+        Order pending = order("PENDING-1", pickup, Instant.parse("2026-04-01T10:00:00Z"));
+        pendingField.update(List.of(pending), List.of(), 18, 0.35, WeatherProfile.CLEAR);
+
+        SpatiotemporalField pickedUpField = new SpatiotemporalField();
+        Order pickedUp = order("PICKED-UP-1", pickup, Instant.parse("2026-04-01T10:00:00Z"));
+        pickedUp.markPickedUp(Instant.parse("2026-04-01T10:05:00Z"));
+        pickedUpField.update(List.of(pickedUp), List.of(), 18, 0.35, WeatherProfile.CLEAR);
+
+        SpatiotemporalField assignedField = new SpatiotemporalField();
+        Order assigned = order("ASSIGNED-1", pickup, Instant.parse("2026-04-01T10:00:00Z"));
+        assigned.assignDriver("DRV-1", Instant.parse("2026-04-01T10:03:00Z"));
+        assignedField.update(List.of(assigned), List.of(), 18, 0.35, WeatherProfile.CLEAR);
+
+        assertTrue(pendingField.getDemandAt(pickup) > 0.0,
+                "Fresh pending orders should contribute pickup demand");
+        assertTrue(assignedField.getDemandAt(pickup) > 0.0,
+                "Assigned orders should still contribute until the pickup actually happens");
+        assertEquals(0.0, pickedUpField.getDemandAt(pickup),
+                "Picked-up orders should no longer pin demand to the old pickup hotspot");
+    }
+
     private static Order order(String id, GeoPoint pickup, Instant createdAt) {
         return new Order(
                 id,

@@ -62,7 +62,10 @@ public final class GraphShadowProjector {
                     ));
         }
 
-        List<Driver> candidateDrivers = drivers == null ? List.of() : drivers.stream().limit(8).toList();
+        List<Order> rankedOrders = rankOrdersForShadow(pendingOrders);
+        List<Driver> candidateDrivers = rankDriversForShadow(drivers, rankedOrders).stream()
+                .limit(8)
+                .toList();
         for (Driver driver : candidateDrivers) {
             String driverCellId = field.cellKeyOf(driver.getCurrentLocation());
             nodes.add(new GraphNodeRef(
@@ -92,7 +95,9 @@ public final class GraphShadowProjector {
             }
         }
 
-        List<Order> candidateOrders = pendingOrders == null ? List.of() : pendingOrders.stream().limit(8).toList();
+        List<Order> candidateOrders = rankedOrders.stream()
+                .limit(8)
+                .toList();
         for (Order order : candidateOrders) {
             nodes.add(new GraphNodeRef(
                     "ORDER",
@@ -173,6 +178,32 @@ public final class GraphShadowProjector {
         return snapshot;
     }
 
+    private List<Driver> rankDriversForShadow(List<Driver> drivers, List<Order> pendingOrders) {
+        if (drivers == null || drivers.isEmpty()) {
+            return List.of();
+        }
+        return drivers.stream()
+                .sorted(Comparator
+                        .comparingInt((Driver driver) -> driver.isAvailable() ? 0 : 1)
+                        .thenComparingDouble(driver -> minDistanceKmToPending(driver, pendingOrders))
+                        .thenComparingInt(Driver::getCurrentOrderCount)
+                        .thenComparing(Driver::getId))
+                .toList();
+    }
+
+    private List<Order> rankOrdersForShadow(List<Order> pendingOrders) {
+        if (pendingOrders == null || pendingOrders.isEmpty()) {
+            return List.of();
+        }
+        return pendingOrders.stream()
+                .sorted(Comparator
+                        .comparing(Order::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(Comparator.comparingDouble(Order::getPredictedLateRisk).reversed())
+                        .thenComparing(Comparator.comparingDouble(Order::getPickupDelayHazard).reversed())
+                        .thenComparing(Order::getId))
+                .toList();
+    }
+
     private List<FutureCellValue> buildFutureCellValues(List<CellValueSnapshot> topCells) {
         List<FutureCellValue> values = new ArrayList<>();
         for (CellValueSnapshot cell : topCells) {
@@ -230,6 +261,16 @@ public final class GraphShadowProjector {
 
     private double distanceKm(double latA, double lngA, double latB, double lngB) {
         return new GeoPoint(latA, lngA).distanceTo(new GeoPoint(latB, lngB)) / 1000.0;
+    }
+
+    private double minDistanceKmToPending(Driver driver, List<Order> pendingOrders) {
+        if (driver == null || pendingOrders == null || pendingOrders.isEmpty()) {
+            return Double.POSITIVE_INFINITY;
+        }
+        return pendingOrders.stream()
+                .mapToDouble(order -> driver.getCurrentLocation().distanceTo(order.getPickupPoint()) / 1000.0)
+                .min()
+                .orElse(Double.POSITIVE_INFINITY);
     }
 
     private List<GraphNodeRef> dedupeNodes(List<GraphNodeRef> nodes) {

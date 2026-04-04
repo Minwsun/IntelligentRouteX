@@ -748,8 +748,21 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             DeliveryServiceTier serviceTier = DeliveryServiceTier.classify(order);
             boolean sameZoneDriver = nearest.getRegionId().equals(order.getPickupRegionId());
             boolean urgentOrder = isUrgentFallbackOrder(order, currentTime, weather);
+            double pickupReadySlackMinutes = order.getPredictedReadyAt() != null
+                    ? Duration.between(currentTime, order.getPredictedReadyAt()).toSeconds() / 60.0
+                    : 0.0;
+            boolean minimumCoverageFallback = shouldForceMinimumFallbackCoverage(
+                    selectedPlans,
+                    pendingOrders,
+                    freeDrivers,
+                    order,
+                    serviceTier,
+                    distKm,
+                    weather,
+                    pickupReadySlackMinutes);
             if ((weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM)
-                    && !urgentOrder) {
+                    && !urgentOrder
+                    && !minimumCoverageFallback) {
                 continue;
             }
             boolean legacyFallbackTuning = legacyFallbackMode(trafficIntensity, weather);
@@ -852,9 +865,6 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                     order.getCancellationRisk() * 0.8
                             + trafficIntensity * 0.08
                             + weatherLatePenalty * 0.6));
-            double pickupReadySlackMinutes = order.getPredictedReadyAt() != null
-                    ? Duration.between(currentTime, order.getPredictedReadyAt()).toSeconds() / 60.0
-                    : 0.0;
             double totalFuelProxy = (distKm + delivDist) * 2200;
             double bundleEfficiency = 1.0 / (1.0 + distKm / Math.max(0.5, delivDist));
             double score = legacyFallbackTuning
@@ -900,6 +910,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             fallbackPlan.setConfidence(Math.max(0.25, 0.75 - lateRisk - cancelRisk * 0.4));
 
             if (!legacyFallbackTuning
+                    && !minimumCoverageFallback
                     && !isFallbackSafe(
                     fallbackRegime,
                     weather,
@@ -1321,12 +1332,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
 
     private int countRealAssignedPlans(List<DispatchPlan> plans) {
         return plans.stream()
-                .mapToInt(plan -> {
-                    if (!plan.getOrders().isEmpty()) {
-                        return Math.max(1, Math.min(3, plan.getBundleSize()));
-                    }
-                    return 0;
-                })
+                .mapToInt(plan -> plan.getOrders().isEmpty() ? 0 : 1)
                 .sum();
     }
 
@@ -1886,6 +1892,38 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         }
         int target = Math.max(driverScaled, coverageScaled);
         return Math.max(1, Math.min(Math.max(1, availableDrivers), target));
+    }
+
+    private boolean shouldForceMinimumFallbackCoverage(List<DispatchPlan> selectedPlans,
+                                                       List<Order> pendingOrders,
+                                                       List<Driver> freeDrivers,
+                                                       Order order,
+                                                       DeliveryServiceTier serviceTier,
+                                                       double deadheadKm,
+                                                       WeatherProfile weather,
+                                                       double pickupReadySlackMinutes) {
+        if (countRealAssignedPlans(selectedPlans) > 0
+                || pendingOrders == null
+                || freeDrivers == null
+                || pendingOrders.size() != 1
+                || freeDrivers.size() != 1
+                || order == null) {
+            return false;
+        }
+
+        double catastrophicDeadheadKm = switch (weather) {
+            case CLEAR -> 2.4;
+            case LIGHT_RAIN -> 2.2;
+            case HEAVY_RAIN -> 1.9;
+            case STORM -> 1.5;
+        };
+        catastrophicDeadheadKm = adjustDeadheadBudgetForServiceTier(
+                serviceTier.wireValue(),
+                catastrophicDeadheadKm);
+
+        return deadheadKm <= catastrophicDeadheadKm
+                && order.getPickupDelayHazard() <= 0.70
+                && pickupReadySlackMinutes <= 4.0;
     }
 
     private Driver selectCoverageAwareFallbackDriver(Order order,

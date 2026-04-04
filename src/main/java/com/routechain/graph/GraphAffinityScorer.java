@@ -28,6 +28,7 @@ public final class GraphAffinityScorer {
         GeoPoint endPoint = plan.getEndZonePoint();
         String sourceCellId = field.cellKeyOf(driverPoint);
         String targetCellId = field.cellKeyOf(endPoint);
+        String driverNodeId = "driver-" + plan.getDriver().getId();
 
         double topologyScore = topologyScore(driverPoint, pickupPoint, endPoint, weather, trafficIntensity, field);
         double bundleCompatibilityScore = bundleCompatibilityScore(plan.getOrders());
@@ -41,8 +42,8 @@ public final class GraphAffinityScorer {
                 1.0 - field.getTrafficForecastAt(endPoint, 10) * 0.70 - field.getWeatherForecastAt(endPoint, 10) * 0.30));
         double structuralAffinity = snapshot.affinities().stream()
                 .filter(affinity -> affinity.relationType().equals("DRIVER_IN_ZONE"))
-                .filter(affinity -> affinity.source().cellId().equals(sourceCellId)
-                        || affinity.target().cellId().equals(targetCellId))
+                .filter(affinity -> affinity.source().nodeId().equals(driverNodeId))
+                .filter(affinity -> affinity.target().cellId().equals(targetCellId))
                 .map(GraphAffinitySnapshot::affinityScore)
                 .max(Comparator.naturalOrder())
                 .orElse(0.0);

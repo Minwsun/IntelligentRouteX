@@ -7,7 +7,6 @@ import com.routechain.domain.Order;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -54,8 +53,6 @@ public class AssignmentSolver {
         Set<String> usedDrivers = new HashSet<>();
         Set<String> usedOrders = new HashSet<>();
         List<DispatchPlan> selected = new ArrayList<>();
-        Map<String, Integer> borrowedQuotaByZone = new HashMap<>();
-        Map<String, Integer> emergencyQuotaByZone = new HashMap<>();
 
         List<SelectionBucket> passOrder = List.of(
                 SelectionBucket.WAVE_LOCAL,
@@ -75,22 +72,14 @@ public class AssignmentSolver {
             if (bucketPlans.isEmpty()) {
                 continue;
             }
-            List<DispatchPlan> matched = matchZoneGroups(bucketPlans, usedDrivers, usedOrders);
+            List<DispatchPlan> matched = matchZoneGroups(
+                    bucketPlans,
+                    usedDrivers,
+                    usedOrders,
+                    zoneSelectionCap(bucket));
             for (DispatchPlan plan : matched) {
-                if (bucket == SelectionBucket.BORROWED_COVERAGE) {
-                    String zone = getZoneKey(plan);
-                    if (borrowedQuotaByZone.getOrDefault(zone, 0) >= 1) {
-                        continue;
-                    }
-                    borrowedQuotaByZone.merge(zone, 1, Integer::sum);
-                } else if (bucket == SelectionBucket.EMERGENCY_COVERAGE) {
-                    String zone = getZoneKey(plan);
-                    if (emergencyQuotaByZone.getOrDefault(zone, 0) >= 1) {
-                        continue;
-                    }
-                    emergencyQuotaByZone.merge(zone, 1, Integer::sum);
-                }
                 selected.add(plan);
+                reservePlan(plan, usedDrivers, usedOrders);
             }
         }
         return selected;
@@ -98,7 +87,8 @@ public class AssignmentSolver {
 
     private List<DispatchPlan> matchZoneGroups(List<DispatchPlan> plans,
                                                Set<String> usedDrivers,
-                                               Set<String> usedOrders) {
+                                               Set<String> usedOrders,
+                                               int zoneSelectionCap) {
         if (plans.isEmpty()) {
             return List.of();
         }
@@ -107,15 +97,23 @@ public class AssignmentSolver {
             zoneGroups.computeIfAbsent(getZoneKey(plan), ignored -> new ArrayList<>()).add(plan);
         }
         List<DispatchPlan> result = new ArrayList<>();
+        Set<String> proposedDrivers = new HashSet<>(usedDrivers);
+        Set<String> proposedOrders = new HashSet<>(usedOrders);
         for (List<DispatchPlan> groupPlans : zoneGroups.values()) {
+            int acceptedInZone = 0;
             for (List<DispatchPlan> subGroup : partitionGroup(groupPlans)) {
-                List<DispatchPlan> matched = auctionMatch(subGroup, usedDrivers, usedOrders);
+                if (acceptedInZone >= zoneSelectionCap) {
+                    break;
+                }
+                List<DispatchPlan> matched = auctionMatch(subGroup, proposedDrivers, proposedOrders);
+                int remainingZoneCapacity = zoneSelectionCap - acceptedInZone;
+                if (matched.size() > remainingZoneCapacity) {
+                    matched = new ArrayList<>(matched.subList(0, remainingZoneCapacity));
+                }
                 result.addAll(matched);
+                acceptedInZone += matched.size();
                 for (DispatchPlan plan : matched) {
-                    usedDrivers.add(plan.getDriver().getId());
-                    for (Order order : plan.getOrders()) {
-                        usedOrders.add(order.getId());
-                    }
+                    reservePlan(plan, proposedDrivers, proposedOrders);
                 }
             }
         }
@@ -182,6 +180,22 @@ public class AssignmentSolver {
         for (Order order : plan.getOrders()) {
             localUsedOrders.remove(order.getId());
         }
+    }
+
+    private void reservePlan(DispatchPlan plan,
+                             Set<String> usedDrivers,
+                             Set<String> usedOrders) {
+        usedDrivers.add(plan.getDriver().getId());
+        for (Order order : plan.getOrders()) {
+            usedOrders.add(order.getId());
+        }
+    }
+
+    private int zoneSelectionCap(SelectionBucket bucket) {
+        return switch (bucket) {
+            case BORROWED_COVERAGE, EMERGENCY_COVERAGE -> 1;
+            default -> Integer.MAX_VALUE;
+        };
     }
 
     private SelectionBucket effectiveBucket(DispatchPlan plan) {
