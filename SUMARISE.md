@@ -20,6 +20,27 @@ Neu session sau can mot diem bat dau nhanh, doc:
 3. `Section 4` - Da verify gi
 4. `Section 6` - Viec can lam tiep
 
+## 0.1 Update bo sung sau handoff goc
+
+Sau khi file nay duoc tao, repo da co them mot batch runtime/auth quan trong:
+
+- Redis-backed `DriverPresenceStore`
+- Redis-backed `OfferRuntimeStore`
+- Kafka outbox relay co claim/retry/stale-claim reclaim
+- JWT security infrastructure + actor ownership guard + websocket handshake auth
+- correlation id filter + JSON error envelope on dinh
+- them migration `V5__outbox_relay_runtime.sql`
+- them test cho:
+  - Redis driver presence
+  - Redis offer runtime
+  - Kafka outbox relay
+  - security web mvc
+  - websocket JWT handshake
+
+Trang thai verify moi nhat:
+
+- `./gradlew.bat --no-daemon test` da pass toan bo vao ngay `2026-04-04`
+
 ## 1. North Star va huong di dang khoa
 
 Repo da chuyen ro tu:
