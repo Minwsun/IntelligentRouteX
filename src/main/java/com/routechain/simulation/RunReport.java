@@ -72,6 +72,7 @@ public record RunReport(
         double borrowedDeadheadPerExecutedOrderKm,
         double fallbackDeadheadPerExecutedOrderKm,
         double waveDeadheadPerExecutedOrderKm,
+        DispatchStageBreakdown stageLatency,
         LatencyBreakdown latency,
         IntelligenceScorecard intelligence,
         ScenarioAcceptanceResult acceptance,
@@ -84,6 +85,7 @@ public record RunReport(
         if (recovery == null) {
             recovery = DispatchRecoveryDecomposition.empty();
         }
+        stageLatency = stageLatency == null ? DispatchStageBreakdown.empty() : stageLatency;
         latency = latency == null ? LatencyBreakdown.empty() : latency;
         intelligence = intelligence == null ? IntelligenceScorecard.empty() : intelligence;
         acceptance = acceptance == null ? ScenarioAcceptanceResult.empty() : acceptance;

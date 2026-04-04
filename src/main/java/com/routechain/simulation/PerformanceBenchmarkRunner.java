@@ -44,12 +44,16 @@ public final class PerformanceBenchmarkRunner {
         BenchmarkArtifactWriter.writeEnvironmentManifest(environment);
 
         LatencyBreakdown microLatency = null;
+        DispatchStageBreakdown microStageLatency = null;
         List<RunReport> scenarioRuns = List.of();
         MemoryGcSummary soakSummary = null;
 
         if ("all".equals(mode) || "micro".equals(mode) || smoke) {
-            microLatency = runMicroBenchmark(smoke);
+            MicroBenchmarkResult microBenchmark = runMicroBenchmark(smoke);
+            microLatency = microBenchmark.latency();
+            microStageLatency = microBenchmark.stageLatency();
             BenchmarkArtifactWriter.writeLatencyBreakdown("micro/omega-hotpath", microLatency);
+            BenchmarkArtifactWriter.writeDispatchStageBreakdown("micro/omega-hotpath", microStageLatency);
         }
         if ("all".equals(mode) || "scenario".equals(mode) || smoke) {
             scenarioRuns = runScenarioBench(smoke);
@@ -69,9 +73,21 @@ public final class PerformanceBenchmarkRunner {
                 + " dispatchP95=" + String.format("%.2f", sloSummary.dispatchP95Ms())
                 + " dispatchP99=" + String.format("%.2f", sloSummary.dispatchP99Ms())
                 + " measurementValid=" + sloSummary.measurementValid());
+        if (smoke && !scenarioRuns.isEmpty()) {
+            DispatchStageBreakdown stageLatency = scenarioRuns.get(0).stageLatency();
+            System.out.println("[PerformanceBenchmark][Stage] dominant="
+                    + stageLatency.dominantStageByP95()
+                    + " graphShadowP95=" + String.format("%.2f", stageLatency.graphShadowProjection().p95Ms())
+                    + " candidateP95=" + String.format("%.2f", stageLatency.candidateGeneration().p95Ms())
+                    + " graphAffinityP95=" + String.format("%.2f", stageLatency.graphAffinityScoring().p95Ms())
+                    + " optimizerP95=" + String.format("%.2f", stageLatency.optimizerSolve().p95Ms())
+                    + " fallbackP95=" + String.format("%.2f", stageLatency.fallbackInjection().p95Ms())
+                    + " repositionP95=" + String.format("%.2f", stageLatency.repositionSelection().p95Ms())
+                    + " cacheHitRate=" + String.format("%.1f%%", stageLatency.graphShadowCacheHitRate()));
+        }
     }
 
-    private static LatencyBreakdown runMicroBenchmark(boolean smoke) {
+    private static MicroBenchmarkResult runMicroBenchmark(boolean smoke) {
         SimulationEngine engine = new SimulationEngine(SEEDS.get(0));
         engine.setDispatchMode(SimulationEngine.DispatchMode.OMEGA);
         engine.setRouteLatencyMode(SimulationEngine.RouteLatencyMode.IMMEDIATE);
@@ -87,17 +103,34 @@ public final class PerformanceBenchmarkRunner {
             engine.tickHeadless();
         }
 
-        List<Order> pending = pendingOrdersOf(engine);
-        List<Driver> available = availableDriversOf(engine);
+        DispatchInputSnapshot snapshot = captureMicroBenchmarkSnapshot(engine, smoke ? 80 : 180);
+        List<Order> pending = snapshot.pending();
+        List<Driver> available = snapshot.available();
         if (pending.isEmpty() || available.isEmpty()) {
-            throw new IllegalStateException("Micro benchmark requires pending orders and available drivers");
+            throw new IllegalStateException("Micro benchmark requires pending orders and available drivers"
+                    + " (pending=" + pending.size()
+                    + ", available=" + available.size() + ")");
         }
 
         int iterations = smoke ? 10 : 30;
         List<Long> dispatchSamples = new ArrayList<>(iterations);
         List<Long> modelSamples = new ArrayList<>();
         List<Long> neuralSamples = new ArrayList<>();
+        List<DispatchStageTimings> stageSamples = new ArrayList<>(iterations);
         Instant now = engine.getClock().currentInstant();
+        int untimedWarmupDispatches = smoke ? 2 : 4;
+        for (int i = 0; i < untimedWarmupDispatches; i++) {
+            engine.getOmegaAgent().dispatch(
+                    new ArrayList<>(pending),
+                    new ArrayList<>(available),
+                    new ArrayList<>(engine.getDrivers()),
+                    new ArrayList<>(engine.getActiveOrders()),
+                    engine.getSimulatedHour(),
+                    engine.getTrafficIntensity(),
+                    engine.getWeatherProfile(),
+                    now,
+                    engine.getCurrentRunId());
+        }
         for (int i = 0; i < iterations; i++) {
             long startedNanos = System.nanoTime();
             OmegaDispatchAgent.DispatchResult result = engine.getOmegaAgent().dispatch(
@@ -116,9 +149,13 @@ public final class PerformanceBenchmarkRunner {
             dispatchSamples.add(wallClockMs);
             modelSamples.addAll(result.modelInferenceLatencySamples());
             neuralSamples.addAll(result.neuralPriorLatencySamples());
+            stageSamples.add(result.stageTimings());
         }
 
-        return LatencyBreakdown.fromSamples(dispatchSamples, modelSamples, neuralSamples, List.of(), 0.0);
+        return new MicroBenchmarkResult(
+                LatencyBreakdown.fromSamples(dispatchSamples, modelSamples, neuralSamples, List.of(), 0.0),
+                DispatchStageBreakdown.fromSamples(stageSamples, List.of())
+        );
     }
 
     private static List<RunReport> runScenarioBench(boolean smoke) {
@@ -291,10 +328,26 @@ public final class PerformanceBenchmarkRunner {
     private static List<Driver> availableDriversOf(SimulationEngine engine) {
         return engine.getDrivers().stream()
                 .filter(driver -> driver.getState() == DriverState.ONLINE_IDLE
+                        || driver.isPrePickupAugmentable()
                         || driver.getState() == DriverState.ROUTE_PENDING)
                 .sorted(Comparator.comparing(Driver::getId))
                 .toList();
     }
+
+    private static DispatchInputSnapshot captureMicroBenchmarkSnapshot(SimulationEngine engine,
+                                                                       int searchTicks) {
+        for (int i = 0; i <= Math.max(0, searchTicks); i++) {
+            List<Order> pending = pendingOrdersOf(engine);
+            List<Driver> available = availableDriversOf(engine);
+            if (!pending.isEmpty() && !available.isEmpty()) {
+                return new DispatchInputSnapshot(pending, available);
+            }
+            engine.tickHeadless();
+        }
+        return new DispatchInputSnapshot(List.of(), List.of());
+    }
+
+    private record DispatchInputSnapshot(List<Order> pending, List<Driver> available) {}
 
     private static long gcCount() {
         long count = 0L;
@@ -345,5 +398,10 @@ public final class PerformanceBenchmarkRunner {
             double demandMultiplier,
             double trafficIntensity,
             WeatherProfile weatherProfile
+    ) {}
+
+    private record MicroBenchmarkResult(
+            LatencyBreakdown latency,
+            DispatchStageBreakdown stageLatency
     ) {}
 }

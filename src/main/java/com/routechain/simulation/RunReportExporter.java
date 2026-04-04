@@ -46,6 +46,8 @@ public class RunReportExporter {
             List<Long> dispatchDecisionLatencySamples,
             List<Long> modelInferenceLatencySamples,
             List<Long> neuralPriorLatencySamples,
+            List<DispatchStageTimings> dispatchStageTimingSamples,
+            List<Long> replayRetrainLatencySamples,
             List<Long> assignmentAgingLatencySamples,
             double tickThroughputPerSec,
             int totalAssignments,
@@ -221,6 +223,9 @@ public class RunReportExporter {
                 Math.abs(postDropOrderHitRate / 100.0 - avgPredictedPostDropOpportunity),
                 avgPredictedPostDropOpportunity
         );
+        DispatchStageBreakdown stageLatency = DispatchStageBreakdown.fromSamples(
+                dispatchStageTimingSamples,
+                replayRetrainLatencySamples);
         LatencyBreakdown latency = LatencyBreakdown.fromSamples(
                 dispatchDecisionLatencySamples,
                 modelInferenceLatencySamples,
@@ -293,6 +298,7 @@ public class RunReportExporter {
                 borrowedDeadheadPerExecutedOrderKm,
                 fallbackDeadheadPerExecutedOrderKm,
                 waveDeadheadPerExecutedOrderKm,
+                stageLatency,
                 latency,
                 intelligence,
                 acceptance,

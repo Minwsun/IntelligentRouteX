@@ -271,7 +271,9 @@ public final class ControlRoomFrameBuilder {
                                                                    List<CellValueSnapshot> topCells) {
         List<Driver> candidateDrivers = engine.getDrivers().stream()
                 .filter(driver -> driver.getState() == DriverState.ONLINE_IDLE
-                        || driver.getState() == DriverState.ROUTE_PENDING)
+                        || driver.getState() == DriverState.ROUTE_PENDING
+                        || driver.getState() == DriverState.PICKUP_EN_ROUTE
+                        || driver.getState() == DriverState.WAITING_PICKUP)
                 .limit(Math.min(4, topCells.size()))
                 .toList();
         List<DriverFutureValue> values = new ArrayList<>();
@@ -320,12 +322,28 @@ public final class ControlRoomFrameBuilder {
                         || order.getStatus() == OrderStatus.PENDING_ASSIGNMENT)
                 .limit(4)
                 .toList();
+        if (pendingOrders.isEmpty()) {
+            pendingOrders = engine.getActiveOrders().stream()
+                    .filter(order -> order.getStatus() != OrderStatus.DELIVERED
+                            && order.getStatus() != OrderStatus.CANCELLED
+                            && order.getStatus() != OrderStatus.FAILED)
+                    .limit(4)
+                    .toList();
+        }
         List<Driver> availableDrivers = engine.getDrivers().stream()
                 .filter(driver -> driver.getState() == DriverState.ONLINE_IDLE
-                        || driver.getState() == DriverState.ROUTE_PENDING)
+                        || driver.getState() == DriverState.ROUTE_PENDING
+                        || driver.getState() == DriverState.PICKUP_EN_ROUTE
+                        || driver.getState() == DriverState.WAITING_PICKUP)
                 .filter(driver -> driver.getCurrentOrderCount() < 2)
                 .limit(8)
                 .toList();
+        if (availableDrivers.isEmpty()) {
+            availableDrivers = engine.getDrivers().stream()
+                    .filter(driver -> driver.getState() != DriverState.OFFLINE)
+                    .limit(8)
+                    .toList();
+        }
         List<MarketplaceEdge> edges = new ArrayList<>();
         double weatherSpeedFactor = switch (engine.getWeatherProfile()) {
             case CLEAR -> 1.0;

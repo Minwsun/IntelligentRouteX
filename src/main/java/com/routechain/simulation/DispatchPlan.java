@@ -83,6 +83,7 @@ public class DispatchPlan {
     private double totalScore;
     private double confidence;
     private String traceId;
+    private boolean legacyGuardrailPlan;
 
     public DispatchPlan(Driver driver, Bundle bundle, List<Stop> sequence) {
         this.driver = driver;
@@ -173,6 +174,7 @@ public class DispatchPlan {
     public double getTotalScore() { return totalScore; }
     public double getConfidence() { return confidence; }
     public String getTraceId() { return traceId; }
+    public boolean isLegacyGuardrailPlan() { return legacyGuardrailPlan; }
 
     /** Get the last dropoff point (end zone). */
     public GeoPoint getEndZonePoint() {
@@ -304,6 +306,9 @@ public class DispatchPlan {
     public void setTotalScore(double v) { this.totalScore = v; }
     public void setConfidence(double v) { this.confidence = v; }
     public void setTraceId(String v) { this.traceId = v; }
+    public void setLegacyGuardrailPlan(boolean legacyGuardrailPlan) {
+        this.legacyGuardrailPlan = legacyGuardrailPlan;
+    }
 
     @Override
     public String toString() {

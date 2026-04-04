@@ -29,7 +29,9 @@ public final class BenchmarkArtifactWriter {
     private static final Path ABLATIONS_DIR = ROOT.resolve("ablations");
     private static final Path DRIFT_DIR = ROOT.resolve("drift");
     private static final Path LATENCY_DIR = ROOT.resolve("latency");
+    private static final Path STAGE_LATENCY_DIR = ROOT.resolve("stage-latency");
     private static final Path ACCEPTANCE_DIR = ROOT.resolve("acceptance");
+    private static final Path CERTIFICATION_DIR = ROOT.resolve("certification");
     private static final Path CONTROL_ROOM_DIR = ROOT.resolve("control-room");
     private static final Path CONTROL_ROOM_FRAMES_DIR = CONTROL_ROOM_DIR.resolve("frames");
     private static final Path RUNS_CSV = ROOT.resolve("run_reports.csv");
@@ -39,7 +41,9 @@ public final class BenchmarkArtifactWriter {
     private static final Path ABLATIONS_CSV = ROOT.resolve("policy_ablations.csv");
     private static final Path DRIFT_CSV = ROOT.resolve("drift_snapshots.csv");
     private static final Path LATENCY_CSV = ROOT.resolve("latency_breakdown.csv");
+    private static final Path STAGE_LATENCY_CSV = ROOT.resolve("dispatch_stage_breakdown.csv");
     private static final Path ACCEPTANCE_CSV = ROOT.resolve("scenario_acceptance.csv");
+    private static final Path CERTIFICATION_CSV = ROOT.resolve("route_ai_certification.csv");
     private static final Path CITY_TWIN_CSV = CONTROL_ROOM_DIR.resolve("city_twin_cells.csv");
     private static final Path FUTURE_CELL_VALUE_CSV = CONTROL_ROOM_DIR.resolve("future_cell_values.csv");
     private static final Path DRIVER_FUTURE_VALUE_CSV = CONTROL_ROOM_DIR.resolve("driver_future_values.csv");
@@ -115,6 +119,7 @@ public final class BenchmarkArtifactWriter {
                             report.forecastCalibrationSummary() == null ? 0.0 : report.forecastCalibrationSummary().merchantPrepMaeMinutes(),
                             report.forecastCalibrationSummary() == null ? 0.0 : report.forecastCalibrationSummary().continuationCalibrationGap()));
             writeLatencyBreakdown("run/" + report.runId(), report.latency());
+            writeDispatchStageBreakdown("run/" + report.runId(), report.stageLatency());
             writeScenarioAcceptance(report.acceptance());
             PlatformRuntimeBootstrap.recordRunReport(report);
         } catch (IOException e) {
@@ -383,6 +388,46 @@ public final class BenchmarkArtifactWriter {
         }
     }
 
+    public static void writeDispatchStageBreakdown(String scope, DispatchStageBreakdown stageLatency) {
+        if (stageLatency == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(STAGE_LATENCY_DIR);
+            Files.writeString(
+                    STAGE_LATENCY_DIR.resolve(safe(scope) + ".json"),
+                    GSON.toJson(stageLatency),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            appendCsv(
+                    STAGE_LATENCY_CSV,
+                    "scope,dominantStageByP95,graphShadowP95Ms,candidateGenerationP95Ms,graphAffinityP95Ms,optimizerSolveP95Ms,fallbackInjectionP95Ms,repositionSelectionP95Ms,replayRetrainP95Ms,graphShadowCacheHitRate,avgGeneratedCandidateCount,avgFullyScoredCandidateCount,avgAvailableDriverCount,dispatchSampleCount,replayRetrainSampleCount",
+                    String.format(
+                            "%s,%s,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d",
+                            safe(scope),
+                            safe(stageLatency.dominantStageByP95()),
+                            stageLatency.graphShadowProjection().p95Ms(),
+                            stageLatency.candidateGeneration().p95Ms(),
+                            stageLatency.graphAffinityScoring().p95Ms(),
+                            stageLatency.optimizerSolve().p95Ms(),
+                            stageLatency.fallbackInjection().p95Ms(),
+                            stageLatency.repositionSelection().p95Ms(),
+                            stageLatency.replayRetrain().p95Ms(),
+                            stageLatency.graphShadowCacheHitRate(),
+                            stageLatency.avgGeneratedCandidateCount(),
+                            stageLatency.avgFullyScoredCandidateCount(),
+                            stageLatency.avgAvailableDriverCount(),
+                            stageLatency.dispatchSampleCount(),
+                            stageLatency.replayRetrainSampleCount()
+                    )
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to write dispatch stage latency artifact", e);
+        }
+    }
+
     public static void writeScenarioAcceptance(ScenarioAcceptanceResult acceptance) {
         if (acceptance == null) {
             return;
@@ -416,6 +461,61 @@ public final class BenchmarkArtifactWriter {
             );
         } catch (IOException e) {
             throw new IllegalStateException("Unable to write scenario acceptance artifact", e);
+        }
+    }
+
+    public static void writeRouteAiCertificationSummary(RouteAiCertificationSummary summary) {
+        if (summary == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(CERTIFICATION_DIR);
+            Path jsonPath = CERTIFICATION_DIR.resolve(safe(summary.laneName()) + ".json");
+            Path markdownPath = CERTIFICATION_DIR.resolve(safe(summary.laneName()) + ".md");
+            Files.writeString(
+                    jsonPath,
+                    GSON.toJson(summary),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            Files.writeString(
+                    markdownPath,
+                    renderRouteCertificationMarkdown(summary),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            appendCsv(
+                    CERTIFICATION_CSV,
+                    "laneName,profileName,scenarioName,baselinePolicy,candidatePolicy,routeRegressionPass,measurementValid,dispatchP95Ms,dispatchP99Ms,dispatchP95Pass,dispatchP99Pass,overallGainPercent,completionDelta,deadheadDistanceRatioDelta,postDropOrderHitRateDelta,gainPass,completionPass,deadheadPass,safetyPass,overallPass,dominantDispatchStage",
+                    String.format(
+                            "%s,%s,%s,%s,%s,%s,%s,%.6f,%.6f,%s,%s,%.6f,%.6f,%.6f,%.6f,%s,%s,%s,%s,%s,%s",
+                            safe(summary.laneName()),
+                            safe(summary.profileName()),
+                            safe(summary.scenarioName()),
+                            safe(summary.baselinePolicy()),
+                            safe(summary.candidatePolicy()),
+                            Boolean.toString(summary.routeRegressionPass()),
+                            Boolean.toString(summary.measurementValid()),
+                            summary.dispatchP95Ms(),
+                            summary.dispatchP99Ms(),
+                            Boolean.toString(summary.dispatchP95Pass()),
+                            Boolean.toString(summary.dispatchP99Pass()),
+                            summary.overallGainPercent(),
+                            summary.completionDelta(),
+                            summary.deadheadDistanceRatioDelta(),
+                            summary.postDropOrderHitRateDelta(),
+                            Boolean.toString(summary.gainPass()),
+                            Boolean.toString(summary.completionPass()),
+                            Boolean.toString(summary.deadheadPass()),
+                            Boolean.toString(summary.safetyPass()),
+                            Boolean.toString(summary.overallPass()),
+                            safe(summary.dominantDispatchStage())
+                    )
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to write route AI certification summary", e);
         }
     }
 
@@ -738,6 +838,42 @@ public final class BenchmarkArtifactWriter {
         } catch (IOException e) {
             throw new IllegalStateException("Unable to write " + label + " artifact", e);
         }
+    }
+
+    private static String renderRouteCertificationMarkdown(RouteAiCertificationSummary summary) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# Route AI Certification").append(System.lineSeparator()).append(System.lineSeparator());
+        builder.append("- Lane: ").append(summary.laneName()).append(System.lineSeparator());
+        builder.append("- Verdict: ").append(summary.overallPass() ? "PASS" : "FAIL").append(System.lineSeparator());
+        builder.append("- Profile: ").append(summary.profileName()).append(System.lineSeparator());
+        builder.append("- Scenario: ").append(summary.scenarioName()).append(System.lineSeparator());
+        builder.append("- Candidate: ").append(summary.candidatePolicy())
+                .append(" vs ").append(summary.baselinePolicy()).append(System.lineSeparator());
+        builder.append("- Route regressions: ").append(summary.routeRegressionPass()).append(System.lineSeparator());
+        builder.append("- Measurement valid: ").append(summary.measurementValid()).append(System.lineSeparator());
+        builder.append("- Dispatch P95/P99: ")
+                .append(String.format("%.1fms / %.1fms", summary.dispatchP95Ms(), summary.dispatchP99Ms()))
+                .append(" (targets ")
+                .append(String.format("%.0fms / %.0fms", summary.dispatchP95TargetMs(), summary.dispatchP99TargetMs()))
+                .append(")")
+                .append(System.lineSeparator());
+        builder.append("- Gain/completion/deadhead: ")
+                .append(String.format("%.1f%% / %+.2fpp / %+.2fpp",
+                        summary.overallGainPercent(),
+                        summary.completionDelta(),
+                        summary.deadheadDistanceRatioDelta()))
+                .append(System.lineSeparator());
+        builder.append("- Post-drop delta: ")
+                .append(String.format("%+.2fpp", summary.postDropOrderHitRateDelta()))
+                .append(System.lineSeparator());
+        builder.append("- Dominant stage: ").append(summary.dominantDispatchStage()).append(System.lineSeparator());
+        if (!summary.notes().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
+            for (String note : summary.notes()) {
+                builder.append("- ").append(note).append(System.lineSeparator());
+            }
+        }
+        return builder.toString();
     }
 
     private static String renderControlRoomMarkdown(ControlRoomFrame frame) {

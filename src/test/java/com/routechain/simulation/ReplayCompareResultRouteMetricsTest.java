@@ -89,6 +89,7 @@ class ReplayCompareResultRouteMetricsTest {
                 1.02,
                 1.10,
                 0.96,
+                DispatchStageBreakdown.empty(),
                 new LatencyBreakdown(20.0, 16.0, 92.0, 118.0, 6.0, 10.0, 31.0, 56.0, 1580.0, 2380.0, 7.9, 11, 8),
                 new IntelligenceScorecard(0.71, 0.67, 0.62, 0.59, 0.65, 0.61, 0.63, 1.0, 0.73, 0.69, 0.46, 0.23, 0.81, 0.15, "PASSING", "PASSING"),
                 new ScenarioAcceptanceResult(id, "instant", "local-production-small-50", true, true, true, true, true, "PASSING", "PASSING", ""),

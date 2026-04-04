@@ -25,12 +25,12 @@ public class PlanUtilityScorer {
     private static final double W_MERCHANT_ALIGNMENT = 0.08;
     private static final double W_DROP_EFFICIENCY = 0.14;
     private static final double W_FIRST_ORDER_PROTECTION = 0.08;
-    private static final double W_END_STATE = 0.04;
-    private static final double W_NEXT_ORDER = 0.04;
-    private static final double W_FUTURE_ZONE_LANDING = 0.05;
+    private static final double W_END_STATE = 0.05;
+    private static final double W_NEXT_ORDER = 0.06;
+    private static final double W_FUTURE_ZONE_LANDING = 0.08;
     private static final double W_REMAINING_DROP_PROXIMITY = 0.07;
     private static final double W_DELIVERY_CORRIDOR = 0.08;
-    private static final double W_LAST_DROP_LANDING = 0.10;
+    private static final double W_LAST_DROP_LANDING = 0.12;
     private static final double W_VISIBLE_CLEAN_WAVE = 0.14;
 
     private static final double P_DEADHEAD = 0.30;
@@ -39,10 +39,10 @@ public class PlanUtilityScorer {
     private static final double P_LATE_RISK = 0.28;
     private static final double P_CANCEL_RISK = 0.14;
     private static final double P_OVERLOAD = 0.03;
-    private static final double P_POST_COMPLETION_EMPTY = 0.16;
+    private static final double P_POST_COMPLETION_EMPTY = 0.20;
     private static final double P_ZIGZAG = 0.08;
-    private static final double P_BORROWED_DEPENDENCY = 0.12;
-    private static final double P_EMPTY_RISK = 0.10;
+    private static final double P_BORROWED_DEPENDENCY = 0.18;
+    private static final double P_EMPTY_RISK = 0.14;
 
     private static final double PROFIT_NORM = 50000.0;
     private static final double DEADHEAD_THRESHOLD_KM = 5.0;

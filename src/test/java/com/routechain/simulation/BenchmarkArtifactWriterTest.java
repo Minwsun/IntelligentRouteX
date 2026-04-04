@@ -50,6 +50,7 @@ class BenchmarkArtifactWriterTest {
         assertTrue(runCsv.contains("dominantServiceTier"));
         assertTrue(runCsv.contains("merchantPrepMaeMinutes"));
         assertTrue(Files.exists(root.resolve("latency_breakdown.csv")));
+        assertTrue(Files.exists(root.resolve("dispatch_stage_breakdown.csv")));
         assertTrue(Files.exists(root.resolve("scenario_acceptance.csv")));
         assertTrue(compareCsv.contains("candidate-run"));
         assertTrue(compareCsv.contains("dispatchP95MsDelta"));
@@ -180,6 +181,48 @@ class BenchmarkArtifactWriterTest {
         String driftCsv = Files.readString(root.resolve("drift_snapshots.csv"));
         assertTrue(driftCsv.contains("deadheadDistanceRatio"));
         assertTrue(driftCsv.contains("counterfactual_Omega-current"));
+    }
+
+    @Test
+    void shouldPersistRouteAiCertificationArtifacts() throws IOException {
+        Path root = Path.of("build", "routechain-apex", "benchmarks");
+        deleteRecursively(root);
+
+        RouteAiCertificationSummary summary = new RouteAiCertificationSummary(
+                BenchmarkSchema.VERSION,
+                "route-ai-certification-smoke",
+                "local-production-small-smoke",
+                "counterfactual-normal-smoke",
+                "Legacy",
+                "Omega-current",
+                true,
+                true,
+                118.0,
+                176.0,
+                120.0,
+                180.0,
+                true,
+                true,
+                1.4,
+                0.8,
+                -2.2,
+                12.5,
+                true,
+                true,
+                true,
+                true,
+                true,
+                "graphAffinityScoring",
+                List.of("all gates green")
+        );
+
+        BenchmarkArtifactWriter.writeRouteAiCertificationSummary(summary);
+
+        assertTrue(Files.exists(root.resolve("certification").resolve("route-ai-certification-smoke.json")));
+        assertTrue(Files.exists(root.resolve("certification").resolve("route-ai-certification-smoke.md")));
+        String certificationCsv = Files.readString(root.resolve("route_ai_certification.csv"));
+        assertTrue(certificationCsv.contains("route-ai-certification-smoke"));
+        assertTrue(certificationCsv.contains("Omega-current"));
     }
 
     @Test
@@ -442,6 +485,7 @@ class BenchmarkArtifactWriterTest {
                 1.05,
                 1.14,
                 0.99,
+                DispatchStageBreakdown.empty(),
                 new LatencyBreakdown(22.0, 18.0, 95.0, 118.0, 6.0, 10.0, 34.0, 58.0, 1200.0, 2100.0, 8.5, 12, 10),
                 new IntelligenceScorecard(0.72, 0.68, 0.64, 0.61, 0.66, 0.63, 0.58, 1.0, 0.74, 0.69, 0.54, 0.21, 0.82, 0.13, "STRONG", "PASSING"),
                 new ScenarioAcceptanceResult(scenario, "instant", "local-production-small-50", true, true, true, true, true, "STRONG", "PASSING", ""),

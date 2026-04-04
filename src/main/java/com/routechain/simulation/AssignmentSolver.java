@@ -252,34 +252,36 @@ public class AssignmentSolver {
         SelectionBucket bucket = effectiveBucket(plan);
         double score = plan.getTotalScore();
         if (bucket == SelectionBucket.WAVE_LOCAL || bucket == SelectionBucket.EXTENSION_LOCAL) {
-            score += 0.06;
+            score += bucket == SelectionBucket.WAVE_LOCAL ? 0.10 : 0.08;
         }
         if (bucket == SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD) {
-            score += plan.getPredictedDeadheadKm() <= 1.9
+            score += plan.getPredictedDeadheadKm() <= 1.6
                     && plan.getOnTimeProbability() >= 0.82
-                    && plan.getBorrowedDependencyScore() < 0.25
-                    ? 0.04 : -0.01;
+                    && plan.getBorrowedDependencyScore() < 0.10
+                    && plan.getEmptyRiskAfter() <= 0.45
+                    ? 0.05 : -0.03;
         } else if (bucket == SelectionBucket.BORROWED_COVERAGE) {
-            score -= 0.07;
+            score -= 0.30;
         } else if (bucket == SelectionBucket.EMERGENCY_COVERAGE) {
-            score -= 0.10;
+            score -= 0.32;
         } else if (bucket == SelectionBucket.HOLD_WAIT3) {
             score -= 0.04;
         }
-        score += Math.max(0.0, plan.getExecutionScore()) * 0.12;
-        score += Math.max(0.0, plan.getContinuationScore()) * 0.04;
-        score += Math.max(0.0, plan.getCoverageScore()) * 0.02;
-        score += Math.max(0.0, plan.getGraphAffinityScore()) * 0.05;
-        score -= plan.getPredictedDeadheadKm() * 0.10;
-        score -= plan.getExpectedPostCompletionEmptyKm() * 0.08;
-        score -= plan.getBorrowedDependencyScore() * 0.12;
-        score -= plan.getEmptyRiskAfter() * 0.07;
+        score += Math.max(0.0, plan.getExecutionScore()) * 0.16;
+        score += Math.max(0.0, plan.getContinuationScore()) * 0.05;
+        score += Math.max(0.0, plan.getCoverageScore()) * 0.04;
+        score += Math.max(0.0, plan.getGraphAffinityScore()) * 0.02;
+        score += plan.getLastDropLandingScore() * 0.05;
+        score += plan.getPostDropDemandProbability() * 0.04;
+        score -= plan.getPredictedDeadheadKm() * 0.20;
+        score -= plan.getExpectedPostCompletionEmptyKm() * 0.16;
+        score -= plan.getBorrowedDependencyScore() * 0.30;
+        score -= plan.getEmptyRiskAfter() * 0.18;
         if (plan.isStressFallbackOnly() && plan.getBundleSize() <= 2) {
-            score -= 0.05;
+            score -= 0.08;
         }
         score += plan.getCoverageQuality() * 0.03;
         score += plan.getReplacementDepth() * 0.02;
-        score += plan.getPostDropDemandProbability() * 0.03;
         if (bucket == SelectionBucket.HOLD_WAIT3) {
             score += plan.getWaveReadinessScore() * 0.03;
             if (plan.getHoldRemainingCycles() <= 1) {

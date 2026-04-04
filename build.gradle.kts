@@ -168,6 +168,51 @@ tasks.register<JavaExec>("performanceBenchmarkSmoke") {
     args("smoke")
 }
 
+val routeAiRegressionSmoke by tasks.registering(Test::class) {
+    group = "verification"
+    description = "Runs the route/AI smoke regression suite."
+    useJUnitPlatform()
+    filter {
+        includeTestsMatching("com.routechain.ai.OmegaDispatchBrainContractTest")
+        includeTestsMatching("com.routechain.ai.OmegaStressRegimeTest")
+        includeTestsMatching("com.routechain.ai.DriverPlanGeneratorProfileTest")
+        includeTestsMatching("com.routechain.ai.PlanUtilityScorerSoftLandingTest")
+        includeTestsMatching("com.routechain.ai.SpatiotemporalFieldForecastTest")
+        includeTestsMatching("com.routechain.simulation.AssignmentSolverThreeOrderPolicyTest")
+        includeTestsMatching("com.routechain.simulation.SimulationRoutePendingTest")
+        includeTestsMatching("com.routechain.graph.GraphShadowProjectorStabilityTest")
+    }
+}
+
+val routeAiCertificationSmokeSummary by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Summarizes and enforces the Beat Legacy smoke gate."
+    mainClass.set("com.routechain.simulation.RouteAiCertificationRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("smoke")
+}
+
+tasks.named("performanceBenchmarkSmoke") {
+    mustRunAfter(routeAiRegressionSmoke)
+}
+
+tasks.named("counterfactualArenaSmoke") {
+    mustRunAfter("performanceBenchmarkSmoke")
+}
+
+routeAiCertificationSmokeSummary.configure {
+    mustRunAfter("counterfactualArenaSmoke")
+}
+
+tasks.register("routeAiCertificationSmoke") {
+    group = "verification"
+    description = "Runs route regressions, smoke benchmarks, and the Beat Legacy certification gate."
+    dependsOn(routeAiRegressionSmoke)
+    dependsOn("performanceBenchmarkSmoke")
+    dependsOn("counterfactualArenaSmoke")
+    dependsOn(routeAiCertificationSmokeSummary)
+}
+
 tasks.register<JavaExec>("soakBenchmark") {
     group = "application"
     mainClass.set("com.routechain.simulation.PerformanceBenchmarkRunner")

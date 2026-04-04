@@ -123,8 +123,13 @@ public class DriverPlanGenerator {
         prioritizedClusters.sort(Comparator.comparingDouble(
                 (OrderCluster cluster) -> computeClusterPriority(cluster, weather, trafficIntensity))
                 .reversed());
+        int clusterLimit = clusterProcessingLimit(ctx, weather, trafficIntensity);
+        int candidateBuildBudget = driverCandidateBuildBudget(ctx, weather, trafficIntensity);
 
-        for (OrderCluster cluster : prioritizedClusters) {
+        for (int clusterIndex = 0;
+             clusterIndex < prioritizedClusters.size() && clusterIndex < clusterLimit;
+             clusterIndex++) {
+            OrderCluster cluster = prioritizedClusters.get(clusterIndex);
             if (cluster.orders().size() < 2) {
                 continue;
             }
@@ -135,6 +140,14 @@ public class DriverPlanGenerator {
                 for (DispatchPlan plan : buildBundlePlans(driver, cluster, size, trafficIntensity, weather, regime, ctx)) {
                     classifyOrderPlan(plan, sameMerchantWaves, compactClusterWaves, corridorAlignedWaves, stretchMultiOrder);
                 }
+            }
+            if (countActionablePlans(
+                    safeSingles,
+                    sameMerchantWaves,
+                    compactClusterWaves,
+                    corridorAlignedWaves,
+                    stretchMultiOrder) >= candidateBuildBudget) {
+                break;
             }
         }
 
@@ -148,7 +161,17 @@ public class DriverPlanGenerator {
             }
         }
 
-        for (Order order : ctx.reachableOrders()) {
+        List<Order> prioritizedReachableOrders = new ArrayList<>(ctx.reachableOrders());
+        prioritizedReachableOrders.sort(Comparator
+                .comparingDouble((Order order) -> singleOrderPriority(order, driver, ctx))
+                .reversed()
+                .thenComparing(Order::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(Order::getId));
+        int singleLimit = Math.min(
+                prioritizedReachableOrders.size(),
+                singleOrderCandidateLimit(ctx, weather, trafficIntensity));
+        for (int index = 0; index < singleLimit; index++) {
+            Order order = prioritizedReachableOrders.get(index);
             DispatchPlan plan = buildSingleOrderPlan(driver, order, trafficIntensity, weather, regime, ctx);
             if (plan != null) {
                 safeSingles.add(plan);
@@ -364,8 +387,7 @@ public class DriverPlanGenerator {
         comboPool.sort(Comparator
                 .comparingDouble((Order order) -> candidateSubsetOrderPriority(order, driver, ctx))
                 .reversed());
-        int poolSize = Math.min(comboPool.size(),
-                executionProfile == OmegaDispatchAgent.ExecutionProfile.SHOWCASE_PICKUP_WAVE_8 ? 8 : 7);
+        int poolSize = Math.min(comboPool.size(), comboPoolSize());
         List<List<Order>> rankedCombos = new ArrayList<>();
         buildRankedSubsetCombos(
                 comboPool.subList(0, poolSize),
@@ -377,11 +399,129 @@ public class DriverPlanGenerator {
                 .comparingDouble((List<Order> subset) -> scoreCandidateSubset(subset, driver, ctx))
                 .reversed());
         rankedCombos.stream()
-                .limit(executionProfile == OmegaDispatchAgent.ExecutionProfile.SHOWCASE_PICKUP_WAVE_8 ? 10 : 6)
+                .limit(rankedComboLimit(bundleSize))
                 .map(List::copyOf)
                 .forEach(subsets::add);
 
         return subsets;
+    }
+
+    private int clusterProcessingLimit(DriverDecisionContext ctx,
+                                       WeatherProfile weather,
+                                       double trafficIntensity) {
+        if (executionProfile == OmegaDispatchAgent.ExecutionProfile.SHOWCASE_PICKUP_WAVE_8) {
+            return Integer.MAX_VALUE;
+        }
+        int limit = switch (weather) {
+            case CLEAR -> 3;
+            case LIGHT_RAIN -> 3;
+            case HEAVY_RAIN -> 4;
+            case STORM -> 5;
+        };
+        if (ctx != null && (ctx.localReachableBacklog() >= 5 || ctx.reachableOrders().size() >= 6)) {
+            limit += 1;
+        }
+        if (trafficIntensity >= 0.55) {
+            limit += 1;
+        }
+        if (ctx != null && requiresHardThreeOrderLaunch(executionProfile, ctx)) {
+            limit += 1;
+        }
+        return Math.max(2, limit);
+    }
+
+    private int driverCandidateBuildBudget(DriverDecisionContext ctx,
+                                           WeatherProfile weather,
+                                           double trafficIntensity) {
+        if (executionProfile == OmegaDispatchAgent.ExecutionProfile.SHOWCASE_PICKUP_WAVE_8) {
+            return Integer.MAX_VALUE;
+        }
+        int budget = switch (weather) {
+            case CLEAR -> 7;
+            case LIGHT_RAIN -> 8;
+            case HEAVY_RAIN -> 9;
+            case STORM -> 10;
+        };
+        if (ctx != null && ctx.localReachableBacklog() >= 5) {
+            budget += 1;
+        }
+        if (trafficIntensity >= 0.55) {
+            budget += 1;
+        }
+        return Math.max(6, budget);
+    }
+
+    private int singleOrderCandidateLimit(DriverDecisionContext ctx,
+                                          WeatherProfile weather,
+                                          double trafficIntensity) {
+        if (executionProfile == OmegaDispatchAgent.ExecutionProfile.SHOWCASE_PICKUP_WAVE_8) {
+            return Integer.MAX_VALUE;
+        }
+        int limit = switch (weather) {
+            case CLEAR -> 5;
+            case LIGHT_RAIN -> 6;
+            case HEAVY_RAIN -> 7;
+            case STORM -> 8;
+        };
+        if (ctx != null && ctx.localReachableBacklog() >= 5) {
+            limit += 1;
+        }
+        if (trafficIntensity >= 0.55) {
+            limit += 1;
+        }
+        return Math.max(4, limit);
+    }
+
+    private int comboPoolSize() {
+        if (executionProfile == OmegaDispatchAgent.ExecutionProfile.SHOWCASE_PICKUP_WAVE_8) {
+            return 8;
+        }
+        return smallBatchOnly ? 4 : 5;
+    }
+
+    private int rankedComboLimit(int bundleSize) {
+        if (executionProfile == OmegaDispatchAgent.ExecutionProfile.SHOWCASE_PICKUP_WAVE_8) {
+            return 10;
+        }
+        if (smallBatchOnly) {
+            return 2;
+        }
+        return bundleSize >= 3 ? 4 : 3;
+    }
+
+    private int syntheticWavePoolSize() {
+        if (executionProfile == OmegaDispatchAgent.ExecutionProfile.SHOWCASE_PICKUP_WAVE_8) {
+            return 7;
+        }
+        return 5;
+    }
+
+    private int syntheticWaveComboLimit(int bundleSize) {
+        if (executionProfile == OmegaDispatchAgent.ExecutionProfile.SHOWCASE_PICKUP_WAVE_8) {
+            return 8;
+        }
+        return bundleSize >= 4 ? 2 : 4;
+    }
+
+    private int countActionablePlans(List<DispatchPlan> safeSingles,
+                                     List<DispatchPlan> sameMerchantWaves,
+                                     List<DispatchPlan> compactClusterWaves,
+                                     List<DispatchPlan> corridorAlignedWaves,
+                                     List<DispatchPlan> stretchMultiOrder) {
+        return safeSingles.size()
+                + sameMerchantWaves.size()
+                + compactClusterWaves.size()
+                + corridorAlignedWaves.size()
+                + stretchMultiOrder.size();
+    }
+
+    private double singleOrderPriority(Order order,
+                                       Driver driver,
+                                       DriverDecisionContext ctx) {
+        double urgency = clamp01(order.getPredictedLateRisk()) * 0.18
+                + clamp01(order.getPickupDelayHazard()) * 0.16
+                + clamp01(order.getCancellationRisk()) * 0.06;
+        return candidateSubsetOrderPriority(order, driver, ctx) + urgency;
     }
 
     private double candidateSubsetOrderPriority(Order order,
@@ -619,7 +759,7 @@ public class DriverPlanGenerator {
         wavePool.sort(Comparator
                 .comparingDouble((Order order) -> syntheticWaveOrderPriority(order, ctx))
                 .reversed());
-        int poolSize = Math.min(7, wavePool.size());
+        int poolSize = Math.min(syntheticWavePoolSize(), wavePool.size());
         List<List<Order>> rankedCombos = new ArrayList<>();
         for (int i = 0; i < poolSize - 2; i++) {
             for (int j = i + 1; j < poolSize - 1; j++) {
@@ -632,7 +772,7 @@ public class DriverPlanGenerator {
                 .comparingDouble((List<Order> seed) -> scoreSyntheticWaveSeed(seed, ctx))
                 .reversed());
         seeds.addAll(rankedCombos.stream()
-                .limit(8)
+                .limit(syntheticWaveComboLimit(3))
                 .toList());
 
         boolean cleanLaunchWindow = !ctx.harshWeatherStress()
@@ -640,7 +780,7 @@ public class DriverPlanGenerator {
                 && ctx.threeOrderSlackBuffer() >= 1.5;
         if (cleanLaunchWindow && reachable.size() >= 4) {
             List<List<Order>> rankedFourCombos = new ArrayList<>();
-            int fourPoolSize = Math.min(7, wavePool.size());
+            int fourPoolSize = Math.min(syntheticWavePoolSize(), wavePool.size());
             for (int i = 0; i < fourPoolSize - 3; i++) {
                 for (int j = i + 1; j < fourPoolSize - 2; j++) {
                     for (int k = j + 1; k < fourPoolSize - 1; k++) {
@@ -658,7 +798,7 @@ public class DriverPlanGenerator {
                     .comparingDouble((List<Order> seed) -> scoreSyntheticWaveSeed(seed, ctx))
                     .reversed());
             rankedFourCombos.stream()
-                    .limit(executionProfile == OmegaDispatchAgent.ExecutionProfile.SHOWCASE_PICKUP_WAVE_8 ? 8 : 4)
+                    .limit(syntheticWaveComboLimit(4))
                     .forEach(seeds::add);
         }
 
@@ -699,7 +839,7 @@ public class DriverPlanGenerator {
 
         SequenceOptimizer seqOpt = createSequenceOptimizer(trafficIntensity, weather, regime, ctx);
         int maxSequences = executionProfile == OmegaDispatchAgent.ExecutionProfile.SHOWCASE_PICKUP_WAVE_8
-                ? 12 : effectiveBundleSize >= 4 ? 10 : orders.size() >= 3 ? 8 : 6;
+                ? 12 : effectiveBundleSize >= 4 ? 5 : orders.size() >= 3 ? 4 : 3;
         List<List<Stop>> sequences = seqOpt.generateFeasibleSequences(
                 driver, bundle, maxSequences);
         if (sequences.isEmpty()) {
@@ -981,7 +1121,9 @@ public class DriverPlanGenerator {
 
         double bestScore = Double.NEGATIVE_INFINITY;
         List<Stop> best = sequences.get(0);
-        int maxCandidates = Math.min(6, sequences.size());
+        int maxCandidates = Math.min(
+                executionProfile == OmegaDispatchAgent.ExecutionProfile.SHOWCASE_PICKUP_WAVE_8 ? 6 : 4,
+                sequences.size());
         for (int i = 0; i < maxCandidates; i++) {
             List<Stop> candidate = sequences.get(i);
             SequenceOptimizer.RouteObjectiveMetrics metrics =

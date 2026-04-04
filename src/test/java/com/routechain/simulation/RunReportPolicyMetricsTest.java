@@ -97,6 +97,7 @@ class RunReportPolicyMetricsTest {
                 1.10,
                 1.20,
                 1.05,
+                DispatchStageBreakdown.empty(),
                 new LatencyBreakdown(18.0, 14.0, 86.0, 112.0, 5.0, 9.0, 30.0, 54.0, 1600.0, 2400.0, 8.2, 10, 8),
                 new IntelligenceScorecard(0.70, 0.66, 0.61, 0.58, 0.64, 0.60, 0.62, 2.0, 0.72, 0.68, 0.44, 0.24, 0.80, 0.15, "PASSING", "PASSING"),
                 new ScenarioAcceptanceResult("scenario-a", "instant", "local-production-small-50", true, true, true, true, true, "PASSING", "PASSING", ""),
