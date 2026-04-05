@@ -1,0 +1,33 @@
+management:
+  health:
+    redis:
+      enabled: true
+
+routechain:
+  security:
+    enabled: ${ROUTECHAIN_SECURITY_ENABLED:true}
+    actor-id-claim: ${ROUTECHAIN_SECURITY_ACTOR_ID_CLAIM:preferred_username}
+  persistence:
+    jdbc:
+      enabled: ${ROUTECHAIN_PERSISTENCE_JDBC_ENABLED:true}
+      url: ${ROUTECHAIN_PERSISTENCE_JDBC_URL:jdbc:postgresql://localhost:5432/routechain}
+      username: ${ROUTECHAIN_PERSISTENCE_JDBC_USERNAME:routechain}
+      password: ${ROUTECHAIN_PERSISTENCE_JDBC_PASSWORD:routechain}
+    redis:
+      enabled: ${ROUTECHAIN_PERSISTENCE_REDIS_ENABLED:true}
+      host: ${ROUTECHAIN_PERSISTENCE_REDIS_HOST:localhost}
+      port: ${ROUTECHAIN_PERSISTENCE_REDIS_PORT:6379}
+      password: ${ROUTECHAIN_PERSISTENCE_REDIS_PASSWORD:}
+      database: ${ROUTECHAIN_PERSISTENCE_REDIS_DATABASE:0}
+      key-prefix: ${ROUTECHAIN_PERSISTENCE_REDIS_KEY_PREFIX:routechain}
+  outbox:
+    enabled: ${ROUTECHAIN_OUTBOX_ENABLED:true}
+    bootstrap-servers: ${ROUTECHAIN_OUTBOX_BOOTSTRAP_SERVERS:localhost:9092}
+    topic-prefix: ${ROUTECHAIN_OUTBOX_TOPIC_PREFIX:routechain.}
+
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI:http://localhost:8088/realms/routechain-demo}

@@ -26,6 +26,7 @@ This stack brings up the production-small shape used for demo and future integra
 1. Kafka single-node
 2. Flink jobmanager/taskmanager
 3. Redis online feature cache
+4. Keycloak demo auth realm
 4. Postgres/PostGIS operational read model
 5. MinIO + Iceberg REST lakehouse spine
 6. ClickHouse benchmark warehouse
@@ -43,6 +44,32 @@ This command:
 2. Starts the neural route-prior sidecar.
 3. Runs `compileJava`, `performanceBenchmarkSmoke`, `counterfactualArenaSmoke`.
 4. Prints the latest control-room markdown summary from `build/routechain-apex/benchmarks/control-room/control_room_latest.md`.
+
+## Production-small API run
+
+Use the Spring profile below so the API talks to the local production-small stack instead of the default in-memory mode.
+
+```powershell
+$env:SPRING_PROFILES_ACTIVE="production-small"
+$env:ROUTECHAIN_SECURITY_ENABLED="true"
+$env:ROUTECHAIN_SECURITY_ACTOR_ID_CLAIM="preferred_username"
+$env:SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI="http://localhost:8088/realms/routechain-demo"
+./gradlew.bat --no-daemon apiRun
+```
+
+### Demo tokens
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/get_demo_token.ps1 -Role customer -AsBearer
+powershell -ExecutionPolicy Bypass -File scripts/get_demo_token.ps1 -Role driver -AsBearer
+powershell -ExecutionPolicy Bypass -File scripts/get_demo_token.ps1 -Role ops -AsBearer
+```
+
+Demo identities imported into Keycloak:
+
+- `customer-demo / demo123`
+- `driver-demo / demo123`
+- `ops-demo / demo123`
 
 ## Manual commands
 
@@ -71,6 +98,24 @@ powershell -ExecutionPolicy Bypass -File scripts/model/stop_neural_sidecar.ps1 -
 powershell -ExecutionPolicy Bypass -File scripts/benchmark/run_recovery_loop.ps1 -RepoRoot D:\Project\IntelligentRouteX
 ```
 
+### Realistic HCMC scenario batch
+
+```powershell
+./gradlew.bat --no-daemon scenarioBatchRealisticHcmc
+```
+
+### Dataset workspace bootstrap
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/benchmark/fetch_route_research_datasets.ps1 -RepoRoot D:\Project\IntelligentRouteX
+```
+
+Optional Amazon last-mile download:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/benchmark/fetch_route_research_datasets.ps1 -RepoRoot D:\Project\IntelligentRouteX -FetchAmazonLastMile
+```
+
 ### Control room console only
 
 ```powershell
@@ -82,3 +127,4 @@ powershell -ExecutionPolicy Bypass -File scripts/benchmark/run_recovery_loop.ps1
 - If ONNX files are missing in `models/onnx`, system stays deterministic with fallback traces.
 - Neural prior is nearline only; execution gate remains final authority.
 - `ops/production-small/docker-compose.yml` is the local-first production-small shape for demo and artifact-driven development.
+- `benchmark-baselines/dataset-manifest.json` documents how each public dataset is used and what it is allowed to prove.

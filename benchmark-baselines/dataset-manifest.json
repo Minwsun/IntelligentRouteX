@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "v1",
+  "datasets": [
+    {
+      "datasetId": "solomon-vrptw-100",
+      "displayName": "Solomon VRPTW 100 customers",
+      "sourceUrl": "https://www.sintef.no/projectweb/top/vrptw/solomon-benchmark/",
+      "localPath": "benchmarks/vrp/solomon",
+      "acquisition": "manual-download",
+      "usage": "Tier A academic VRPTW benchmark for route-quality regression and paper-grade comparison",
+      "notes": "Use as public OR baseline, not as direct proof of food-delivery superiority."
+    },
+    {
+      "datasetId": "homberger-200",
+      "displayName": "Gehring & Homberger 200 customers",
+      "sourceUrl": "https://www.sintef.no/projectweb/top/vrptw/homberger-benchmark/",
+      "localPath": "benchmarks/vrp/homberger",
+      "acquisition": "manual-download",
+      "usage": "Larger Tier A routing benchmark for scale realism and certification stress",
+      "notes": "Use as scale-up academic benchmark."
+    },
+    {
+      "datasetId": "amazon-last-mile-2021",
+      "displayName": "Amazon Last Mile Routing Challenge 2021",
+      "sourceUrl": "s3://amazon-last-mile-challenges/almrrc2021",
+      "localPath": "benchmarks/vrp/amazon-lastmile",
+      "acquisition": "aws-s3-sync",
+      "usage": "Offline calibration for last-mile stop geometry, route realism, and batching heuristics",
+      "notes": "Useful for realism calibration, not direct proof for online food-delivery dispatch."
+    },
+    {
+      "datasetId": "xedu-hcmc",
+      "displayName": "Xe Du HCMC delivery dataset",
+      "sourceUrl": "https://www.kaggle.com/datasets/hunhquanglc/xe-d-ho-chi-minh-city-delivery-service-dataset",
+      "localPath": "benchmarks/vrp/hcmc-xedu",
+      "acquisition": "manual-download",
+      "usage": "Calibration for HCMC time buckets, zone demand shape, and merchant/order rhythm",
+      "notes": "Use for demand calibration only, not as route-optimization ground truth."
+    }
+  ]
+}

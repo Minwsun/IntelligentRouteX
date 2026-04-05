@@ -41,6 +41,23 @@ Trang thai verify moi nhat:
 
 - `./gradlew.bat --no-daemon test` da pass toan bo vao ngay `2026-04-04`
 
+## 0.2 Update phase-1 slice ngay 2026-04-05
+
+Them mot batch thay doi de day nhanh phase `algorithm + bigdata`:
+
+- `SpatiotemporalField` da tach `open pickup demand` khoi `committed pickup pressure`
+- them `application-production-small.yml` de bat `jdbc + redis + outbox + security`
+- them Keycloak demo realm import trong `ops/production-small`
+- them helper script `scripts/get_demo_token.ps1`
+- them `RealisticScenarioGenerator` + lane `scenarioBatchRealisticHcmc`
+- them `benchmark-baselines/dataset-manifest.json` + script bootstrap dataset workspace
+
+Y nghia:
+
+- route truth layer sach hon cho benchmark/tuning clean-regime
+- production-small auth demo khong con phu thuoc vao sub UUID
+- benchmark research bat dau co HCMC realistic batch reproducible thay vi chi co scenario tinh
+
 ## 1. North Star va huong di dang khoa
 
 Repo da chuyen ro tu:

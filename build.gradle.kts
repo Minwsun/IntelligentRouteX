@@ -1,3 +1,5 @@
+import java.util.UUID
+
 plugins {
     java
     application
@@ -70,8 +72,13 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-tasks.test {
+val testRunId = UUID.randomUUID().toString()
+
+tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    binaryResultsDirectory.set(layout.buildDirectory.dir("test-results/$name/binary-$testRunId"))
+    reports.junitXml.outputLocation.set(layout.buildDirectory.dir("test-results/$name/junit-$testRunId"))
+    reports.html.outputLocation.set(layout.buildDirectory.dir("reports/tests/$name-$testRunId"))
 }
 
 application {
@@ -216,6 +223,14 @@ val scenarioBatchNightly by tasks.registering(JavaExec::class) {
     mainClass.set("com.routechain.simulation.ScenarioBatchRunner")
     classpath = sourceSets["main"].runtimeClasspath
     args("nightly")
+}
+
+val scenarioBatchRealisticHcmc by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Runs the reproducible HCMC realistic scenario batch."
+    mainClass.set("com.routechain.simulation.ScenarioBatchRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("realistic-hcmc", "1", "42")
 }
 
 val hybridBenchmarkTrackA by tasks.registering(JavaExec::class) {

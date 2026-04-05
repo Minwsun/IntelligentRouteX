@@ -344,6 +344,13 @@ public class SimulationEngine {
         orderArrivalEngine.setManualDemandMultiplier(dm);
     }
     public void setInitialDriverCount(int count) { this.initialDriverCount = count; }
+    public void setSimulationStartTime(int hour, int minute) {
+        int safeHour = Math.max(0, Math.min(23, hour));
+        int safeMinute = Math.max(0, Math.min(59, minute));
+        this.simulatedHour = safeHour;
+        this.simulatedMinute = safeMinute;
+        this.clock.reset(safeHour, safeMinute);
+    }
     public DriverSupplyEngine getDriverSupplyEngine() { return driverSupplyEngine; }
     public ScenarioShockEngine getShockEngine() { return shockEngine; }
     public double getTrafficIntensity() { return trafficIntensity; }

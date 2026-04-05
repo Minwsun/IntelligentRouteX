@@ -80,10 +80,14 @@ class SpatiotemporalFieldForecastTest {
 
         assertTrue(pendingField.getDemandAt(pickup) > 0.0,
                 "Fresh pending orders should contribute pickup demand");
-        assertTrue(assignedField.getDemandAt(pickup) > 0.0,
-                "Assigned orders should still contribute until the pickup actually happens");
+        assertEquals(0.0, assignedField.getDemandAt(pickup),
+                "Assigned orders should no longer count as open pickup demand");
+        assertTrue(assignedField.getCommittedPickupPressureAt(pickup) > 0.0,
+                "Assigned orders should still leave committed pickup pressure for prep and congestion signals");
         assertEquals(0.0, pickedUpField.getDemandAt(pickup),
                 "Picked-up orders should no longer pin demand to the old pickup hotspot");
+        assertEquals(0.0, pickedUpField.getCommittedPickupPressureAt(pickup),
+                "Picked-up orders should also stop contributing committed pickup pressure");
     }
 
     private static Order order(String id, GeoPoint pickup, Instant createdAt) {

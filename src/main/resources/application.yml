@@ -19,6 +19,7 @@ springdoc:
 routechain:
   security:
     enabled: false
+    actor-id-claim: ${ROUTECHAIN_SECURITY_ACTOR_ID_CLAIM:sub}
   persistence:
     jdbc:
       enabled: false

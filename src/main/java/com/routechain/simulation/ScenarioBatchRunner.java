@@ -14,6 +14,7 @@ import java.util.function.ToDoubleFunction;
  * the legacy dispatch lane against the Omega driver-centric lane.
  */
 public class ScenarioBatchRunner {
+    private static final RealisticScenarioGenerator REALISTIC_SCENARIO_GENERATOR = new RealisticScenarioGenerator();
 
     @FunctionalInterface
     private interface ScenarioSetup {
@@ -24,6 +25,8 @@ public class ScenarioBatchRunner {
 
     private record ScenarioConfig(
             String name,
+            int startHour,
+            int startMinute,
             int ticks,
             int drivers,
             double demandMultiplier,
@@ -39,7 +42,7 @@ public class ScenarioBatchRunner {
             double demandMultiplier,
             double trafficIntensity,
             WeatherProfile weatherProfile) {
-        return new ScenarioConfig(name, ticks, drivers, demandMultiplier,
+        return new ScenarioConfig(name, 12, 0, ticks, drivers, demandMultiplier,
                 trafficIntensity, weatherProfile, NO_OP_SETUP);
     }
 
@@ -51,7 +54,21 @@ public class ScenarioBatchRunner {
             double trafficIntensity,
             WeatherProfile weatherProfile,
             ScenarioSetup setup) {
-        return new ScenarioConfig(name, ticks, drivers, demandMultiplier,
+        return new ScenarioConfig(name, 12, 0, ticks, drivers, demandMultiplier,
+                trafficIntensity, weatherProfile, setup == null ? NO_OP_SETUP : setup);
+    }
+
+    private static ScenarioConfig scenario(
+            String name,
+            int startHour,
+            int startMinute,
+            int ticks,
+            int drivers,
+            double demandMultiplier,
+            double trafficIntensity,
+            WeatherProfile weatherProfile,
+            ScenarioSetup setup) {
+        return new ScenarioConfig(name, startHour, startMinute, ticks, drivers, demandMultiplier,
                 trafficIntensity, weatherProfile, setup == null ? NO_OP_SETUP : setup);
     }
 
@@ -106,6 +123,12 @@ public class ScenarioBatchRunner {
             runConfiguredComparisonBatch("smoke");
             return;
         }
+        if (args.length > 0 && "realistic-hcmc".equalsIgnoreCase(args[0])) {
+            int runsPerBucket = args.length > 1 ? Integer.parseInt(args[1]) : 1;
+            long baseSeed = args.length > 2 ? Long.parseLong(args[2]) : 42L;
+            runRealisticHcmcBatch(runsPerBucket, baseSeed);
+            return;
+        }
 
         System.out.println("=================================================");
         System.out.println("   ROUTECHAIN AI - SCENARIO BATCH COMPARISON");
@@ -127,6 +150,55 @@ public class ScenarioBatchRunner {
 
             System.out.println();
             System.out.println("Scenario: " + scenario.name());
+            System.out.println("  Legacy : " + legacy.toSummary());
+            System.out.println("  Omega  : " + omega.toSummary());
+            System.out.println("  Compare: " + compare.toSummary());
+        }
+
+        System.out.println("=================================================");
+    }
+
+    private static void runRealisticHcmcBatch(int runsPerBucket, long baseSeed) {
+        System.out.println("=================================================");
+        System.out.println("   ROUTECHAIN AI - REALISTIC HCMC BATCH");
+        System.out.println("=================================================");
+
+        List<RealisticScenarioGenerator.RealisticScenarioSpec> specs =
+                REALISTIC_SCENARIO_GENERATOR.generate(runsPerBucket, baseSeed);
+
+        for (RealisticScenarioGenerator.RealisticScenarioSpec spec : specs) {
+            ScenarioConfig scenario = scenario(
+                    spec.scenarioName(),
+                    spec.startHour(),
+                    spec.startMinute(),
+                    spec.ticks(),
+                    spec.drivers(),
+                    spec.demandMultiplier(),
+                    spec.trafficIntensity(),
+                    spec.weatherProfile(),
+                    engine -> REALISTIC_SCENARIO_GENERATOR.configureShocks(spec, engine)
+            );
+
+            RunReport legacy = runScenario(
+                    scenario,
+                    SimulationEngine.DispatchMode.LEGACY,
+                    OmegaDispatchAgent.AblationMode.FULL,
+                    OmegaDispatchAgent.ExecutionProfile.MAINLINE_REALISTIC,
+                    spec.seed());
+            RunReport omega = runScenario(
+                    scenario,
+                    SimulationEngine.DispatchMode.OMEGA,
+                    OmegaDispatchAgent.AblationMode.FULL,
+                    OmegaDispatchAgent.ExecutionProfile.MAINLINE_REALISTIC,
+                    spec.seed());
+            ReplayCompareResult compare = ReplayCompareResult.compare(legacy, omega);
+            BenchmarkArtifactWriter.writeCompare(compare);
+
+            System.out.println();
+            System.out.println("Scenario: " + scenario.name()
+                    + " bucket=" + spec.bucket()
+                    + " start=" + String.format("%02d:%02d", scenario.startHour(), scenario.startMinute())
+                    + " seed=" + spec.seed());
             System.out.println("  Legacy : " + legacy.toSummary());
             System.out.println("  Omega  : " + omega.toSummary());
             System.out.println("  Compare: " + compare.toSummary());
@@ -453,6 +525,7 @@ public class ScenarioBatchRunner {
         engine.setDemandMultiplier(scenario.demandMultiplier());
         engine.setTrafficIntensity(scenario.trafficIntensity());
         engine.setWeatherProfile(scenario.weatherProfile());
+        engine.setSimulationStartTime(scenario.startHour(), scenario.startMinute());
         scenario.setup().configure(engine.getShockEngine());
 
         for (int i = 0; i < scenario.ticks(); i++) {

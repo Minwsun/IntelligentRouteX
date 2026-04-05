@@ -44,12 +44,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         RouteChainJwtAuthoritiesConverter.class,
         RouteChainExceptionHandler.class,
         CorrelationIdFilter.class,
+        JwtActorIdentityResolver.class,
         ActorAccessGuard.class
 })
 class RouteChainSecurityWebMvcTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private RouteChainSecurityProperties securityProperties;
 
     @MockBean
     private UserOrderingService userOrderingService;
@@ -99,6 +103,22 @@ class RouteChainSecurityWebMvcTest {
                 .andExpect(status().isOk())
                 .andExpect(header().exists(CorrelationIdFilter.HEADER_NAME))
                 .andExpect(jsonPath("$").isArray());
+    }
+
+    @Test
+    void preferredUsernameCanDriveActorOwnership() throws Exception {
+        when(driverOperationsService.offers("driver-demo")).thenReturn(List.of());
+        securityProperties.setActorIdClaim("preferred_username");
+        try {
+            mockMvc.perform(get("/v1/driver/offers")
+                            .param("driverId", "driver-demo")
+                            .with(jwt().jwt(jwt -> jwt
+                                            .subject("uuid-subject")
+                                            .claim("preferred_username", "driver-demo"))))
+                    .andExpect(status().isOk());
+        } finally {
+            securityProperties.setActorIdClaim("sub");
+        }
     }
 
     @Test

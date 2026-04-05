@@ -27,13 +27,16 @@ public class WebSocketJwtHandshakeInterceptor implements HandshakeInterceptor {
     private final RouteChainSecurityProperties securityProperties;
     private final JwtDecoder jwtDecoder;
     private final RouteChainJwtAuthoritiesConverter authoritiesConverter;
+    private final JwtActorIdentityResolver actorIdentityResolver;
 
     public WebSocketJwtHandshakeInterceptor(RouteChainSecurityProperties securityProperties,
                                             JwtDecoder jwtDecoder,
-                                            RouteChainJwtAuthoritiesConverter authoritiesConverter) {
+                                            RouteChainJwtAuthoritiesConverter authoritiesConverter,
+                                            JwtActorIdentityResolver actorIdentityResolver) {
         this.securityProperties = securityProperties;
         this.jwtDecoder = jwtDecoder;
         this.authoritiesConverter = authoritiesConverter;
+        this.actorIdentityResolver = actorIdentityResolver;
     }
 
     public HandshakeInterceptor forAudience(Audience audience) {
@@ -73,11 +76,12 @@ public class WebSocketJwtHandshakeInterceptor implements HandshakeInterceptor {
             try {
                 Jwt jwt = jwtDecoder.decode(resolveToken(request));
                 Set<String> roles = authoritiesConverter.extractRoles(jwt);
-                if (!isAuthorized(request, jwt, roles)) {
+                String actorId = actorIdentityResolver.resolveActorId(jwt);
+                if (!isAuthorized(request, actorId, roles)) {
                     response.setStatusCode(HttpStatus.FORBIDDEN);
                     return false;
                 }
-                attributes.put("jwtSubject", jwt.getSubject());
+                attributes.put("jwtSubject", actorId);
                 attributes.put("jwtRoles", roles);
                 return true;
             } catch (Exception ex) {
@@ -93,10 +97,10 @@ public class WebSocketJwtHandshakeInterceptor implements HandshakeInterceptor {
                                    Exception exception) {
         }
 
-        private boolean isAuthorized(ServerHttpRequest request, Jwt jwt, Set<String> roles) {
+        private boolean isAuthorized(ServerHttpRequest request, String actorId, Set<String> roles) {
             return switch (audience) {
-                case DRIVER -> jwt.getSubject().equals(queryParam(request, "driverId")) || hasOpsRole(roles);
-                case USER -> jwt.getSubject().equals(queryParam(request, "customerId")) || hasOpsRole(roles);
+                case DRIVER -> actorId.equals(queryParam(request, "driverId")) || hasOpsRole(roles);
+                case USER -> actorId.equals(queryParam(request, "customerId")) || hasOpsRole(roles);
                 case OPS -> hasOpsRole(roles);
             };
         }

@@ -46,6 +46,7 @@ public class SpatiotemporalField {
     private final double[][] attractionScore  = new double[ROWS][COLS];
     private final double[][] weatherExposure  = new double[ROWS][COLS];
     private final double[][] congestionExposure = new double[ROWS][COLS];
+    private final double[][] committedPickupPressure = new double[ROWS][COLS];
 
     // ── Auxiliary state ─────────────────────────────────────────────────
     private final double[][] driverDensity    = new double[ROWS][COLS];
@@ -70,17 +71,22 @@ public class SpatiotemporalField {
             for (int c = 0; c < COLS; c++) {
                 orderCount[r][c] = 0;
                 driverCount[r][c] = 0;
+                committedPickupPressure[r][c] = committedPickupPressure[r][c] * TEMPORAL_DECAY;
             }
         }
 
-        // 2. Count orders per cell (pending and active)
+        // 2. Count open pickup demand separately from already-claimed pickup pressure.
         for (Order order : allOrders) {
-            if (!contributesPickupDemand(order)) {
+            int[] cell = cellOf(order.getPickupPoint());
+            if (cell == null) {
                 continue;
             }
-            int[] cell = cellOf(order.getPickupPoint());
-            if (cell != null) {
+            if (contributesOpenPickupDemand(order)) {
                 orderCount[cell[0]][cell[1]]++;
+            }
+            if (contributesCommittedPickupPressure(order)) {
+                committedPickupPressure[cell[0]][cell[1]] =
+                        committedPickupPressure[cell[0]][cell[1]] * TEMPORAL_DECAY + (1 - TEMPORAL_DECAY);
             }
         }
 
@@ -134,7 +140,8 @@ public class SpatiotemporalField {
                         trafficIntensity * 0.55
                                 + Math.min(1.0, demandIntensity[r][c] / 5.0) * 0.20
                                 + shortagePressure[r][c] * 0.15
-                                + Math.min(1.0, driverDensity[r][c] / 5.0) * 0.10));
+                                + Math.min(1.0, driverDensity[r][c] / 5.0) * 0.10
+                                + committedPickupPressure[r][c] * 0.18));
 
                 weatherExposure[r][c] = Math.max(0, Math.min(1.0,
                         weatherSeverity * (0.80 + shortagePressure[r][c] * 0.20)));
@@ -172,12 +179,22 @@ public class SpatiotemporalField {
     /**
      * Apply 3×3 kernel averaging to propagate field values to neighbors.
      */
-    private boolean contributesPickupDemand(Order order) {
+    private boolean contributesOpenPickupDemand(Order order) {
         if (order == null || order.getStatus() == null) {
             return false;
         }
         return switch (order.getStatus()) {
-            case CONFIRMED, PENDING_ASSIGNMENT, ASSIGNED, PICKUP_EN_ROUTE -> true;
+            case CONFIRMED, PENDING_ASSIGNMENT -> true;
+            default -> false;
+        };
+    }
+
+    private boolean contributesCommittedPickupPressure(Order order) {
+        if (order == null || order.getStatus() == null) {
+            return false;
+        }
+        return switch (order.getStatus()) {
+            case ASSIGNED, PICKUP_EN_ROUTE -> true;
             default -> false;
         };
     }
@@ -237,6 +254,12 @@ public class SpatiotemporalField {
     public double getDriverDensityAt(GeoPoint p) {
         int[] cell = cellOf(p);
         return cell != null ? driverDensity[cell[0]][cell[1]] : 0;
+    }
+
+    /** Get committed pickup pressure at a geographic point. */
+    public double getCommittedPickupPressureAt(GeoPoint p) {
+        int[] cell = cellOf(p);
+        return cell != null ? committedPickupPressure[cell[0]][cell[1]] : 0;
     }
 
     /** Get weather risk exposure at a geographic point. */
@@ -381,12 +404,14 @@ public class SpatiotemporalField {
         double traffic = getTrafficForecastAt(p, horizonMinutes);
         double weather = getWeatherForecastAt(p, horizonMinutes);
         double shortage = getShortageForecastAt(p, horizonMinutes);
+        double committedPressure = Math.min(1.0, getCommittedPickupPressureAt(p));
         double horizonFactor = Math.max(0.5, horizonMinutes / 10.0);
         double minutes = 3.5
                 + demand * 3.2
                 + traffic * 2.0
                 + weather * 2.8
                 + shortage * 1.4
+                + committedPressure * 1.8
                 + horizonFactor * 0.4;
         return Math.max(2.0, Math.min(18.0, minutes));
     }
@@ -591,6 +616,7 @@ public class SpatiotemporalField {
             case "shortage" -> shortagePressure;
             case "attraction" -> attractionScore;
             case "driverDensity" -> driverDensity;
+            case "committedPickupPressure" -> committedPickupPressure;
             case "weatherExposure" -> weatherExposure;
             case "congestionExposure" -> congestionExposure;
             default -> demandIntensity;
@@ -637,6 +663,7 @@ public class SpatiotemporalField {
                 driverDensity[r][c] = 0;
                 weatherExposure[r][c] = 0;
                 congestionExposure[r][c] = 0;
+                committedPickupPressure[r][c] = 0;
                 prevDemand[r][c] = 0;
             }
         }

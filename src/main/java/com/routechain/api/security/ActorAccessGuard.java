@@ -14,9 +14,12 @@ import java.util.stream.Collectors;
 @Component
 public class ActorAccessGuard {
     private final RouteChainSecurityProperties securityProperties;
+    private final JwtActorIdentityResolver actorIdentityResolver;
 
-    public ActorAccessGuard(RouteChainSecurityProperties securityProperties) {
+    public ActorAccessGuard(RouteChainSecurityProperties securityProperties,
+                            JwtActorIdentityResolver actorIdentityResolver) {
         this.securityProperties = securityProperties;
+        this.actorIdentityResolver = actorIdentityResolver;
     }
 
     public void requireCustomer(String customerId) {
@@ -61,7 +64,7 @@ public class ActorAccessGuard {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication instanceof JwtAuthenticationToken jwtAuthenticationToken) {
             Jwt jwt = jwtAuthenticationToken.getToken();
-            return jwt.getSubject();
+            return actorIdentityResolver.resolveActorId(jwt);
         }
         throw new AccessDeniedException("Authenticated JWT subject is required");
     }
