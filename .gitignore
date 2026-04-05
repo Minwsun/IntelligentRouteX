@@ -9,6 +9,9 @@ build/
 .javac-deps/
 routechain.db
 .venv-neural/
+.venv-agent/
+__pycache__/
+*.pyc
 build/routechain-apex/runtime/
 models/onnx/*
 models/routefinder/

@@ -1,0 +1,6 @@
+[project]
+name = "route-intelligence-agent"
+version = "0.1.0"
+description = "Quota-aware analytics and modelops agent plane for RouteChain"
+requires-python = ">=3.11"
+

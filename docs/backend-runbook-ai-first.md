@@ -45,6 +45,34 @@ This command:
 3. Runs `compileJava`, `performanceBenchmarkSmoke`, `counterfactualArenaSmoke`.
 4. Prints the latest control-room markdown summary from `build/routechain-apex/benchmarks/control-room/control_room_latest.md`.
 
+## Route intelligence agent plane
+
+This plane is intentionally outside the live dispatch hot path. It is for benchmark triage, analytics copilot, and modelops review only.
+
+### Start/stop the agent
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/agent/start_route_intelligence_agent.ps1 -RepoRoot D:\Project\IntelligentRouteX
+powershell -ExecutionPolicy Bypass -File scripts/agent/stop_route_intelligence_agent.ps1 -RepoRoot D:\Project\IntelligentRouteX
+```
+
+### Analyze the latest smoke evidence
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/agent/invoke_route_agent_triage.ps1 -RepoRoot D:\Project\IntelligentRouteX
+```
+
+### Agent plane model routing
+
+The agent plane uses a quota-aware Gemma cascade:
+
+1. `Gemma 4 26B` for standard benchmark triage and ops Q&A
+2. `Gemma 4 31B` for deep certification diagnosis
+3. `Gemma 3 27B` as the main fallback when Gemma 4 quota is exhausted
+4. `Gemma 3 12B` as the light fallback for short, low-risk prompts when budget guard is active
+
+The service reads local benchmark artifacts, candidate-level facts, and the model registry snapshot before it asks any remote model. If no OpenAI-compatible model gateway is configured, it stays useful by emitting a deterministic source-attributed report instead of failing.
+
 ## Production-small API run
 
 Use the Spring profile below so the API talks to the local production-small stack instead of the default in-memory mode.
@@ -128,3 +156,4 @@ powershell -ExecutionPolicy Bypass -File scripts/benchmark/fetch_route_research_
 - Neural prior is nearline only; execution gate remains final authority.
 - `ops/production-small/docker-compose.yml` is the local-first production-small shape for demo and artifact-driven development.
 - `benchmark-baselines/dataset-manifest.json` documents how each public dataset is used and what it is allowed to prove.
+- The route intelligence agent is an analytics/modelops sidecar, not a live routing dependency.
