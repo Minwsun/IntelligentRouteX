@@ -8,18 +8,22 @@ public record DispatchRecoveryDecomposition(
         int generatedOrderPlanCount,
         int generatedWaveCandidateCount,
         int generatedExtensionCandidateCount,
+        int generatedSingleLocalCandidateCount,
         int generatedFallbackCandidateCount,
         int generatedHoldCandidateCount,
         int shortlistedWaveCount,
+        int shortlistedSingleLocalCount,
         int shortlistedFallbackCount,
         int shortlistedHoldCount,
         int solverSelectedWaveCount,
         int solverSelectedExtensionCount,
+        int solverSelectedSingleLocalCount,
         int solverSelectedFallbackCount,
         int solverSelectedHoldCount,
         int fallbackInjectedCount,
         int executedWaveCount,
         int executedExtensionCount,
+        int executedSingleLocalCount,
         int executedFallbackCount,
         int executedBorrowedCount,
         int executedLocalCoverageCount,
@@ -34,10 +38,10 @@ public record DispatchRecoveryDecomposition(
 ) {
     public static DispatchRecoveryDecomposition empty() {
         return new DispatchRecoveryDecomposition(
-                0, 0, 0, 0, 0,
-                0, 0, 0,
-                0, 0, 0, 0,
                 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0,
+                0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0,
                 0, 0, 0,
                 0, 0, 0, 0, 0);
     }
@@ -50,18 +54,22 @@ public record DispatchRecoveryDecomposition(
                 generatedOrderPlanCount + other.generatedOrderPlanCount,
                 generatedWaveCandidateCount + other.generatedWaveCandidateCount,
                 generatedExtensionCandidateCount + other.generatedExtensionCandidateCount,
+                generatedSingleLocalCandidateCount + other.generatedSingleLocalCandidateCount,
                 generatedFallbackCandidateCount + other.generatedFallbackCandidateCount,
                 generatedHoldCandidateCount + other.generatedHoldCandidateCount,
                 shortlistedWaveCount + other.shortlistedWaveCount,
+                shortlistedSingleLocalCount + other.shortlistedSingleLocalCount,
                 shortlistedFallbackCount + other.shortlistedFallbackCount,
                 shortlistedHoldCount + other.shortlistedHoldCount,
                 solverSelectedWaveCount + other.solverSelectedWaveCount,
                 solverSelectedExtensionCount + other.solverSelectedExtensionCount,
+                solverSelectedSingleLocalCount + other.solverSelectedSingleLocalCount,
                 solverSelectedFallbackCount + other.solverSelectedFallbackCount,
                 solverSelectedHoldCount + other.solverSelectedHoldCount,
                 fallbackInjectedCount + other.fallbackInjectedCount,
                 executedWaveCount + other.executedWaveCount,
                 executedExtensionCount + other.executedExtensionCount,
+                executedSingleLocalCount + other.executedSingleLocalCount,
                 executedFallbackCount + other.executedFallbackCount,
                 executedBorrowedCount + other.executedBorrowedCount,
                 executedLocalCoverageCount + other.executedLocalCoverageCount,
@@ -101,15 +109,19 @@ public record DispatchRecoveryDecomposition(
     }
 
     public double fallbackDirectRate() {
-        return percent(executedFallbackCount, executedFallbackCount + executedWaveCount + executedExtensionCount);
+        return percent(executedFallbackCount, executionSelectionDenominator());
     }
 
     public double borrowedSelectionRate() {
-        return percent(executedBorrowedCount, executedFallbackCount + executedWaveCount + executedExtensionCount);
+        return percent(executedBorrowedCount, executionSelectionDenominator());
     }
 
     public double localCoverageExecutionRate() {
-        return percent(executedLocalCoverageCount, executedFallbackCount + executedWaveCount + executedExtensionCount);
+        return percent(executedLocalCoverageCount, executionSelectionDenominator());
+    }
+
+    private double executionSelectionDenominator() {
+        return executedFallbackCount + executedWaveCount + executedExtensionCount + executedSingleLocalCount;
     }
 
     private static double percent(double numerator, double denominator) {

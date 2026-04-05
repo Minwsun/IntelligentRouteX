@@ -1812,7 +1812,7 @@ public class DriverPlanGenerator {
             }
             plan.setHoldRemainingCycles(0);
         } else if (!plan.getOrders().isEmpty()) {
-            plan.setSelectionBucket(SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD);
+            plan.setSelectionBucket(SelectionBucket.SINGLE_LOCAL);
             plan.setHoldRemainingCycles(0);
         } else {
             plan.setSelectionBucket(SelectionBucket.EMERGENCY_COVERAGE);

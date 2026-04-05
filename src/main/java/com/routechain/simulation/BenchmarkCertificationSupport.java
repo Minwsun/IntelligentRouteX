@@ -10,10 +10,16 @@ import java.util.Locale;
 public final class BenchmarkCertificationSupport {
     private static final List<String> NON_CURRENT_OMEGA_MARKERS = List.of(
             "legacy",
-            "omega-no-hold",
-            "omega-no-reposition",
-            "omega-no-continuation",
-            "omega-no-neural-prior",
+            "omega-no-",
+            "omega-small-batch-only",
+            "omega-small_batch_only",
+            "no_batch_value",
+            "no-batch-value",
+            "no_positioning_model",
+            "no-positioning-model",
+            "no_stress_ai_gate",
+            "no-stress-ai-gate",
+            "ablation",
             "or-tools-shadow"
     );
 

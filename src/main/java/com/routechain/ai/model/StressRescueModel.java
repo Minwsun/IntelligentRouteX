@@ -65,16 +65,16 @@ public class StressRescueModel {
         double weather = f[8];
         double traffic = f[9];
 
-        double score = stressIntensity * 0.10
-                + onTime * 0.28
-                + pickupReady * 0.08
-                + sameZone * 0.16
-                + localBacklogTight * 0.06
-                + clamp01(1.0 - deadhead) * 0.18
-                + clamp01(1.0 - borrowRisk) * 0.06
-                + clamp01(1.0 - merchantPrepRisk) * 0.04
-                + clamp01(1.0 - weather) * 0.02
-                + clamp01(1.0 - traffic) * 0.02;
+        double score = onTime * 0.30
+                + pickupReady * 0.10
+                + sameZone * 0.18
+                + localBacklogTight * 0.08
+                + clamp01(1.0 - deadhead) * 0.20
+                + clamp01(1.0 - borrowRisk) * 0.08
+                + clamp01(1.0 - merchantPrepRisk) * 0.06
+                + clamp01(1.0 - weather) * 0.04
+                + clamp01(1.0 - traffic) * 0.04
+                - stressIntensity * 0.10;
         return clamp01(score);
     }
 

@@ -5,6 +5,7 @@ import com.routechain.domain.Enums.WeatherProfile;
 import com.routechain.domain.Enums.VehicleType;
 import com.routechain.domain.GeoPoint;
 import com.routechain.domain.Order;
+import com.routechain.simulation.SelectionBucket;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -328,7 +329,7 @@ class DriverPlanGeneratorProfileTest {
     }
 
     @Test
-    void cleanSparseWorldKeepsSubThreeFallbackWithoutForcedHoldOnly() {
+    void cleanSparseWorldKeepsSubThreeLocalLaunchWithoutForcedHoldOnly() {
         GeoPoint driverLocation = new GeoPoint(10.7765, 106.7009);
         Driver driver = new Driver("DTEST-3", "Sparse Driver", driverLocation, "R1", VehicleType.MOTORBIKE);
 
@@ -412,7 +413,10 @@ class DriverPlanGeneratorProfileTest {
         List<com.routechain.simulation.DispatchPlan> plans = generator.generate(context, 0.28, WeatherProfile.CLEAR, 12);
 
         assertTrue(plans.stream().anyMatch(plan -> !plan.getOrders().isEmpty() && plan.getBundleSize() <= 2),
-                "Sparse clean world should keep viable 1/2-order launch fallbacks");
+                "Sparse clean world should keep viable 1/2-order local launch plans");
+        assertTrue(plans.stream().anyMatch(plan -> !plan.getOrders().isEmpty()
+                        && plan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL),
+                "Non-wave clean-regime plans should stay in the single-local lane instead of being mislabeled as fallback");
         assertFalse(plans.stream().allMatch(com.routechain.simulation.DispatchPlan::isWaitingForThirdOrder),
                 "Sparse clean world should not collapse into hold-only plans");
     }

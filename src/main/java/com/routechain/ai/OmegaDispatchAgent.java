@@ -788,7 +788,9 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 weather);
         double positioningValueScore = ablationMode == AblationMode.NO_POSITIONING_MODEL
                 ? neutralPositioningValue(plan)
-                : positioningValueModel.predict(positioningFeatures);
+                : calibratedPositioningValueScore(
+                        plan,
+                        positioningValueModel.predict(positioningFeatures));
         double[] stressRescueFeatures = featureExtractor.stressRescueFeatures(
                 plan,
                 ctx,
@@ -797,7 +799,11 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 weather);
         double stressRescueScore = ablationMode == AblationMode.NO_STRESS_AI_GATE
                 ? neutralStressRescueValue(plan, effectiveRegime, weather)
-                : stressRescueModel.predict(stressRescueFeatures);
+                : calibratedStressRescueScore(
+                        plan,
+                        stressRescueModel.predict(stressRescueFeatures),
+                        effectiveRegime,
+                        weather);
         plan.setRouteValueScore(routeValueScore);
         plan.setBatchValueScore(batchValueScore);
         plan.setPositioningValueScore(positioningValueScore);
@@ -1019,9 +1025,10 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                     : SelectionBucket.BORROWED_COVERAGE);
             fallbackPlan.setRunId(activeRunId);
             fallbackPlan.setServiceTier(serviceTier.wireValue());
-            fallbackPlan.setBorrowedDependencyScore(sameZoneDriver
-                    ? (distKm <= 1.2 ? 0.05 : 0.14)
-                    : 0.38);
+            fallbackPlan.setStressRegime(fallbackRegime);
+            fallbackPlan.setHarshWeatherStress(
+                    weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM);
+            fallbackPlan.setStressFallbackOnly(true);
 
             double delivDist = order.getPickupPoint().distanceTo(
                     order.getDropoffPoint()) / 1000.0;
@@ -1092,17 +1099,30 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             fallbackPlan.setCongestionPenalty(trafficIntensity * 0.4);
             fallbackPlan.setRepositionPenalty(0.1);
             populateFallbackLandingMetrics(fallbackPlan, order, weather, trafficIntensity);
+            populateSelectionSignals(fallbackPlan, null, fallbackRegime);
             fallbackPlan.setCoverageQuality(sameZoneDriver ? 0.74 : 0.48);
             fallbackPlan.setReplacementDepth(clamp01((freeDrivers.size() - 1) / 3.0));
             fallbackPlan.setBorrowSuccessProbability(sameZoneDriver
                     ? 0.0
                     : clamp01(1.0 - distKm / Math.max(2.5, maxFallbackDeadheadKm + 0.6)));
+            fallbackPlan.setBorrowedDependencyScore(sameZoneDriver
+                    ? (distKm <= 1.2 ? 0.05 : 0.14)
+                    : 0.38);
             fallbackPlan.setEmptyRiskAfter(clamp01(1.0 - fallbackPlan.getPostDropDemandProbability()));
             fallbackPlan.setExecutionScore(computeExecutionScore(fallbackPlan, fallbackRegime, weather));
             fallbackPlan.setContinuationScore(computeContinuationScore(fallbackPlan, fallbackRegime));
             fallbackPlan.setCoverageScore(computeCoverageScore(fallbackPlan, null, fallbackRegime));
             fallbackPlan.setFutureScore(computeFutureScore(fallbackPlan, fallbackRegime));
-            populateSelectionSignals(fallbackPlan, null, fallbackRegime);
+            double[] stressRescueFeatures = featureExtractor.stressRescueFeatures(
+                    fallbackPlan,
+                    null,
+                    field,
+                    trafficIntensity,
+                    weather);
+            double stressRescueScore = ablationMode == AblationMode.NO_STRESS_AI_GATE
+                    ? neutralStressRescueValue(fallbackPlan, fallbackRegime, weather)
+                    : stressRescueModel.predict(stressRescueFeatures);
+            fallbackPlan.setStressRescueScore(stressRescueScore);
             double landingQualityBonus = fallbackPlan.getLastDropLandingScore() * 0.10
                     + fallbackPlan.getPostDropDemandProbability() * 0.08
                     + Math.max(0.0, 1.0 - fallbackPlan.getExpectedPostCompletionEmptyKm() / 2.8) * 0.06;
@@ -1126,6 +1146,9 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 continue;
             }
             if (!passesExecutionGate(fallbackPlan, fallbackRegime, weather)) {
+                continue;
+            }
+            if (!passesStressRescueGate(fallbackPlan, fallbackRegime, weather)) {
                 continue;
             }
 
@@ -1909,7 +1932,11 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
                 plan -> plan.getSelectionBucket() == SelectionBucket.EXTENSION_LOCAL);
         addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
-                plan -> plan.getSelectionBucket() == SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD);
+                plan -> plan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL
+                        && plan.getBundleSize() == 2);
+        addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
+                plan -> plan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL
+                        && plan.getBundleSize() <= 1);
         if (allowBorrowedShortlist(ctx, weather, trafficIntensity)) {
             addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
                     plan -> plan.getSelectionBucket() == SelectionBucket.BORROWED_COVERAGE
@@ -2000,7 +2027,11 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         if (plan.getBundleSize() >= 3 || plan.isWaveLaunchEligible()) {
             score += 0.12;
         }
-        if (plan.getBundleSize() <= 1 && !plan.isWaveLaunchEligible()) {
+        if (plan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL) {
+            score += plan.getBundleSize() == 2 ? 0.06 : 0.03;
+            score += plan.getLastDropLandingScore() * 0.04;
+            score += Math.max(0.0, 1.0 - plan.getExpectedPostCompletionEmptyKm() / 2.6) * 0.03;
+        } else if (plan.getBundleSize() <= 1 && !plan.isWaveLaunchEligible()) {
             score -= 0.08;
         }
         score += plan.getWaveReadinessScore() * 0.08;
@@ -2019,14 +2050,14 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
     }
 
     private List<DispatchPlan> applyWaveAssemblyGate(DriverDecisionContext ctx,
-                                                     List<DispatchPlan> driverPlans,
-                                                     MutableDispatchRecoveryStats recovery) {
+                                                      List<DispatchPlan> driverPlans,
+                                                      MutableDispatchRecoveryStats recovery) {
         List<DispatchPlan> wavePlans = driverPlans.stream()
                 .filter(plan -> !plan.getOrders().isEmpty())
                 .filter(plan -> plan.isWaveLaunchEligible() || plan.getBundleSize() >= 3)
                 .sorted(Comparator.comparingDouble(DispatchPlan::getTotalScore).reversed())
                 .toList();
-        List<DispatchPlan> fallbackPlans = driverPlans.stream()
+        List<DispatchPlan> localDirectPlans = driverPlans.stream()
                 .filter(plan -> !plan.getOrders().isEmpty())
                 .filter(plan -> !plan.isWaveLaunchEligible() && plan.getBundleSize() <= 2)
                 .sorted(Comparator.comparingDouble(DispatchPlan::getTotalScore).reversed())
@@ -2069,29 +2100,29 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             }
         }
 
-        if (!fallbackPlans.isEmpty()) {
-            DispatchPlan fallback = fallbackPlans.get(0);
-            fallback.setRunId(activeRunId);
-            fallback.setSelectionBucket(SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD);
-            fallback.setHoldRemainingCycles(0);
+        if (!localDirectPlans.isEmpty()) {
+            DispatchPlan localDirect = localDirectPlans.get(0);
+            localDirect.setRunId(activeRunId);
+            localDirect.setSelectionBucket(SelectionBucket.SINGLE_LOCAL);
+            localDirect.setHoldRemainingCycles(0);
             boolean hasLiveHold = shortlist.stream()
                     .anyMatch(plan -> plan.getSelectionBucket() == SelectionBucket.HOLD_WAIT3
                             && plan.getHoldRemainingCycles() > 0);
             boolean allowFallbackSlot = shouldAllowFallbackSlot(
                     ctx,
-                    fallback,
+                    localDirect,
                     !wavePlans.isEmpty(),
                     hasLiveHold);
             if (!hasLiveHold && allowFallbackSlot) {
-                shortlist.add(fallback);
+                shortlist.add(localDirect);
             } else if (hasLiveHold
                     && allowFallbackSlot
-                    && fallbackOutweighsHold(ctx, fallback, shortlist)) {
+                    && fallbackOutweighsHold(ctx, localDirect, shortlist)) {
                 shortlist.removeIf(plan -> plan.getSelectionBucket() == SelectionBucket.HOLD_WAIT3);
                 if (recovery != null) {
                     recovery.holdSuppressedByFallbackCount++;
                 }
-                shortlist.add(fallback);
+                shortlist.add(localDirect);
             }
         }
 
@@ -2210,6 +2241,12 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 || bucket == SelectionBucket.EMERGENCY_COVERAGE;
     }
 
+    private boolean isLocalMainlineBucket(SelectionBucket bucket) {
+        return bucket == SelectionBucket.WAVE_LOCAL
+                || bucket == SelectionBucket.EXTENSION_LOCAL
+                || bucket == SelectionBucket.SINGLE_LOCAL;
+    }
+
     private int holdTtlCycles(DriverDecisionContext ctx,
                               StressRegime stressRegime,
                               boolean harshWeather) {
@@ -2319,7 +2356,19 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         score += serviceTierContinuationBias(plan.getServiceTier(), postDropOpportunity, lowEmptyFinish);
         double regimeWeight = regime == StressRegime.NORMAL ? 1.0
                 : regime == StressRegime.STRESS ? 0.82 : 0.65;
-        return clamp01(score * regimeWeight);
+        double harshWeatherPenalty = 0.0;
+        if (plan.isHarshWeatherStress()) {
+            harshWeatherPenalty += clamp01(plan.getBorrowedDependencyScore()) * 0.14;
+            harshWeatherPenalty += clamp01(plan.getEmptyRiskAfter()) * 0.10;
+            harshWeatherPenalty += Math.max(0.0, plan.getExpectedPostCompletionEmptyKm() - 1.2) * 0.08;
+            if (plan.getPredictedDeadheadKm() >= 1.8) {
+                harshWeatherPenalty += 0.05;
+            }
+            if (plan.isStressFallbackOnly()) {
+                harshWeatherPenalty += 0.05;
+            }
+        }
+        return clamp01(score * regimeWeight - harshWeatherPenalty);
     }
 
     private double computeCoverageScore(DispatchPlan plan,
@@ -2468,11 +2517,15 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             future += 0.02;
             utility -= 0.01;
         }
-        if (plan.isStressFallbackOnly() || plan.getBundleSize() <= 2) {
+        if (plan.isStressFallbackOnly() || isFallbackBucket(plan.getSelectionBucket())) {
             robust -= 0.05;
             execution += 0.07;
             future -= 0.03;
             utility += 0.01;
+        } else if (plan.getBundleSize() <= 2) {
+            robust -= 0.02;
+            execution += 0.03;
+            future -= 0.01;
         }
         if (serviceTier == DeliveryServiceTier.INSTANT) {
             robust += 0.02;
@@ -2583,9 +2636,25 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         if (ablationMode == AblationMode.NO_STRESS_AI_GATE) {
             return true;
         }
+        boolean strongSameZoneLocalRescue = plan.getBorrowedDependencyScore() < 0.10
+                && plan.getPredictedDeadheadKm() <= 1.5
+                && plan.getOnTimeProbability() >= 0.80;
+        if (strongSameZoneLocalRescue) {
+            return true;
+        }
+        boolean harshBorrowedRescue = (weather == WeatherProfile.HEAVY_RAIN
+                || weather == WeatherProfile.STORM
+                || regime.isAtLeast(StressRegime.STRESS))
+                && plan.getBorrowedDependencyScore() >= 0.25
+                && plan.getPredictedDeadheadKm() >= 2.0
+                && plan.getOnTimeProbability() > 0.0
+                && plan.getOnTimeProbability() < 0.78;
+        if (harshBorrowedRescue) {
+            return false;
+        }
         double threshold = (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM)
-                ? (regime == StressRegime.SEVERE_STRESS ? 0.36 : 0.42)
-                : regime == StressRegime.NORMAL ? 0.48 : 0.44;
+                ? (regime == StressRegime.SEVERE_STRESS ? 0.34 : 0.38)
+                : regime == StressRegime.NORMAL ? 0.44 : 0.42;
         return plan.getStressRescueScore() >= threshold;
     }
 
@@ -2621,6 +2690,31 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         return clamp01(base);
     }
 
+    private double calibratedStressRescueScore(DispatchPlan plan,
+                                               double rawScore,
+                                               StressRegime regime,
+                                               WeatherProfile weather) {
+        double neutral = neutralStressRescueValue(plan, regime, weather);
+        double trust = modelTrust(stressRescueModel.getSampleCount(), 90.0, 260.0);
+        if (regime == StressRegime.NORMAL
+                && weather != WeatherProfile.HEAVY_RAIN
+                && weather != WeatherProfile.STORM
+                && !plan.isStressFallbackOnly()) {
+            trust *= 0.25;
+        }
+        if (plan.getBorrowedDependencyScore() >= 0.25
+                && plan.getPredictedDeadheadKm() >= 1.8) {
+            trust = Math.max(trust, 0.60);
+        }
+        double blended = blendScores(neutral, rawScore, trust);
+        if (plan.getBorrowedDependencyScore() < 0.10
+                && plan.getPredictedDeadheadKm() <= 1.5
+                && plan.getOnTimeProbability() >= 0.80) {
+            blended = Math.max(blended, neutral);
+        }
+        return clamp01(blended);
+    }
+
     private double neutralPositioningValue(DispatchPlan plan) {
         if (plan == null) {
             return 0.0;
@@ -2631,6 +2725,60 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                         + plan.getGraphAffinityScore() * 0.18
                         + clamp01(1.0 - plan.getExpectedPostCompletionEmptyKm() / 3.0) * 0.14
                         - clamp01(plan.getCongestionPenalty()) * 0.08);
+    }
+
+    private double calibratedPositioningValueScore(DispatchPlan plan,
+                                                   double rawScore) {
+        double neutral = neutralPositioningValue(plan);
+        double trust = modelTrust(positioningValueModel.getSampleCount(), 120.0, 320.0);
+        boolean weakLandingContext = plan.getLastDropLandingScore() < 0.35
+                && plan.getPostDropDemandProbability() < 0.35;
+        boolean fragileExecution = plan.getOnTimeProbability() > 0.0
+                && plan.getOnTimeProbability() < 0.74;
+        boolean expensiveContinuation = plan.getExpectedPostCompletionEmptyKm() > 1.8
+                || plan.getBorrowedDependencyScore() >= 0.18;
+        boolean harshWeatherFragility = plan.isHarshWeatherStress()
+                || plan.getStressRegime().isAtLeast(StressRegime.STRESS);
+        if (weakLandingContext || fragileExecution || expensiveContinuation) {
+            trust *= 0.30;
+        }
+        if (harshWeatherFragility) {
+            trust *= expensiveContinuation ? 0.18 : 0.45;
+        }
+        if (plan.getBundleSize() >= 3) {
+            trust *= 0.55;
+        }
+        double blended = blendScores(neutral, rawScore, trust);
+        if (weakLandingContext) {
+            blended = Math.min(blended, neutral + 0.04);
+        }
+        if (harshWeatherFragility
+                && (weakLandingContext
+                || expensiveContinuation
+                || plan.getPredictedDeadheadKm() >= 1.8
+                || plan.getBorrowedDependencyScore() >= 0.18)) {
+            blended = Math.min(blended, neutral + 0.02);
+        }
+        return clamp01(blended);
+    }
+
+    private double modelTrust(long sampleCount,
+                              double trustStart,
+                              double trustFull) {
+        if (sampleCount <= trustStart) {
+            return 0.0;
+        }
+        if (sampleCount >= trustFull) {
+            return 1.0;
+        }
+        return clamp01((sampleCount - trustStart) / (trustFull - trustStart));
+    }
+
+    private double blendScores(double neutral,
+                               double model,
+                               double trust) {
+        double clampedTrust = clamp01(trust);
+        return neutral * (1.0 - clampedTrust) + model * clampedTrust;
     }
 
     private double normalizeModelScore(double rawScore) {
@@ -2722,22 +2870,26 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         if (requestedTarget <= 0 || executionProfile != ExecutionProfile.MAINLINE_REALISTIC) {
             return requestedTarget;
         }
-        if (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM) {
-            return requestedTarget;
-        }
         int waveLikeCount = countPlansInBuckets(
                 selectedPlans,
                 SelectionBucket.WAVE_LOCAL,
-                SelectionBucket.EXTENSION_LOCAL);
+                SelectionBucket.EXTENSION_LOCAL,
+                SelectionBucket.SINGLE_LOCAL);
         int fallbackCount = countPlansInBuckets(
                 selectedPlans,
                 SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD,
                 SelectionBucket.BORROWED_COVERAGE,
                 SelectionBucket.EMERGENCY_COVERAGE);
+        boolean harshWeather = weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM;
         if (waveLikeCount <= 0) {
-            return Math.min(requestedTarget, trafficIntensity >= 0.38 ? 2 : 1);
+            int cap = harshWeather
+                    ? (trafficIntensity >= 0.65 ? 2 : 1)
+                    : (trafficIntensity >= 0.38 ? 2 : 1);
+            return Math.min(requestedTarget, cap);
         }
-        int maxFallbackShare = Math.max(1, waveLikeCount);
+        int maxFallbackShare = harshWeather
+                ? Math.max(1, (int) Math.ceil(waveLikeCount * 0.75))
+                : Math.max(1, waveLikeCount);
         if (fallbackCount >= maxFallbackShare) {
             return countRealAssignedPlans(selectedPlans);
         }
@@ -2919,11 +3071,12 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         plan.setHarshWeatherStress(ctx.harshWeatherStress());
         plan.setHardThreeOrderPolicyActive(cleanThreeLaunch);
         if (!plan.getOrders().isEmpty()) {
+            boolean localMainlinePlan = isLocalMainlineBucket(plan.getSelectionBucket());
             boolean stressFallbackOnly = plan.getBundleSize() < 3
                     && (sparseOrOffRouteDowngrade
-                    || cleanThreeLaunch
-                    || ctx.harshWeatherStress()
-                    || effectiveRegime == StressRegime.SEVERE_STRESS);
+                    || (!localMainlinePlan
+                    && (ctx.harshWeatherStress()
+                    || effectiveRegime == StressRegime.SEVERE_STRESS)));
             plan.setStressFallbackOnly(stressFallbackOnly);
             if (plan.getBundleSize() >= 3) {
                 plan.setWaveLaunchEligible(plan.isWaveLaunchEligible()
@@ -3618,18 +3771,22 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         private int generatedOrderPlanCount;
         private int generatedWaveCandidateCount;
         private int generatedExtensionCandidateCount;
+        private int generatedSingleLocalCandidateCount;
         private int generatedFallbackCandidateCount;
         private int generatedHoldCandidateCount;
         private int shortlistedWaveCount;
+        private int shortlistedSingleLocalCount;
         private int shortlistedFallbackCount;
         private int shortlistedHoldCount;
         private int solverSelectedWaveCount;
         private int solverSelectedExtensionCount;
+        private int solverSelectedSingleLocalCount;
         private int solverSelectedFallbackCount;
         private int solverSelectedHoldCount;
         private int fallbackInjectedCount;
         private int executedWaveCount;
         private int executedExtensionCount;
+        private int executedSingleLocalCount;
         private int executedFallbackCount;
         private int executedBorrowedCount;
         private int executedLocalCoverageCount;
@@ -3659,6 +3816,8 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                     if (plan.getBundleSize() < 3) {
                         generatedExtensionCandidateCount++;
                     }
+                } else if (plan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL) {
+                    generatedSingleLocalCandidateCount++;
                 } else {
                     generatedFallbackCandidateCount++;
                 }
@@ -3672,6 +3831,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             for (DispatchPlan plan : shortlist) {
                 switch (plan.getSelectionBucket()) {
                     case WAVE_LOCAL, EXTENSION_LOCAL -> shortlistedWaveCount++;
+                    case SINGLE_LOCAL -> shortlistedSingleLocalCount++;
                     case HOLD_WAIT3 -> shortlistedHoldCount++;
                     case FALLBACK_LOCAL_LOW_DEADHEAD, BORROWED_COVERAGE, EMERGENCY_COVERAGE -> shortlistedFallbackCount++;
                 }
@@ -3686,6 +3846,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 switch (plan.getSelectionBucket()) {
                     case WAVE_LOCAL -> solverSelectedWaveCount++;
                     case EXTENSION_LOCAL -> solverSelectedExtensionCount++;
+                    case SINGLE_LOCAL -> solverSelectedSingleLocalCount++;
                     case HOLD_WAIT3 -> solverSelectedHoldCount++;
                     default -> solverSelectedFallbackCount++;
                 }
@@ -3699,6 +3860,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             switch (plan.getSelectionBucket()) {
                 case WAVE_LOCAL -> executedWaveCount++;
                 case EXTENSION_LOCAL -> executedExtensionCount++;
+                case SINGLE_LOCAL -> executedSingleLocalCount++;
                 case BORROWED_COVERAGE, EMERGENCY_COVERAGE -> {
                     executedFallbackCount++;
                     executedBorrowedCount++;
@@ -3707,7 +3869,8 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             }
             if (plan.getSelectionBucket() == SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD
                     || plan.getSelectionBucket() == SelectionBucket.WAVE_LOCAL
-                    || plan.getSelectionBucket() == SelectionBucket.EXTENSION_LOCAL) {
+                    || plan.getSelectionBucket() == SelectionBucket.EXTENSION_LOCAL
+                    || plan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL) {
                 executedLocalCoverageCount++;
             }
         }
@@ -3717,18 +3880,22 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                     generatedOrderPlanCount,
                     generatedWaveCandidateCount,
                     generatedExtensionCandidateCount,
+                    generatedSingleLocalCandidateCount,
                     generatedFallbackCandidateCount,
                     generatedHoldCandidateCount,
                     shortlistedWaveCount,
+                    shortlistedSingleLocalCount,
                     shortlistedFallbackCount,
                     shortlistedHoldCount,
                     solverSelectedWaveCount,
                     solverSelectedExtensionCount,
+                    solverSelectedSingleLocalCount,
                     solverSelectedFallbackCount,
                     solverSelectedHoldCount,
                     fallbackInjectedCount,
                     executedWaveCount,
                     executedExtensionCount,
+                    executedSingleLocalCount,
                     executedFallbackCount,
                     executedBorrowedCount,
                     executedLocalCoverageCount,

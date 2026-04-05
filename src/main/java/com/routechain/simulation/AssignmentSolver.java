@@ -57,6 +57,7 @@ public class AssignmentSolver {
         List<SelectionBucket> passOrder = List.of(
                 SelectionBucket.WAVE_LOCAL,
                 SelectionBucket.EXTENSION_LOCAL,
+                SelectionBucket.SINGLE_LOCAL,
                 SelectionBucket.HOLD_WAIT3,
                 SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD,
                 SelectionBucket.BORROWED_COVERAGE,
@@ -222,7 +223,10 @@ public class AssignmentSolver {
                 && plan.getBorrowedDependencyScore() >= 0.25) {
             return SelectionBucket.BORROWED_COVERAGE;
         }
-        return declared == null ? SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD : declared;
+        if (declared == SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD) {
+            return SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD;
+        }
+        return SelectionBucket.SINGLE_LOCAL;
     }
 
     private boolean eligibleForBucket(DispatchPlan plan, SelectionBucket bucket) {
@@ -234,6 +238,10 @@ public class AssignmentSolver {
                     && plan.isWaveLaunchEligible()
                     && plan.getBundleSize() < 3
                     && plan.getBorrowedDependencyScore() < 0.25;
+            case SINGLE_LOCAL -> plan.isExecutionGatePassed()
+                    && plan.getBundleSize() <= 2
+                    && plan.getBorrowedDependencyScore() < 0.25
+                    && (plan.getOnTimeProbability() <= 0.0 || plan.getOnTimeProbability() >= 0.68);
             case HOLD_WAIT3 -> plan.isWaitingForThirdOrder()
                     && plan.isHardThreeOrderPolicyActive()
                     && plan.getHoldRemainingCycles() > 0
@@ -241,7 +249,8 @@ public class AssignmentSolver {
             case FALLBACK_LOCAL_LOW_DEADHEAD -> plan.isExecutionGatePassed()
                     && plan.getBundleSize() <= 2
                     && plan.getBorrowedDependencyScore() < 0.25
-                    && (plan.getOnTimeProbability() <= 0.0 || plan.getOnTimeProbability() >= 0.72);
+                    && plan.getPredictedDeadheadKm() <= 2.2
+                    && (plan.getOnTimeProbability() <= 0.0 || plan.getOnTimeProbability() >= 0.76);
             case BORROWED_COVERAGE -> plan.getBorrowedDependencyScore() >= 0.25
                     && plan.isExecutionGatePassed();
             case EMERGENCY_COVERAGE -> true;
@@ -254,12 +263,18 @@ public class AssignmentSolver {
         if (bucket == SelectionBucket.WAVE_LOCAL || bucket == SelectionBucket.EXTENSION_LOCAL) {
             score += bucket == SelectionBucket.WAVE_LOCAL ? 0.10 : 0.08;
         }
-        if (bucket == SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD) {
+        if (bucket == SelectionBucket.SINGLE_LOCAL) {
+            score += plan.getPredictedDeadheadKm() <= 1.8
+                    && plan.getOnTimeProbability() >= 0.78
+                    && plan.getBorrowedDependencyScore() < 0.12
+                    && plan.getEmptyRiskAfter() <= 0.55
+                    ? 0.07 : 0.02;
+        } else if (bucket == SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD) {
             score += plan.getPredictedDeadheadKm() <= 1.6
                     && plan.getOnTimeProbability() >= 0.82
                     && plan.getBorrowedDependencyScore() < 0.10
                     && plan.getEmptyRiskAfter() <= 0.45
-                    ? 0.05 : -0.03;
+                    ? 0.03 : -0.08;
         } else if (bucket == SelectionBucket.BORROWED_COVERAGE) {
             score -= 0.30;
         } else if (bucket == SelectionBucket.EMERGENCY_COVERAGE) {

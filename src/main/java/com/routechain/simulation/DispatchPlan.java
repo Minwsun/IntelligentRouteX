@@ -41,7 +41,7 @@ public class DispatchPlan {
     private boolean harshWeatherStress;
     private StressRegime stressRegime = StressRegime.NORMAL;
     private String runId = "run-unset";
-    private SelectionBucket selectionBucket = SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD;
+    private SelectionBucket selectionBucket = SelectionBucket.SINGLE_LOCAL;
     private int holdRemainingCycles;
     private String holdReason;
     private String holdAnchorZoneId;
@@ -226,7 +226,7 @@ public class DispatchPlan {
     }
     public void setSelectionBucket(SelectionBucket selectionBucket) {
         this.selectionBucket = selectionBucket == null
-                ? SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD
+                ? SelectionBucket.SINGLE_LOCAL
                 : selectionBucket;
     }
     public void setHoldRemainingCycles(int holdRemainingCycles) {

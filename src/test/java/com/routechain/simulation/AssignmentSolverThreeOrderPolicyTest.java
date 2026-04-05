@@ -35,6 +35,7 @@ class AssignmentSolverThreeOrderPolicyTest {
         single.setHardThreeOrderPolicyActive(true);
         single.setStressFallbackOnly(true);
         single.setStressRegime(StressRegime.NORMAL);
+        single.setSelectionBucket(SelectionBucket.SINGLE_LOCAL);
 
         List<Order> waveOrders = List.of(order("O-2", 10), order("O-3", 20), order("O-4", 30));
         DispatchPlan wave = new DispatchPlan(
@@ -91,6 +92,7 @@ class AssignmentSolverThreeOrderPolicyTest {
         compactTwo.setTotalScore(0.72);
         compactTwo.setConfidence(0.74);
         compactTwo.setStressRegime(StressRegime.NORMAL);
+        compactTwo.setSelectionBucket(SelectionBucket.SINGLE_LOCAL);
 
         AssignmentSolver solver = new AssignmentSolver();
         List<DispatchPlan> selected = solver.solve(List.of(hold, compactTwo));
@@ -149,6 +151,46 @@ class AssignmentSolverThreeOrderPolicyTest {
         assertIterableEquals(
                 List.of("BORROW-A", "EMERGENCY-C"),
                 selected.stream().map(plan -> plan.getBundle().bundleId()).toList());
+    }
+
+    @Test
+    void singleLocalLaneWinsBeforeFallbackRescueForSameDriver() {
+        Driver driver = new Driver(
+                "DRV-C",
+                "Driver C",
+                new GeoPoint(10.7765, 106.7009),
+                "R1",
+                VehicleType.MOTORBIKE);
+
+        DispatchPlan localDirect = plan(
+                driver,
+                "LOCAL-DIRECT",
+                List.of(order("O-10", 0)),
+                SelectionBucket.SINGLE_LOCAL,
+                0.78,
+                0.80,
+                0.08);
+        localDirect.setPredictedDeadheadKm(1.0);
+        localDirect.setOnTimeProbability(0.84);
+        localDirect.setEmptyRiskAfter(0.20);
+
+        DispatchPlan rescueFallback = plan(
+                driver,
+                "RESCUE-FALLBACK",
+                List.of(order("O-11", 10)),
+                SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD,
+                0.82,
+                0.78,
+                0.12);
+        rescueFallback.setPredictedDeadheadKm(1.9);
+        rescueFallback.setOnTimeProbability(0.78);
+        rescueFallback.setEmptyRiskAfter(0.42);
+
+        AssignmentSolver solver = new AssignmentSolver();
+        List<DispatchPlan> selected = solver.solve(List.of(rescueFallback, localDirect));
+
+        assertEquals(1, selected.size());
+        assertEquals("LOCAL-DIRECT", selected.get(0).getBundle().bundleId());
     }
 
     private static DispatchPlan plan(Driver driver,

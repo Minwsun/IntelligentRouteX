@@ -6,6 +6,7 @@ package com.routechain.simulation;
 public enum SelectionBucket {
     WAVE_LOCAL,
     EXTENSION_LOCAL,
+    SINGLE_LOCAL,
     HOLD_WAIT3,
     FALLBACK_LOCAL_LOW_DEADHEAD,
     BORROWED_COVERAGE,

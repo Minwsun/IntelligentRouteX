@@ -204,7 +204,11 @@ public class RunReportExporter {
                 : 0.0;
         int borrowedExecutedCount = Math.max(0, safeRecovery.executedBorrowedCount());
         int fallbackExecutedCount = Math.max(0, safeRecovery.executedFallbackCount());
-        int waveExecutedCount = Math.max(0, safeRecovery.executedWaveCount() + safeRecovery.executedExtensionCount());
+        int waveExecutedCount = Math.max(
+                0,
+                safeRecovery.executedWaveCount()
+                        + safeRecovery.executedExtensionCount()
+                        + safeRecovery.executedSingleLocalCount());
         double borrowedDeadheadPerExecutedOrderKm = borrowedExecutedCount > 0
                 ? borrowedExecutedDeadheadKm / borrowedExecutedCount : 0.0;
         double fallbackDeadheadPerExecutedOrderKm = fallbackExecutedCount > 0

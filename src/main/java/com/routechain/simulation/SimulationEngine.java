@@ -947,7 +947,8 @@ public class SimulationEngine {
             } else if (executablePlan.getSelectionBucket() == SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD) {
                 fallbackExecutedDeadheadKm += deadheadKm;
             } else if (executablePlan.getSelectionBucket() == SelectionBucket.WAVE_LOCAL
-                    || executablePlan.getSelectionBucket() == SelectionBucket.EXTENSION_LOCAL) {
+                    || executablePlan.getSelectionBucket() == SelectionBucket.EXTENSION_LOCAL
+                    || executablePlan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL) {
                 waveExecutedDeadheadKm += deadheadKm;
             }
             best.setContinuationValueCurrentZone(executablePlan.getEndZoneOpportunity());
