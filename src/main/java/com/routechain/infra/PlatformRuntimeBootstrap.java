@@ -154,6 +154,33 @@ public final class PlatformRuntimeBootstrap {
                 true
         ));
         MODEL_ARTIFACT_PROVIDER.registerBundle(new ModelBundleManifest(
+                "batch-value-model",
+                "batch-value-logit-v1",
+                "batch-value-features-v1",
+                "models/onnx/batch-value-logit-v1.onnx",
+                60,
+                "online-batch-fallback",
+                true
+        ));
+        MODEL_ARTIFACT_PROVIDER.registerBundle(new ModelBundleManifest(
+                "stress-rescue-model",
+                "stress-rescue-logit-v1",
+                "stress-rescue-features-v1",
+                "models/onnx/stress-rescue-logit-v1.onnx",
+                65,
+                "rule-based-stress-fallback",
+                true
+        ));
+        MODEL_ARTIFACT_PROVIDER.registerBundle(new ModelBundleManifest(
+                "driver-positioning-model",
+                "driver-positioning-logit-v1",
+                "driver-positioning-features-v1",
+                "models/onnx/driver-positioning-logit-v1.onnx",
+                65,
+                "graph-attraction-fallback",
+                true
+        ));
+        MODEL_ARTIFACT_PROVIDER.registerBundle(new ModelBundleManifest(
                 "neural-route-prior-model",
                 "routefinder-v1",
                 "neural-route-prior-features-v1",

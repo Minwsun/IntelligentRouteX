@@ -16,6 +16,7 @@ public final class JsonlDispatchFactSink implements DispatchFactSink {
     private static final com.google.gson.Gson GSON = GsonSupport.compact();
 
     private final Path decisionFile;
+    private final Path candidateFile;
     private final Path outcomeFile;
     private final Path runReportFile;
     private final Path compareFile;
@@ -26,10 +27,16 @@ public final class JsonlDispatchFactSink implements DispatchFactSink {
         } catch (IOException e) {
             throw new IllegalStateException("Unable to create dispatch fact directory", e);
         }
-        this.decisionFile = rootDir.resolve("dispatch_candidates_fact.jsonl");
+        this.decisionFile = rootDir.resolve("dispatch_decision_facts.jsonl");
+        this.candidateFile = rootDir.resolve("dispatch_candidate_facts.jsonl");
         this.outcomeFile = rootDir.resolve("plan_outcome_fact.jsonl");
         this.runReportFile = rootDir.resolve("run_reports_fact.jsonl");
         this.compareFile = rootDir.resolve("replay_compare_fact.jsonl");
+    }
+
+    @Override
+    public void recordCandidate(CandidateFact fact) {
+        append(candidateFile, fact);
     }
 
     @Override

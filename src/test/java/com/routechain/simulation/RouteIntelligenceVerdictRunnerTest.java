@@ -97,8 +97,9 @@ class RouteIntelligenceVerdictRunnerTest {
 
         writeAblation("NO_NEURAL_PRIOR", 1.2, 0.8, -1.0, 0.03, 0.01, 0.7);
         writeAblation("NO_CONTINUATION", 1.1, 0.6, -0.8, 0.04, 0.02, 0.9);
-        writeAblation("NO_REPOSITION", 0.6, 0.2, -0.6, 0.01, 0.03, 0.1);
-        writeAblation("SMALL_BATCH_ONLY", 0.7, 0.5, -0.2, 0.02, 0.03, 0.2);
+        writeAblation("NO_BATCH_VALUE", 0.7, 0.5, -0.2, 0.02, 0.03, 0.2);
+        writeAblation("NO_STRESS_AI_GATE", 0.9, 0.7, -0.7, 0.03, 0.04, 0.8);
+        writeAblation("NO_POSITIONING_MODEL", 0.8, 0.4, -0.5, 0.02, 0.03, 0.6);
 
         assertDoesNotThrow(() -> RouteIntelligenceVerdictRunner.main(new String[]{"smoke"}));
 

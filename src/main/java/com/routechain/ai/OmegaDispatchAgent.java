@@ -47,6 +47,9 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         NO_REPOSITION,
         NO_CONTINUATION,
         NO_NEURAL_PRIOR,
+        NO_BATCH_VALUE,
+        NO_STRESS_AI_GATE,
+        NO_POSITIONING_MODEL,
         NO_FALLBACK_TUNING,
         SMALL_BATCH_ONLY
     }
@@ -71,6 +74,9 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
     private final ContinuationValueModel continuationValueModel;
     private final PlanRanker planRanker;
     private final UncertaintyEstimator uncertaintyEstimator;
+    private final BatchValueModel batchValueModel;
+    private final StressRescueModel stressRescueModel;
+    private final DriverPositioningValueModel positioningValueModel;
 
     // ── Centralized scoring + constraints (Phase 3) ─────────────────────
     private final PlanUtilityScorer utilityScorer;
@@ -140,6 +146,9 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         this.continuationValueModel = modelArtifactProvider.getOrDefault("continuation-value-model", ContinuationValueModel::new);
         this.planRanker = modelArtifactProvider.getOrDefault("plan-ranker-model", PlanRanker::new);
         this.uncertaintyEstimator = modelArtifactProvider.getOrDefault("uncertainty-model", UncertaintyEstimator::new);
+        this.batchValueModel = modelArtifactProvider.getOrDefault("batch-value-model", BatchValueModel::new);
+        this.stressRescueModel = modelArtifactProvider.getOrDefault("stress-rescue-model", StressRescueModel::new);
+        this.positioningValueModel = modelArtifactProvider.getOrDefault("driver-positioning-model", DriverPositioningValueModel::new);
 
         this.replayTrainer = new ReplayTrainer();
 
@@ -416,6 +425,28 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
 
         // ── Step 8: Log decisions (UNCHANGED) ──────────────────────────
         stageAccumulator.repositionSelectionMs = nanosToMillis(repositionSelectionStartedNanos);
+        Set<String> selectedTraceIds = new HashSet<>();
+        for (DispatchPlan selectedPlan : selectedPlans) {
+            if (selectedPlan.getTraceId() != null && !selectedPlan.getTraceId().isBlank()) {
+                selectedTraceIds.add(selectedPlan.getTraceId());
+            }
+        }
+        for (DispatchPlan candidatePlan : allPlans) {
+            if (candidatePlan.getTraceId() == null || candidatePlan.getTraceId().isBlank()) {
+                continue;
+            }
+            double[] candidateFeatures = candidatePlan.getOrders().isEmpty()
+                    ? new double[15]
+                    : featureExtractor.planFeatures(candidatePlan, field, trafficIntensity, weather);
+            emitCandidateArtifact(
+                    tick,
+                    contextFeatures,
+                    candidateFeatures,
+                    activePolicy.name(),
+                    candidatePlan,
+                    contextsByDriver.get(candidatePlan.getDriver().getId()),
+                    selectedTraceIds.contains(candidatePlan.getTraceId()));
+        }
         for (DispatchPlan plan : selectedPlans) {
             recovery.recordExecuted(plan);
             if (plan.getBundle().size() > 0) {
@@ -435,7 +466,11 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                         candidatePlansByDriver.get(plan.getDriver().getId()),
                         (System.nanoTime() - dispatchStartedNanos) / 1_000_000L,
                         buildDecisionReason(plan));
-                registerPendingOutcome(plan);
+                registerPendingOutcome(
+                        plan,
+                        contextsByDriver.get(plan.getDriver().getId()),
+                        trafficIntensity,
+                        weather);
             } else if (plan.isWaitingForThirdOrder()) {
                 decisionLog.log(tick, contextFeatures, new double[15],
                         plan.getTotalScore(), activePolicy.name(),
@@ -652,6 +687,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         applySoftLandingAdjustments(plan, ctx, endPoint,
                 adjustedContinuation, nextOrderScore,
                 endWeatherExposure, endCongestionExposure);
+        populateSelectionSignals(plan, ctx, effectiveRegime);
 
         // ── Hard constraints (delegated to ConstraintEngine) ──────────
         // Use a dynamic batch cap of 5 (default max) — the real cap was already
@@ -735,6 +771,47 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
 
         UncertaintyEstimator.Prediction pred = uncertaintyEstimator
                 .predict(planFeatures);
+        double routeValueScore = normalizeModelScore(planRanker.rank(planFeatures));
+        double[] batchFeatures = featureExtractor.batchValueFeatures(plan);
+        double batchValueScore = plan.getBundleSize() <= 1
+                ? 0.0
+                : batchValueModel.predict(batchFeatures);
+        if (ablationMode == AblationMode.NO_BATCH_VALUE) {
+            batchValueScore = neutralBatchValue(plan);
+        }
+        double[] positioningFeatures = featureExtractor.positioningFeatures(
+                driver.getCurrentLocation(),
+                endPoint,
+                field,
+                activeGraphShadowSnapshot,
+                traffic,
+                weather);
+        double positioningValueScore = ablationMode == AblationMode.NO_POSITIONING_MODEL
+                ? neutralPositioningValue(plan)
+                : positioningValueModel.predict(positioningFeatures);
+        double[] stressRescueFeatures = featureExtractor.stressRescueFeatures(
+                plan,
+                ctx,
+                field,
+                traffic,
+                weather);
+        double stressRescueScore = ablationMode == AblationMode.NO_STRESS_AI_GATE
+                ? neutralStressRescueValue(plan, effectiveRegime, weather)
+                : stressRescueModel.predict(stressRescueFeatures);
+        plan.setRouteValueScore(routeValueScore);
+        plan.setBatchValueScore(batchValueScore);
+        plan.setPositioningValueScore(positioningValueScore);
+        plan.setStressRescueScore(stressRescueScore);
+        if (!passesAiBatchAdmissionGate(plan, effectiveRegime, weather)) {
+            rejectReasons[5]++;
+            plan.setModelInferenceLatencyMs((System.nanoTime() - inferenceStartedNanos) / 1_000_000L);
+            return false;
+        }
+        if (!passesStressRescueGate(plan, effectiveRegime, weather)) {
+            rejectReasons[0]++;
+            plan.setModelInferenceLatencyMs((System.nanoTime() - inferenceStartedNanos) / 1_000_000L);
+            return false;
+        }
 
         // ── Final scoring via PlanUtilityScorer (Phase 3) ───────────────
         // Blend robust score with centralized utility for final rank
@@ -755,6 +832,12 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 + continuationScore * blend[2]
                 + coverageScore * 0.04
                 + utilityScore * blend[3]
+                + routeValueScore * 0.08
+                + batchValueScore * (plan.getBundleSize() >= 2 ? 0.06 : 0.0)
+                + positioningValueScore * 0.05
+                + stressRescueScore * ((effectiveRegime.isAtLeast(StressRegime.STRESS)
+                || plan.isStressFallbackOnly()
+                || isFallbackBucket(plan.getSelectionBucket())) ? 0.06 : 0.02)
                 + neuralPriorComponent
                 + plan.getGraphAffinityScore() * 0.05
                 + landingContinuityBonus
@@ -762,7 +845,6 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 - continuityRiskPenalty
                 - executionStabilityPenalty(plan, effectiveRegime, weather, pred.confidence());
 
-        populateSelectionSignals(plan, ctx, effectiveRegime);
         plan.setTotalScore(finalScore);
         plan.setConfidence(pred.confidence());
         plan.setModelInferenceLatencyMs((System.nanoTime() - inferenceStartedNanos) / 1_000_000L);
@@ -1144,15 +1226,41 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         return Math.min(1.0, pending.size() / 20.0);
     }
 
-    private void registerPendingOutcome(DispatchPlan plan) {
+    private void registerPendingOutcome(DispatchPlan plan,
+                                        DriverDecisionContext ctx,
+                                        double trafficIntensity,
+                                        WeatherProfile weather) {
         List<String> orderIds = plan.getOrders().stream()
                 .map(Order::getId)
                 .toList();
+        double[] planFeatures = featureExtractor.planFeatures(plan, field, trafficIntensity, weather);
+        double[] batchFeatures = featureExtractor.batchValueFeatures(plan);
+        double[] stressFeatures = featureExtractor.stressRescueFeatures(
+                plan,
+                ctx,
+                field,
+                trafficIntensity,
+                weather);
+        double[] positioningFeatures = featureExtractor.positioningFeatures(
+                plan.getDriver() == null ? null : plan.getDriver().getCurrentLocation(),
+                plan.getEndZonePoint(),
+                field,
+                activeGraphShadowSnapshot,
+                trafficIntensity,
+                weather);
         pendingTraceOutcomes.put(plan.getTraceId(), new PendingTraceOutcome(
                 new HashSet<>(orderIds),
                 new HashSet<>(),
                 plan.getPredictedDeadheadKm(),
-                plan.getBundleEfficiency()));
+                plan.getBundleEfficiency(),
+                planFeatures,
+                batchFeatures,
+                stressFeatures,
+                positioningFeatures,
+                plan.getExpectedPostCompletionEmptyKm(),
+                plan.getBundleSize(),
+                plan.getStressRegime(),
+                plan.isStressFallbackOnly()));
     }
 
     private void recordPlanOutcome(Order order, Driver driver, long currentTick,
@@ -1184,6 +1292,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                     Math.max(0.1, order.getPredictedBundleFit()),
                     continuationActualNorm,
                     Instant.now()));
+            trainAiOutcomeLanes(null, actualUtility, continuationActualNorm, actualProfit, false, wasCancelled);
             return;
         }
 
@@ -1221,7 +1330,64 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                     pending.bundleEfficiency,
                     pending.continuationActualNorm,
                     Instant.now()));
+            trainAiOutcomeLanes(
+                    pending,
+                    actualUtility,
+                    pending.continuationActualNorm,
+                    pending.realizedProfit,
+                    pending.anyLate,
+                    pending.cancelled);
             pendingTraceOutcomes.remove(traceId);
+        }
+    }
+
+    private void trainAiOutcomeLanes(PendingTraceOutcome pending,
+                                     double actualUtility,
+                                     double continuationActualNorm,
+                                     double realizedProfit,
+                                     boolean wasLate,
+                                     boolean wasCancelled) {
+        if (pending == null) {
+            return;
+        }
+        if (pending.planFeatures != null && pending.planFeatures.length > 0) {
+            planRanker.learnFromOutcome(pending.planFeatures, actualUtility);
+        }
+        if (pending.bundleSize >= 2
+                && pending.batchFeatures != null
+                && pending.batchFeatures.length > 0) {
+            batchValueModel.learnFromOutcome(
+                    pending.batchFeatures,
+                    BatchValueModel.computeOutcomeLabel(
+                            !wasLate,
+                            Math.max(0.1, pending.bundleEfficiency),
+                            continuationActualNorm,
+                            pending.predictedDeadheadKm,
+                            realizedProfit,
+                            wasCancelled));
+        }
+        if ((pending.stressFallbackOnly
+                || pending.stressRegime == StressRegime.STRESS
+                || pending.stressRegime == StressRegime.SEVERE_STRESS)
+                && pending.stressFeatures != null
+                && pending.stressFeatures.length > 0) {
+            stressRescueModel.learnFromOutcome(
+                    pending.stressFeatures,
+                    StressRescueModel.computeOutcomeLabel(
+                            !wasLate,
+                            wasCancelled,
+                            pending.predictedDeadheadKm,
+                            continuationActualNorm,
+                            realizedProfit));
+        }
+        if (pending.positioningFeatures != null && pending.positioningFeatures.length > 0) {
+            positioningValueModel.learnFromOutcome(
+                    pending.positioningFeatures,
+                    DriverPositioningValueModel.computeOutcomeLabel(
+                            continuationActualNorm,
+                            pending.expectedPostCompletionEmptyKm,
+                            realizedProfit,
+                            wasCancelled));
         }
     }
 
@@ -1243,7 +1409,17 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                         + field.getDriverDensityAt(center) * 0.03;
                 double weatherPenalty = field.getWeatherExposureAt(center) * 0.14;
                 double riskAdjustedAttraction = field.getRiskAdjustedAttractionAt(center) * 0.10;
+                double positioningValue = ablationMode == AblationMode.NO_POSITIONING_MODEL
+                        ? 0.0
+                        : positioningValueModel.predict(featureExtractor.positioningFeatures(
+                        currentPos,
+                        center,
+                        field,
+                        activeGraphShadowSnapshot,
+                        field.getTrafficForecastAt(center, 10),
+                        WeatherProfile.CLEAR));
                 double score = futureValue + riskAdjustedAttraction
+                        + positioningValue * 0.45
                         - fuelPenalty - congestionPenalty - weatherPenalty;
                 if (score > bestScore) {
                     bestScore = score;
@@ -1863,14 +2039,17 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         List<DispatchPlan> shortlist = new ArrayList<>(3);
         if (!wavePlans.isEmpty()) {
             DispatchPlan primaryWave = wavePlans.get(0);
-            primaryWave.setRunId(activeRunId);
-            if (primaryWave.getBundleSize() >= 3) {
-                primaryWave.setSelectionBucket(SelectionBucket.WAVE_LOCAL);
-            } else {
-                primaryWave.setSelectionBucket(SelectionBucket.EXTENSION_LOCAL);
+            if (passesAiBatchAdmissionGate(primaryWave, primaryWave.getStressRegime(), WeatherProfile.CLEAR)
+                    || primaryWave.getBatchValueScore() >= 0.50) {
+                primaryWave.setRunId(activeRunId);
+                if (primaryWave.getBundleSize() >= 3) {
+                    primaryWave.setSelectionBucket(SelectionBucket.WAVE_LOCAL);
+                } else {
+                    primaryWave.setSelectionBucket(SelectionBucket.EXTENSION_LOCAL);
+                }
+                primaryWave.setHoldRemainingCycles(0);
+                shortlist.add(primaryWave);
             }
-            primaryWave.setHoldRemainingCycles(0);
-            shortlist.add(primaryWave);
         }
 
         boolean strongImmediateWave = !wavePlans.isEmpty()
@@ -1997,7 +2176,8 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         if (fragileCoverage
                 && fallback.getOnTimeProbability() >= 0.78
                 && fallback.getPredictedDeadheadKm() <= 2.0
-                && fallback.getLateRisk() <= 0.34) {
+                && fallback.getLateRisk() <= 0.34
+                && fallback.getStressRescueScore() >= 0.45) {
             return true;
         }
         if (!hasWaveCandidate
@@ -2016,6 +2196,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             return fallback.getOnTimeProbability() >= 0.84
                     && fallback.getPredictedDeadheadKm() <= 1.5
                     && fallback.getLateRisk() <= 0.30
+                    && fallback.getStressRescueScore() >= 0.48
                     && (fragileCoverage
                     || ctx.thirdOrderFeasibilityScore() < 0.50
                     || ctx.effectiveSlaSlackMinutes() <= 3.0);
@@ -2070,9 +2251,11 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         boolean materialExecutionGain = fallback.getExecutionScore() >= hold.getExecutionScore() + 0.04
                 || fallback.getOnTimeProbability() >= hold.getOnTimeProbability() + 0.05
                 || fallback.getPredictedDeadheadKm() <= hold.getPredictedDeadheadKm() - 0.40;
+        boolean aiRescueGain = fallback.getStressRescueScore() >= hold.getStressRescueScore() + 0.08
+                || fallback.getStressRescueScore() >= 0.52;
         return strongExecutionFallback
                 && !strongLocalWaveSignal
-                && (scoreGap >= 0.03 || weakHoldWindow || urgentSla || fragileCoverage || materialExecutionGain);
+                && (scoreGap >= 0.03 || weakHoldWindow || urgentSla || fragileCoverage || materialExecutionGain || aiRescueGain);
     }
 
     private double computeExecutionScore(DispatchPlan plan,
@@ -2361,6 +2544,103 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         penalty += clamp01(plan.getEmptyRiskAfter()) * 0.030;
         penalty += Math.max(0.0, 0.42 - confidence) * 0.05;
         return penalty;
+    }
+
+    private boolean passesAiBatchAdmissionGate(DispatchPlan plan,
+                                               StressRegime regime,
+                                               WeatherProfile weather) {
+        if (plan == null || plan.getBundleSize() <= 1) {
+            return true;
+        }
+        if (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM) {
+            return true;
+        }
+        if (regime != StressRegime.NORMAL) {
+            return true;
+        }
+        if (plan.getBundleSize() >= 3) {
+            return plan.getBatchValueScore() >= 0.54
+                    && plan.getLastDropLandingScore() >= 0.40
+                    && plan.getExpectedPostCompletionEmptyKm() <= 2.2;
+        }
+        return plan.getBatchValueScore() >= 0.42
+                || (plan.getPredictedDeadheadKm() <= 1.4
+                && plan.getOnTimeProbability() >= 0.82
+                && plan.getExpectedPostCompletionEmptyKm() <= 1.3);
+    }
+
+    private boolean passesStressRescueGate(DispatchPlan plan,
+                                           StressRegime regime,
+                                           WeatherProfile weather) {
+        if (plan == null) {
+            return false;
+        }
+        boolean fallbackLike = plan.isStressFallbackOnly()
+                || isFallbackBucket(plan.getSelectionBucket());
+        if (!fallbackLike) {
+            return true;
+        }
+        if (ablationMode == AblationMode.NO_STRESS_AI_GATE) {
+            return true;
+        }
+        double threshold = (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM)
+                ? (regime == StressRegime.SEVERE_STRESS ? 0.36 : 0.42)
+                : regime == StressRegime.NORMAL ? 0.48 : 0.44;
+        return plan.getStressRescueScore() >= threshold;
+    }
+
+    private double neutralBatchValue(DispatchPlan plan) {
+        if (plan == null || plan.getBundleSize() <= 1) {
+            return 0.0;
+        }
+        return clamp01(
+                plan.getBundleEfficiency() * 0.32
+                        + plan.getDeliveryCorridorScore() * 0.20
+                        + plan.getLastDropLandingScore() * 0.18
+                        - plan.getPredictedDeadheadKm() / 5.0 * 0.18
+                        - plan.getExpectedPostCompletionEmptyKm() / 3.0 * 0.12);
+    }
+
+    private double neutralStressRescueValue(DispatchPlan plan,
+                                            StressRegime regime,
+                                            WeatherProfile weather) {
+        if (plan == null) {
+            return 0.0;
+        }
+        double base = plan.getOnTimeProbability() * 0.34
+                + clamp01(1.0 - plan.getPredictedDeadheadKm() / 3.5) * 0.26
+                + clamp01(1.0 - plan.getLateRisk()) * 0.18
+                + clamp01(1.0 - plan.getMerchantPrepRiskScore()) * 0.10
+                + clamp01(1.0 - plan.getBorrowedDependencyScore()) * 0.12;
+        if (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM) {
+            base -= 0.06;
+        }
+        if (regime == StressRegime.SEVERE_STRESS) {
+            base -= 0.04;
+        }
+        return clamp01(base);
+    }
+
+    private double neutralPositioningValue(DispatchPlan plan) {
+        if (plan == null) {
+            return 0.0;
+        }
+        return clamp01(
+                plan.getPostDropDemandProbability() * 0.36
+                        + plan.getLastDropLandingScore() * 0.24
+                        + plan.getGraphAffinityScore() * 0.18
+                        + clamp01(1.0 - plan.getExpectedPostCompletionEmptyKm() / 3.0) * 0.14
+                        - clamp01(plan.getCongestionPenalty()) * 0.08);
+    }
+
+    private double normalizeModelScore(double rawScore) {
+        if (rawScore >= 1.0) {
+            return 1.0;
+        }
+        if (rawScore <= -1.0) {
+            return 0.0;
+        }
+        return clamp01(1.0 / (1.0 + Math.exp(-rawScore)));
     }
 
     private void populateSelectionSignals(DispatchPlan plan,
@@ -2874,6 +3154,110 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                         !plan.isNeuralPriorUsed(),
                         plan.getNeuralPriorFallbackReason(),
                         Instant.now()));
+        ModelBundleManifest batchBundle = modelArtifactProvider.activeBundle("batch-value-model");
+        PlatformRuntimeBootstrap.getCanonicalEventPublisher().publish(
+                EventContractCatalog.MODEL_INFERENCE_V1,
+                toModelInferenceTrace(
+                        plan,
+                        plan.getTraceId() + "-batch-value",
+                        batchBundle,
+                        plan.getBatchValueScore(),
+                        false));
+        ModelBundleManifest stressBundle = modelArtifactProvider.activeBundle("stress-rescue-model");
+        PlatformRuntimeBootstrap.getCanonicalEventPublisher().publish(
+                EventContractCatalog.MODEL_INFERENCE_V1,
+                toModelInferenceTrace(
+                        plan,
+                        plan.getTraceId() + "-stress-rescue",
+                        stressBundle,
+                        plan.getStressRescueScore(),
+                        false));
+        ModelBundleManifest positioningBundle = modelArtifactProvider.activeBundle("driver-positioning-model");
+        PlatformRuntimeBootstrap.getCanonicalEventPublisher().publish(
+                EventContractCatalog.MODEL_INFERENCE_V1,
+                toModelInferenceTrace(
+                        plan,
+                        plan.getTraceId() + "-positioning",
+                        positioningBundle,
+                        plan.getPositioningValueScore(),
+                        false));
+    }
+
+    private void emitCandidateArtifact(long tick,
+                                       double[] contextFeatures,
+                                       double[] planFeatures,
+                                       String policyUsed,
+                                       DispatchPlan plan,
+                                       DriverDecisionContext ctx,
+                                       boolean selected) {
+        Map<String, Object> contextSnapshot = buildContextSnapshot(ctx, plan);
+        DispatchFactSink.CandidateFact candidateFact = new DispatchFactSink.CandidateFact(
+                plan.getTraceId(),
+                plan.getRunId(),
+                tick,
+                plan.getDriver().getId(),
+                plan.getBundle() == null ? null : plan.getBundle().bundleId(),
+                selected,
+                policyUsed,
+                executionProfile.name(),
+                ablationMode.name(),
+                plan.getSelectionBucket().name(),
+                plan.getBundleSize(),
+                plan.getTotalScore(),
+                plan.getConfidence(),
+                plan.getRouteValueScore(),
+                plan.getBatchValueScore(),
+                plan.getContinuationScore(),
+                plan.getStressRescueScore(),
+                plan.getPositioningValueScore(),
+                plan.getGraphAffinityScore(),
+                plan.getNeuralPriorScore(),
+                plan.getServiceTier(),
+                activeRouteLatencyMode,
+                semanticPlanSummary(plan),
+                contextSnapshot,
+                contextFeatures == null ? new double[0] : contextFeatures.clone(),
+                planFeatures == null ? new double[0] : planFeatures.clone(),
+                activeModelVersions(),
+                Instant.now());
+        dispatchFactSink.recordCandidate(candidateFact);
+        PlatformRuntimeBootstrap.getCanonicalEventPublisher().publish(
+                EventContractCatalog.DISPATCH_CANDIDATE_V1,
+                candidateFact);
+    }
+
+    private InferenceTraceV1 toModelInferenceTrace(DispatchPlan plan,
+                                                   String traceId,
+                                                   ModelBundleManifest bundle,
+                                                   double score,
+                                                   boolean networkModel) {
+        boolean fallback = isBundleOffline(bundle);
+        return new InferenceTraceV1(
+                plan.getRunId(),
+                traceId,
+                bundle.modelKey(),
+                bundle.modelVersion(),
+                "tabular-onnx",
+                "onnx-java",
+                plan.getModelInferenceLatencyMs(),
+                score,
+                true,
+                false,
+                false,
+                fallback,
+                fallback ? "offline-or-missing-bundle" : "none",
+                Instant.now());
+    }
+
+    private Map<String, String> activeModelVersions() {
+        Map<String, String> versions = new LinkedHashMap<>();
+        versions.put("eta-model", modelArtifactProvider.activeModelVersion("eta-model"));
+        versions.put("plan-ranker-model", modelArtifactProvider.activeModelVersion("plan-ranker-model"));
+        versions.put("batch-value-model", modelArtifactProvider.activeModelVersion("batch-value-model"));
+        versions.put("stress-rescue-model", modelArtifactProvider.activeModelVersion("stress-rescue-model"));
+        versions.put("driver-positioning-model", modelArtifactProvider.activeModelVersion("driver-positioning-model"));
+        versions.put("neural-route-prior-model", modelArtifactProvider.activeModelVersion("neural-route-prior-model"));
+        return versions;
     }
 
     private ShadowAdviceEnvelope maybeEmitShadowAdvice(DispatchPlan plan,
@@ -3014,6 +3398,10 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         snapshot.put("neuralPriorFreshnessMs", plan.getNeuralPriorFreshnessMs());
         snapshot.put("neuralPriorScore", plan.getNeuralPriorScore());
         snapshot.put("neuralPriorUsed", plan.isNeuralPriorUsed());
+        snapshot.put("routeValueScore", plan.getRouteValueScore());
+        snapshot.put("batchValueScore", plan.getBatchValueScore());
+        snapshot.put("stressRescueScore", plan.getStressRescueScore());
+        snapshot.put("positioningValueScore", plan.getPositioningValueScore());
         snapshot.put("reachableOrders", ctx == null ? 0 : ctx.reachableOrders().size());
         snapshot.put("nearReadyOrders", ctx == null ? 0 : ctx.nearReadyOrders());
         snapshot.put("localTrafficIntensity", ctx == null ? 0.0 : ctx.localTrafficIntensity());
@@ -3089,6 +3477,10 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         summary.put("neuralPriorVersion", plan.getNeuralPriorVersion());
         summary.put("neuralPriorFreshnessMs", plan.getNeuralPriorFreshnessMs());
         summary.put("graphAffinityScore", plan.getGraphAffinityScore());
+        summary.put("routeValueScore", plan.getRouteValueScore());
+        summary.put("batchValueScore", plan.getBatchValueScore());
+        summary.put("stressRescueScore", plan.getStressRescueScore());
+        summary.put("positioningValueScore", plan.getPositioningValueScore());
         summary.put("graphExplanation", plan.getGraphExplanationTrace());
         summary.put("marginalDeadheadPerAddedOrder", plan.getMarginalDeadheadPerAddedOrder());
         summary.put("routeAlternative", routeAlternative);
@@ -3373,6 +3765,9 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         continuationValueModel.reset();
         planRanker.reset();
         uncertaintyEstimator.reset();
+        batchValueModel.reset();
+        stressRescueModel.reset();
+        positioningValueModel.reset();
         lastRetrainTick = 0;
         dispatchSequence = 0;
         latestReplayRetrainLatencyMs = 0L;
@@ -3758,6 +4153,14 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         private final Set<String> terminalOrderIds;
         private final double predictedDeadheadKm;
         private final double bundleEfficiency;
+        private final double[] planFeatures;
+        private final double[] batchFeatures;
+        private final double[] stressFeatures;
+        private final double[] positioningFeatures;
+        private final double expectedPostCompletionEmptyKm;
+        private final int bundleSize;
+        private final StressRegime stressRegime;
+        private final boolean stressFallbackOnly;
         private double realizedProfit;
         private double continuationActualNorm;
         private boolean anyLate;
@@ -3766,11 +4169,27 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         private PendingTraceOutcome(Set<String> orderIds,
                                     Set<String> terminalOrderIds,
                                     double predictedDeadheadKm,
-                                    double bundleEfficiency) {
+                                    double bundleEfficiency,
+                                    double[] planFeatures,
+                                    double[] batchFeatures,
+                                    double[] stressFeatures,
+                                    double[] positioningFeatures,
+                                    double expectedPostCompletionEmptyKm,
+                                    int bundleSize,
+                                    StressRegime stressRegime,
+                                    boolean stressFallbackOnly) {
             this.orderIds = orderIds;
             this.terminalOrderIds = terminalOrderIds;
             this.predictedDeadheadKm = predictedDeadheadKm;
             this.bundleEfficiency = bundleEfficiency;
+            this.planFeatures = planFeatures == null ? null : planFeatures.clone();
+            this.batchFeatures = batchFeatures == null ? null : batchFeatures.clone();
+            this.stressFeatures = stressFeatures == null ? null : stressFeatures.clone();
+            this.positioningFeatures = positioningFeatures == null ? null : positioningFeatures.clone();
+            this.expectedPostCompletionEmptyKm = expectedPostCompletionEmptyKm;
+            this.bundleSize = bundleSize;
+            this.stressRegime = stressRegime == null ? StressRegime.NORMAL : stressRegime;
+            this.stressFallbackOnly = stressFallbackOnly;
         }
     }
 }

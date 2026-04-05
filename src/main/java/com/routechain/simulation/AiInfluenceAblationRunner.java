@@ -19,8 +19,9 @@ public final class AiInfluenceAblationRunner {
     private static final List<OmegaDispatchAgent.AblationMode> REQUIRED_MODES = List.of(
             OmegaDispatchAgent.AblationMode.NO_NEURAL_PRIOR,
             OmegaDispatchAgent.AblationMode.NO_CONTINUATION,
-            OmegaDispatchAgent.AblationMode.NO_REPOSITION,
-            OmegaDispatchAgent.AblationMode.SMALL_BATCH_ONLY
+            OmegaDispatchAgent.AblationMode.NO_BATCH_VALUE,
+            OmegaDispatchAgent.AblationMode.NO_STRESS_AI_GATE,
+            OmegaDispatchAgent.AblationMode.NO_POSITIONING_MODEL
     );
 
     private AiInfluenceAblationRunner() {}

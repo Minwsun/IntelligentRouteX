@@ -8,6 +8,7 @@ class EventContractCatalogTest {
 
     @Test
     void shouldResolveKnownSchemaVersions() {
+        assertEquals("v1", EventContractCatalog.schemaVersionForTopic(EventContractCatalog.DISPATCH_CANDIDATE_V1));
         assertEquals("v2", EventContractCatalog.schemaVersionForTopic(EventContractCatalog.DISPATCH_DECISION_V2));
         assertEquals("v2", EventContractCatalog.schemaVersionForTopic(EventContractCatalog.FEATURE_SNAPSHOT_V2));
         assertEquals("v1", EventContractCatalog.schemaVersionForTopic(EventContractCatalog.MODEL_INFERENCE_V1));

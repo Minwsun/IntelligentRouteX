@@ -2,6 +2,8 @@ package com.routechain.ai;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -37,7 +39,7 @@ class DefaultModelArtifactProviderTest {
 
     @Test
     void shouldCreateFallbackBundleWhenNoRegistration() {
-        DefaultModelArtifactProvider provider = new DefaultModelArtifactProvider();
+        DefaultModelArtifactProvider provider = new DefaultModelArtifactProvider(Path.of("build", "missing-model-registry.json"));
         ModelBundleManifest active = provider.activeBundle("plan-ranker-model");
         assertTrue(active.champion());
         assertEquals("plan-ranker-model-online-fallback-v1", active.modelVersion());

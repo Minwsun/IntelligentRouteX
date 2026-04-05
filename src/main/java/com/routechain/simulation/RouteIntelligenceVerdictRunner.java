@@ -27,8 +27,9 @@ public final class RouteIntelligenceVerdictRunner {
     private static final List<String> REQUIRED_ABLATION_POLICIES = List.of(
             "NO_NEURAL_PRIOR",
             "NO_CONTINUATION",
-            "NO_REPOSITION",
-            "SMALL_BATCH_ONLY"
+            "NO_BATCH_VALUE",
+            "NO_STRESS_AI_GATE",
+            "NO_POSITIONING_MODEL"
     );
 
     private RouteIntelligenceVerdictRunner() {}
@@ -171,15 +172,20 @@ public final class RouteIntelligenceVerdictRunner {
                 audit(source, "ETA model hot path", true, "etaModel.predict", "ETA prediction is applied per plan."),
                 audit(source, "Late risk model", true, "lateRiskModel.predict", "Late-risk scoring affects on-time gating."),
                 audit(source, "Cancel risk model", true, "cancelRiskModel.predict", "Cancellation risk is part of live plan scoring."),
+                audit(source, "Route value model", true, "planRanker.rank(planFeatures)", "Plan utility is ranked by a learned route-value model."),
+                audit(source, "Batch value model", true, "batchValueModel.predict", "Batch admission uses a learned value model instead of fixed bundle rules."),
                 audit(source, "Continuation model", true, "double continuationValue = continuationValueModel", "Post-drop continuation value shapes final ranking."),
+                audit(source, "Stress rescue model", true, "stressRescueModel.predict", "Stress fallback rescue is gated by a learned model."),
+                audit(source, "Driver positioning model", true, "positioningValueModel.predict", "Idle driver landing and reposition value is predicted by a learned model."),
                 audit(source, "Uncertainty model", true, "UncertaintyEstimator.Prediction pred = uncertaintyEstimator", "Uncertainty is consulted during robust scoring."),
                 audit(source, "Graph affinity scoring", true, "getGraphAffinityScorer().scorePlan", "Graph shadow features are used on the live path."),
                 audit(source, "Neural route prior", true, "neuralRoutePriorClient.resolve", "Neural prior is queried unless ablated."),
                 audit(source, "Replay retraining hook", true, "replayTrainer.retrain", "Adaptive retraining hook exists in live engine ticks."),
                 audit(source, "Ablation control NO_NEURAL_PRIOR", true, "AblationMode.NO_NEURAL_PRIOR", "Neural prior can be disabled for proof runs."),
                 audit(source, "Ablation control NO_CONTINUATION", true, "AblationMode.NO_CONTINUATION", "Continuation value can be disabled for proof runs."),
-                audit(source, "Ablation control NO_REPOSITION", true, "AblationMode.NO_REPOSITION", "Repositioning can be disabled for proof runs."),
-                audit(source, "Ablation control SMALL_BATCH_ONLY", true, "AblationMode.SMALL_BATCH_ONLY", "Batch-size behavior can be constrained for proof runs.")
+                audit(source, "Ablation control NO_BATCH_VALUE", true, "AblationMode.NO_BATCH_VALUE", "Batch value modeling can be disabled for proof runs."),
+                audit(source, "Ablation control NO_STRESS_AI_GATE", true, "AblationMode.NO_STRESS_AI_GATE", "Stress rescue AI gate can be disabled for proof runs."),
+                audit(source, "Ablation control NO_POSITIONING_MODEL", true, "AblationMode.NO_POSITIONING_MODEL", "Driver positioning AI can be disabled for proof runs.")
         );
     }
 

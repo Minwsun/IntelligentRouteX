@@ -11,10 +11,42 @@ import java.util.Map;
  * Durable sink for replay, benchmark, and dispatch facts.
  */
 public interface DispatchFactSink {
+    void recordCandidate(CandidateFact fact);
     void recordDecision(DecisionFact fact);
     void recordOutcome(OutcomeFact fact);
     void recordRunReport(RunReport report);
     void recordReplayCompare(ReplayCompareResult compare);
+
+    record CandidateFact(
+            String traceId,
+            String runId,
+            long tick,
+            String driverId,
+            String bundleId,
+            boolean selected,
+            String policyUsed,
+            String executionProfile,
+            String ablationMode,
+            String selectionBucket,
+            int bundleSize,
+            double predictedUtility,
+            double confidence,
+            double routeValueScore,
+            double batchValueScore,
+            double continuationScore,
+            double stressRescueScore,
+            double positioningValueScore,
+            double graphAffinityScore,
+            double neuralPriorScore,
+            String serviceTier,
+            String routeLatencyMode,
+            Map<String, Object> semanticPlanSummary,
+            Map<String, Object> contextSnapshot,
+            double[] contextFeatures,
+            double[] planFeatures,
+            Map<String, String> activeModelVersions,
+            Instant recordedAt
+    ) {}
 
     record DecisionFact(
             String traceId,

@@ -64,6 +64,10 @@ public class DispatchPlan {
     private String serviceTier = "instant";
     private double routePriorScore;
     private double graphAffinityScore;
+    private double routeValueScore;
+    private double batchValueScore;
+    private double stressRescueScore;
+    private double positioningValueScore;
     private GraphExplanationTrace graphExplanationTrace;
     private double merchantPrepRiskScore;
     private double borrowSuccessProbability;
@@ -157,6 +161,10 @@ public class DispatchPlan {
     public String getServiceTier() { return serviceTier; }
     public double getRoutePriorScore() { return routePriorScore; }
     public double getGraphAffinityScore() { return graphAffinityScore; }
+    public double getRouteValueScore() { return routeValueScore; }
+    public double getBatchValueScore() { return batchValueScore; }
+    public double getStressRescueScore() { return stressRescueScore; }
+    public double getPositioningValueScore() { return positioningValueScore; }
     public GraphExplanationTrace getGraphExplanationTrace() { return graphExplanationTrace; }
     public double getMerchantPrepRiskScore() { return merchantPrepRiskScore; }
     public double getBorrowSuccessProbability() { return borrowSuccessProbability; }
@@ -259,6 +267,12 @@ public class DispatchPlan {
     }
     public void setRoutePriorScore(double routePriorScore) { this.routePriorScore = routePriorScore; }
     public void setGraphAffinityScore(double graphAffinityScore) { this.graphAffinityScore = graphAffinityScore; }
+    public void setRouteValueScore(double routeValueScore) { this.routeValueScore = routeValueScore; }
+    public void setBatchValueScore(double batchValueScore) { this.batchValueScore = batchValueScore; }
+    public void setStressRescueScore(double stressRescueScore) { this.stressRescueScore = stressRescueScore; }
+    public void setPositioningValueScore(double positioningValueScore) {
+        this.positioningValueScore = positioningValueScore;
+    }
     public void setGraphExplanationTrace(GraphExplanationTrace graphExplanationTrace) {
         this.graphExplanationTrace = graphExplanationTrace;
     }

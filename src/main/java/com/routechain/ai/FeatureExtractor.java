@@ -2,6 +2,8 @@ package com.routechain.ai;
 
 import com.routechain.domain.*;
 import com.routechain.domain.Enums.*;
+import com.routechain.graph.FutureCellValue;
+import com.routechain.graph.GraphShadowSnapshot;
 import com.routechain.simulation.DispatchPlan;
 
 import java.util.List;
@@ -204,6 +206,119 @@ public class FeatureExtractor {
         };
     }
 
+    /**
+     * Extract features for learned batch admission.
+     */
+    public double[] batchValueFeatures(DispatchPlan plan) {
+        double bundleSize = Math.max(0.0, Math.min(1.0, (plan.getBundleSize() - 1) / 4.0));
+        double pickupCompactness = clamp01(1.0 - plan.getPickupSpreadKm() / 2.5);
+        double dropCoherence = clamp01(1.0 - plan.getDeliveryZigZagPenalty());
+        double bundleEfficiency = clamp01(plan.getBundleEfficiency());
+        double onTime = clamp01(plan.getOnTimeProbability());
+        double lateRisk = clamp01(plan.getLateRisk());
+        double deadhead = clamp01(plan.getPredictedDeadheadKm() / 4.0);
+        double postDrop = clamp01(plan.getPostDropDemandProbability());
+        double landing = clamp01(plan.getLastDropLandingScore());
+        double emptyRisk = clamp01(plan.getEmptyRiskAfter());
+        double borrowedDependency = clamp01(plan.getBorrowedDependencyScore());
+        double zigZag = clamp01(plan.getDeliveryZigZagPenalty());
+        return new double[] {
+                bundleSize,
+                pickupCompactness,
+                dropCoherence,
+                bundleEfficiency,
+                onTime,
+                lateRisk,
+                deadhead,
+                postDrop,
+                landing,
+                emptyRisk,
+                borrowedDependency,
+                zigZag
+        };
+    }
+
+    /**
+     * Extract features for fallback rescue gating under stress.
+     */
+    public double[] stressRescueFeatures(DispatchPlan plan,
+                                         DriverDecisionContext ctx,
+                                         SpatiotemporalField field,
+                                         double traffic,
+                                         WeatherProfile weather) {
+        GeoPoint pickupPoint = plan.getSequence().isEmpty()
+                ? plan.getDriver().getCurrentLocation()
+                : plan.getSequence().get(0).location();
+        double stressIntensity = clamp01(Math.max(
+                weather.ordinal() / 3.0,
+                Math.max(traffic, plan.getTrafficExposureScore())));
+        double onTime = clamp01(plan.getOnTimeProbability());
+        double deadhead = clamp01(plan.getPredictedDeadheadKm() / 4.0);
+        double pickupReady = clamp01(1.0 - Math.min(1.0, plan.getMerchantPrepRiskScore()));
+        double sameZone = plan.getDriver().getRegionId().equals(
+                plan.getOrders().isEmpty()
+                        ? plan.getDriver().getRegionId()
+                        : plan.getOrders().get(0).getPickupRegionId()) ? 1.0 : 0.0;
+        double localBacklogTight = ctx == null
+                ? 0.5
+                : clamp01(1.0 - Math.min(1.0, ctx.localReachableBacklog() / 4.0));
+        double borrowRisk = clamp01(plan.getBorrowedDependencyScore());
+        double merchantPrepRisk = clamp01(plan.getMerchantPrepRiskScore());
+        double weatherExposure = field == null ? weather.ordinal() / 3.0 : field.getWeatherExposureAt(pickupPoint);
+        double trafficExposure = field == null ? traffic : field.getCongestionExposureAt(pickupPoint);
+        return new double[] {
+                stressIntensity,
+                onTime,
+                deadhead,
+                pickupReady,
+                sameZone,
+                localBacklogTight,
+                borrowRisk,
+                merchantPrepRisk,
+                clamp01(weatherExposure),
+                clamp01(Math.max(traffic, trafficExposure))
+        };
+    }
+
+    /**
+     * Extract features for end-zone and reposition positioning value.
+     */
+    public double[] positioningFeatures(GeoPoint currentPos,
+                                        GeoPoint targetPos,
+                                        SpatiotemporalField field,
+                                        GraphShadowSnapshot snapshot,
+                                        double traffic,
+                                        WeatherProfile weather) {
+        double demand5 = field == null ? 0.0 : clamp01(field.getForecastDemandAt(targetPos, 5) / 3.0);
+        double demand10 = field == null ? 0.0 : clamp01(field.getForecastDemandAt(targetPos, 10) / 3.0);
+        double demand15 = field == null ? 0.0 : clamp01(field.getForecastDemandAt(targetPos, 15) / 3.0);
+        double postDrop = field == null ? 0.0 : clamp01(field.getPostDropOpportunityAt(targetPos, 10));
+        double emptyRisk = field == null ? 0.5 : clamp01(field.getEmptyZoneRiskAt(targetPos, 10));
+        double graphCentrality = resolveFutureCellValue(targetPos, field, snapshot).graphCentralityScore();
+        double shortage = field == null ? 0.0 : clamp01(field.getShortageForecastAt(targetPos, 10));
+        double congestion = field == null ? traffic : clamp01(Math.max(traffic, field.getTrafficForecastAt(targetPos, 10)));
+        double weatherExposure = field == null
+                ? weather.ordinal() / 3.0
+                : clamp01(Math.max(weather.ordinal() / 3.0, field.getWeatherForecastAt(targetPos, 10)));
+        double distancePenalty = currentPos == null || targetPos == null
+                ? 0.0
+                : clamp01((currentPos.distanceTo(targetPos) / 1000.0) / 2.0);
+        double attraction = field == null ? 0.0 : clamp01(field.getRiskAdjustedAttractionAt(targetPos));
+        return new double[] {
+                demand5,
+                demand10,
+                demand15,
+                postDrop,
+                emptyRisk,
+                clamp01(graphCentrality),
+                shortage,
+                congestion,
+                weatherExposure,
+                distancePenalty,
+                attraction
+        };
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
     private double computePickupSpread(List<Order> orders) {
@@ -264,5 +379,31 @@ public class FeatureExtractor {
             prev = stop.location();
         }
         return dist;
+    }
+
+    private FutureCellValue resolveFutureCellValue(GeoPoint targetPos,
+                                                   SpatiotemporalField field,
+                                                   GraphShadowSnapshot snapshot) {
+        if (targetPos == null || field == null || snapshot == null) {
+            return new FutureCellValue("cell-unknown", "instant", 10, 0.0, 0.0, 1.0, 0.0, 0.0, "missing");
+        }
+        String cellId = field.cellKeyOf(targetPos);
+        return snapshot.futureCellValues().stream()
+                .filter(value -> value.cellId().equals(cellId))
+                .findFirst()
+                .orElse(new FutureCellValue(
+                        cellId,
+                        "instant",
+                        10,
+                        field.getForecastDemandAt(targetPos, 10),
+                        field.getPostDropOpportunityAt(targetPos, 10),
+                        field.getEmptyZoneRiskAt(targetPos, 10),
+                        0.0,
+                        field.getRiskAdjustedAttractionAt(targetPos),
+                        "fallback"));
+    }
+
+    private double clamp01(double value) {
+        return Math.max(0.0, Math.min(1.0, value));
     }
 }
