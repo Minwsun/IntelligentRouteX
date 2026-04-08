@@ -906,11 +906,15 @@ public class DriverPlanGenerator {
         SequenceOptimizer.RouteObjectiveMetrics routeMetrics =
                 seqOpt.evaluateRouteObjective(driver, bestSeq, orders);
         populateRouteAndLandingMetrics(plan, routeMetrics);
-        double visibleWaveBonus = executionProfile == OmegaDispatchAgent.ExecutionProfile.MAINLINE_REALISTIC
+        double highValueWaveBonus = executionProfile == OmegaDispatchAgent.ExecutionProfile.MAINLINE_REALISTIC
                 && !ctx.harshWeatherStress()
                 && (orders.size() >= 3 || (opportunisticExtension && effectiveBundleSize >= 3))
                 && compactReadyAligned
-                ? (hardThreeOrderPolicy ? 0.18 : targetThreeOrderLaunch ? 0.14 : 0.12) : 0.0;
+                && routeMetrics.deliveryCorridorScore() >= 0.38
+                && routeMetrics.lastDropLandingScore() >= 0.24
+                && routeMetrics.expectedPostCompletionEmptyKm() <= 2.0
+                && deadheadKm <= 2.9
+                ? (hardThreeOrderPolicy ? 0.14 : targetThreeOrderLaunch ? 0.11 : 0.09) : 0.0;
         double trafficStressRecoveryBonus = trafficOnlyStressWindow
                 && orders.size() == 3
                 && compactness >= 0.60
@@ -989,7 +993,7 @@ public class DriverPlanGenerator {
                 + compactness * 0.15
                 + readinessBonus * 0.10
                 + sizeBonus * 0.17
-                + visibleWaveBonus
+                + highValueWaveBonus
                 + trafficStressRecoveryBonus
                 + routeMetrics.deliveryCorridorScore() * 0.10
                 + routeMetrics.lastDropLandingScore() * 0.10
@@ -1593,7 +1597,7 @@ public class DriverPlanGenerator {
                 sameMerchantWaves,
                 compactClusterWaves,
                 corridorAlignedWaves);
-        promoteVisibleMultiOrderWaves(
+        promoteHighUtilityMultiOrderWaves(
                 selected,
                 maxPlans,
                 regime,
@@ -1636,71 +1640,84 @@ public class DriverPlanGenerator {
                 });
     }
 
-    private void promoteVisibleMultiOrderWaves(List<DispatchPlan> selected,
-                                               int maxPlans,
-                                               StressRegime regime,
-                                               boolean hardThreeOrderPolicy,
-                                               List<DispatchPlan> sameMerchantWaves,
-                                               List<DispatchPlan> compactClusterWaves,
-                                               List<DispatchPlan> corridorAlignedWaves,
-                                               List<DispatchPlan> stretchMultiOrder) {
+    private void promoteHighUtilityMultiOrderWaves(List<DispatchPlan> selected,
+                                                   int maxPlans,
+                                                   StressRegime regime,
+                                                   boolean hardThreeOrderPolicy,
+                                                   List<DispatchPlan> sameMerchantWaves,
+                                                   List<DispatchPlan> compactClusterWaves,
+                                                   List<DispatchPlan> corridorAlignedWaves,
+                                                   List<DispatchPlan> stretchMultiOrder) {
         if (executionProfile != OmegaDispatchAgent.ExecutionProfile.MAINLINE_REALISTIC) {
             return;
         }
 
-        long targetVisibleWaves = regime == StressRegime.NORMAL
-                ? (hardThreeOrderPolicy ? 3 : 2)
-                : regime == StressRegime.STRESS ? (hardThreeOrderPolicy ? 2 : 1) : 0;
-        if (targetVisibleWaves <= 0) {
-            return;
-        }
-
-        long currentVisibleWaves = selected.stream()
-                .filter(plan -> plan.getBundleSize() >= 3)
-                .count();
-        if (currentVisibleWaves >= targetVisibleWaves) {
+        boolean alreadyHasStrongWave = selected.stream()
+                .anyMatch(plan -> isHighUtilityWaveCandidate(plan, regime, hardThreeOrderPolicy));
+        if (alreadyHasStrongWave) {
             return;
         }
 
         List<DispatchPlan> promotedCandidates = new ArrayList<>();
         promotedCandidates.addAll(sameMerchantWaves.stream()
-                .filter(plan -> plan.getBundleSize() >= 3)
+                .filter(plan -> isHighUtilityWaveCandidate(plan, regime, hardThreeOrderPolicy))
                 .toList());
         promotedCandidates.addAll(compactClusterWaves.stream()
-                .filter(plan -> plan.getBundleSize() >= 3)
+                .filter(plan -> isHighUtilityWaveCandidate(plan, regime, hardThreeOrderPolicy))
                 .toList());
         promotedCandidates.addAll(corridorAlignedWaves.stream()
-                .filter(plan -> plan.getBundleSize() >= 3)
+                .filter(plan -> isHighUtilityWaveCandidate(plan, regime, hardThreeOrderPolicy))
                 .toList());
         promotedCandidates.addAll(stretchMultiOrder.stream()
-                .filter(plan -> plan.getBundleSize() >= 3)
+                .filter(plan -> isHighUtilityWaveCandidate(plan, regime, hardThreeOrderPolicy))
                 .toList());
         promotedCandidates.sort(Comparator.comparingDouble(DispatchPlan::getTotalScore).reversed());
 
         for (DispatchPlan candidate : promotedCandidates) {
-            if (currentVisibleWaves >= targetVisibleWaves) {
-                break;
-            }
             if (selected.contains(candidate)) {
-                currentVisibleWaves++;
-                continue;
-            }
-            if (selected.size() < maxPlans) {
-                selected.add(candidate);
-                currentVisibleWaves++;
                 continue;
             }
 
             DispatchPlan replaceable = selected.stream()
-                    .filter(plan -> plan.getBundleSize() < 3)
+                    .filter(plan -> !plan.isWaitingForThirdOrder())
+                    .filter(plan -> !isHighUtilityWaveCandidate(plan, regime, hardThreeOrderPolicy))
                     .min(Comparator.comparingDouble(DispatchPlan::getTotalScore))
                     .orElse(null);
-            if (replaceable != null && candidate.getTotalScore() >= replaceable.getTotalScore() * 0.90) {
+            boolean candidateMateriallyBetter = replaceable != null
+                    && candidate.getTotalScore() >= replaceable.getTotalScore() - 0.02;
+            boolean replacesIdleOrWeakDirect = replaceable != null
+                    && (replaceable.getOrders().isEmpty()
+                    || replaceable.getBundleSize() <= 2
+                    && replaceable.getExpectedPostCompletionEmptyKm() >= 1.6);
+            if (selected.size() < maxPlans && candidate.getTotalScore() >= 0.66) {
+                selected.add(candidate);
+                return;
+            }
+            if (replaceable != null && candidateMateriallyBetter && replacesIdleOrWeakDirect) {
                 selected.remove(replaceable);
                 selected.add(candidate);
-                currentVisibleWaves++;
+                return;
             }
         }
+    }
+
+    private boolean isHighUtilityWaveCandidate(DispatchPlan candidate,
+                                               StressRegime regime,
+                                               boolean hardThreeOrderPolicy) {
+        if (candidate == null || candidate.getBundleSize() < 3) {
+            return false;
+        }
+        double maxDeadhead = regime == StressRegime.NORMAL ? 2.9 : 2.5;
+        double maxEmptyFinish = regime == StressRegime.NORMAL ? 2.0 : 1.6;
+        double minLanding = hardThreeOrderPolicy ? 0.24 : 0.28;
+        double minCorridor = hardThreeOrderPolicy ? 0.38 : 0.42;
+        return candidate.getPredictedDeadheadKm() <= maxDeadhead
+                && candidate.getExpectedPostCompletionEmptyKm() <= maxEmptyFinish
+                && candidate.getDeliveryCorridorScore() >= minCorridor
+                && candidate.getLastDropLandingScore() >= minLanding
+                && candidate.getDeliveryZigZagPenalty() <= 0.64
+                && candidate.getTotalScore() >= 0.62
+                && candidate.isWaveLaunchEligible();
     }
 
     private void addTop(List<DispatchPlan> selected, List<DispatchPlan> source, int limit) {
@@ -1783,10 +1800,13 @@ public class DriverPlanGenerator {
                 && !ctx.harshWeatherStress();
         plan.setStressRegime(regime);
         plan.setHarshWeatherStress(ctx.harshWeatherStress());
-        plan.setHardThreeOrderPolicyActive(cleanThreeLaunch);
+        boolean planLevelThreeOrderPolicy = cleanThreeLaunch
+                && (waitingForThirdOrder
+                || plan.getBundleSize() >= 3
+                || prePickupExtensionEligible);
+        plan.setHardThreeOrderPolicyActive(planLevelThreeOrderPolicy);
         plan.setWaitingForThirdOrder(waitingForThirdOrder);
-        boolean stressFallbackOnly = cleanThreeLaunch
-                || ctx.harshWeatherStress()
+        boolean stressFallbackOnly = ctx.harshWeatherStress()
                 || regime == StressRegime.SEVERE_STRESS;
         stressFallbackOnly = stressFallbackOnly
                 && !waitingForThirdOrder

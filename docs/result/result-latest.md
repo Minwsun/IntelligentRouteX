@@ -2,12 +2,12 @@
 
 ## 1. Nguồn kết quả
 
-Tài liệu này phản ánh trạng thái benchmark gần nhất tính tới `2026-04-08`, dựa trên hai lane chính:
+Tài liệu này phản ánh trạng thái benchmark gần nhất tính tới `2026-04-08 23:56` (Asia/Saigon), dựa trên:
 
 - `routeIntelligenceVerdictSmoke`
 - `scenarioBatchRealisticHcmc`
 
-Mục tiêu của file này là ghi đúng evidence, không viết theo kiểu marketing.
+Mục tiêu của file này là ghi đúng evidence hiện có, không viết theo kiểu marketing.
 
 ## 2. Verdict tổng quan hiện tại
 
@@ -16,10 +16,11 @@ Mục tiêu của file này là ghi đúng evidence, không viết theo kiểu m
 - `Confidence = MEDIUM`
 - `Claim Readiness = INTERNAL_ONLY`
 
-Ý nghĩa:
+Ý nghĩa hiện tại:
 
-- hệ thống đã có AI thật trên hot path
-- nhưng chất lượng route vẫn chưa đủ mạnh để coi là đã hoàn thiện
+- hệ thống có AI thật trên hot path
+- smoke clean-regime đã mạnh hơn trước và đã qua certification smoke
+- nhưng chất lượng route tổng thể vẫn chưa đủ để bỏ nhãn `PARTIAL`
 
 ## 3. Smoke certification gần nhất
 
@@ -27,153 +28,140 @@ Mục tiêu của file này là ghi đúng evidence, không viết theo kiểu m
 
 - Lane: `route-ai-certification-smoke`
 - Verdict: `PASS`
-- Scenario: `CLEAR`
-- Candidate: `Omega-current vs Legacy`
-- Dispatch P95/P99: `11.8ms / 135.3ms`
-- Gain/completion/deadhead: `+3.2% / +3.04pp / -6.50pp`
-- Post-drop delta: `+2.24pp`
+- Scenario group: `CLEAR`
+- Dispatch P95/P99: `4.0ms / 5.3ms`
+- Gain/completion/deadhead: `+2.9% / +6.13pp / -5.50pp`
 - Dominant stage: `candidateGeneration`
 
-Điều này cho thấy ở clean-regime chính, Omega đã có thể thắng `Legacy` theo một số KPI lõi.
+Điểm quan trọng nhất của lần chạy này là:
+
+- smoke certification đã chuyển từ `FAIL` sang `PASS`
+- nguyên nhân fail trước đó là `good-last-zone`
+- sau khi hiệu chỉnh landing/post-drop scoring, lane này đã vượt absolute gate
 
 ### Route intelligence verdict smoke
 
-- Architecture audit: `17/17`
-- Ablation evidence: `material 5/5`
-- Repo certification pass: `true`
-- Legacy warning: `true`
+- `AI = YES`
+- `Routing = PARTIAL`
+- `Confidence = MEDIUM`
+- `Claim Readiness = INTERNAL_ONLY`
 
-Nghĩa là:
+Diễn giải:
 
-- kiến trúc AI hiện có thể chứng minh là AI thật
-- nhưng performance route tổng thể vẫn chưa đủ chắc để bỏ cảnh báo so với `Legacy`
+- kiến trúc AI vẫn được benchmark công nhận là AI thật
+- nhưng route quality toàn cục vẫn chưa đủ mạnh để coi là hoàn tất
 
 ## 4. Bằng chứng AI hiện tại
 
-Những lane hiện đã được detect trên hot path:
+Các lane AI đang có mặt trên hot path:
 
-- ETA model
-- late risk model
-- cancel risk model
-- route value model
-- batch value model
-- continuation model
-- stress rescue model
-- driver positioning model
-- uncertainty-aware scoring
-- graph affinity / graph shadow
+- ETA
+- late risk
+- cancel risk
+- route value
+- batch value
+- continuation outcome
+- stress rescue
+- driver positioning
+- graph affinity / graph shadow / future cell value
 - neural route prior
 
-Ablation proof hiện có cho:
+Ablation smoke gần nhất cho thấy:
 
-- `NO_NEURAL_PRIOR`
-- `NO_CONTINUATION`
-- `NO_BATCH_VALUE`
-- `NO_STRESS_AI_GATE`
-- `NO_POSITIONING_MODEL`
+- `NO_NEURAL_PRIOR`: `BASELINE_BETTER`
+- `NO_CONTINUATION`: `BASELINE_BETTER`
+- `NO_BATCH_VALUE`: `MIXED`
+- `NO_STRESS_AI_GATE`: `MIXED`
+- `NO_POSITIONING_MODEL`: `MIXED`
 
-Kết luận đúng ở thời điểm hiện tại là:
+Kết luận đúng ở thời điểm này:
 
 - hệ thống có AI thật
-- nhưng không phải mọi lane AI đều đã được hiệu chỉnh đủ tốt
+- nhưng không phải lane AI nào cũng đã được hiệu chỉnh ổn định ngang nhau
 
 ## 5. Kết quả realistic HCMC gần nhất
 
-### Scenario đang tốt
+### Các bucket đang tốt hơn Legacy
 
-- `lunch peak`
+- `afternoon off-peak`
   - verdict `AI_BETTER`
-  - gain `+1.7%`
-  - completion `+0.3%`
-  - deadhead `-4.7%`
-  - post-drop hit `+4.0pp`
+  - gain `+2.2%`
+  - completion `+6.6pp`
+  - deadhead `-8.5pp`
+
+- `dinner peak`
+  - verdict `AI_BETTER`
+  - gain `+2.2%`
+  - completion `+1.0pp`
+  - deadhead `-4.0pp`
+  - post-drop hit `+10.7pp`
 
 - `weekend demand spike`
   - verdict `AI_BETTER`
-  - gain `+2.5%`
-  - completion `+2.0%`
-  - deadhead `-8.1%`
-  - post-drop hit `+11.8pp`
+  - gain `+2.1%`
+  - completion `+1.2pp`
+  - deadhead `-5.5pp`
+  - post-drop hit `+11.5pp`
 
-- `shortage regime`
-  - verdict `AI_BETTER`
-  - gain `+3.7%`
-  - completion `+1.6%`
-  - deadhead `-7.9%`
-  - post-drop hit `+2.4pp`
-
-### Scenario đang mixed
+### Các bucket đang mixed hoặc còn bị baseline giữ lại
 
 - `morning off-peak`
-  - verdict `MIXED`
-  - gain `+0.1%`
-  - completion `-2.9%`
-  - deadhead `-3.9%`
-  - post-drop hit `+7.6pp`
+  - verdict `BASELINE_BETTER`
+  - Omega có deadhead tốt hơn và post-drop tốt hơn
+  - nhưng on-time và cancel vẫn chưa đẹp bằng Legacy
 
-- `afternoon off-peak`
+- `lunch peak`
   - verdict `MIXED`
-  - gain `-0.2%`
-  - completion `+1.8%`
-  - deadhead `-8.6%`
-  - on-time xấu hơn baseline
-
-- `dinner peak`
-  - verdict `MIXED`
-  - gain `+0.7%`
-  - completion `+1.4%`
-  - deadhead `-5.3%`
-  - on-time xấu hơn baseline
+  - Omega tốt hơn về completion, deadhead, post-drop
+  - nhưng chưa đủ tách biệt để thành `AI_BETTER`
 
 - `night off-peak`
-  - verdict `MIXED`
-  - gain `-0.1%`
-  - completion `+4.1%`
-  - deadhead `-3.8%`
-  - on-time xấu hơn baseline
+  - verdict `BASELINE_BETTER`
+  - completion nhỉnh hơn
+  - nhưng deadhead tăng và fallback/borrowed vẫn còn cao
 
-### Scenario đang là blocker
+- `shortage regime`
+  - verdict `BASELINE_BETTER`
+  - Omega giảm deadhead tốt
+  - nhưng on-time giảm mạnh nên tổng thể vẫn chưa thắng
+
+### Bucket blocker lớn nhất
 
 - `heavy-rain lunch`
   - verdict `BASELINE_BETTER`
-  - gain `-17.0%`
-  - completion `-6.5%`
-  - deadhead `+74.6%`
-  - post-drop hit `-68.1pp`
-  - dispatch P95 tăng khoảng `+188.3ms`
+  - completion `1.9%` vs Legacy `8.3%`
+  - deadhead `81.1%` vs Legacy `8.3%`
+  - `deadheadPerCompletedOrderKm = 12.90km`
+  - post-drop hit `14.6%` vs Legacy `92.1%`
+  - dispatch P95 `306.0ms`
 
-Đây là blocker rõ nhất hiện tại. Nó cho thấy stress rescue, continuation và positioning dưới mưa lớn vẫn chưa đủ tốt.
+Đây vẫn là blocker số 1 của toàn phase route.
 
-## 6. Điểm mạnh và điểm yếu thực sự
+## 6. Điều đã tốt lên trong nhát cắt này
 
-### Điểm mạnh
+- landing score không còn bị dìm quá thấp so với post-drop opportunity thật
+- `good-last-zone` ở clean smoke đã thoát mức `0.0%`
+- candidate/outcome facts đã giữ thêm tín hiệu post-drop để training về sau bớt mù
+- smoke certification đã pass lại
 
-- route AI không còn là nearest-driver heuristic
-- clean-regime đã có dấu hiệu thắng `Legacy`
-- batching, continuation và positioning đã có hạ tầng model thật
-- benchmark đã bắt đầu phản ánh HCMC realistic thay vì chỉ smoke nội bộ
+## 7. Điểm yếu còn lại
 
-### Điểm yếu
-
-- route quality tổng thể vẫn mới ở mức `PARTIAL`
-- heavy-rain là điểm gãy chính
-- một số lane AI mới có dấu hiệu cần hiệu chỉnh lại vì ablation chưa cho thấy lợi thế ổn định
-- dominant stage vẫn là `candidateGeneration`, nghĩa là frontier chất lượng vẫn còn phải tối ưu
-
-## 7. Blocker hiện tại
-
-Ba blocker lớn nhất ở thời điểm này là:
-
-1. heavy-rain rescue còn yếu
-2. continuation và positioning chưa đủ ổn định trong stress regime
-3. batch admission chưa đủ sắc để luôn tạo batch "có lời thật"
+- `Routing Verdict` vẫn là `PARTIAL`
+- heavy-rain rescue vẫn chưa ổn
+- shortage và night off-peak vẫn chưa đủ sạch
+- một số lane AI mới vẫn cần calibration thêm để ablation tạo lợi thế rõ hơn
 
 ## 8. Kết luận ngắn
 
 Trạng thái đúng của hệ thống hiện tại là:
 
 - AI: có thật
-- benchmark: đã nghiêm túc hơn trước
-- route: tiến bộ, nhưng chưa đủ mạnh để coi là xong
+- smoke clean-regime: đã tiến rõ rệt và đã pass certification
+- realistic route quality: tiến lên, nhưng chưa đủ mạnh trên mọi bucket
+- blocker lớn nhất: `heavy-rain lunch`
 
-Nếu cần ưu tiên đúng việc tiếp theo, hãy tiếp tục nâng core route AI cho tới khi `Routing Verdict` thoát `PARTIAL` và `heavy-rain` không còn là scenario gãy.
+Ưu tiên tiếp theo vẫn phải là:
+
+1. heavy-rain rescue
+2. continuation/positioning trong stress
+3. shortage + night off-peak cleanup

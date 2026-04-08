@@ -462,6 +462,133 @@ class OmegaStressRegimeTest {
                 "Harsh-weather borrowed landing should not keep an overly optimistic positioning uplift");
     }
 
+    @Test
+    void heavyRainBorrowedShortlistNeedsRealShortageSignal() throws Exception {
+        OmegaDispatchAgent agent = new OmegaDispatchAgent(List.of());
+        Driver driver = new Driver(
+                "D-BORROWED-SHORTLIST",
+                "Borrowed Shortlist Driver",
+                new GeoPoint(10.7765, 106.7009),
+                "R1",
+                VehicleType.MOTORBIKE);
+
+        Method method = OmegaDispatchAgent.class.getDeclaredMethod(
+                "allowBorrowedShortlist",
+                DriverDecisionContext.class,
+                WeatherProfile.class,
+                double.class);
+        method.setAccessible(true);
+
+        boolean moderateHeavyRainAllowed = (boolean) method.invoke(
+                agent,
+                moderateHeavyRainContext(driver),
+                WeatherProfile.HEAVY_RAIN,
+                0.45);
+        boolean severeShortageAllowed = (boolean) method.invoke(
+                agent,
+                severeHeavyRainContext(driver),
+                WeatherProfile.HEAVY_RAIN,
+                0.45);
+
+        assertFalse(moderateHeavyRainAllowed,
+                "Heavy-rain borrowed shortlist should stay closed when local world is not in real shortage");
+        assertTrue(severeShortageAllowed,
+                "Heavy-rain borrowed shortlist should reopen when shortage is materially high");
+    }
+
+    @Test
+    void heavyRainBatchAdmissionRejectsLooseThreeWaveButKeepsCompactRescue() throws Exception {
+        OmegaDispatchAgent agent = new OmegaDispatchAgent(List.of());
+        Driver driver = new Driver(
+                "D-BATCH-RAIN",
+                "Batch Rain Driver",
+                new GeoPoint(10.7765, 106.7009),
+                "R1",
+                VehicleType.MOTORBIKE);
+
+        DispatchPlan looseThreeWave = new DispatchPlan(
+                driver,
+                new DispatchPlan.Bundle(
+                        "LOOSE-3",
+                        List.of(order("L3-1", 0), order("L3-2", 10), order("L3-3", 20)),
+                        128000.0,
+                        3),
+                List.of());
+        looseThreeWave.setLastDropLandingScore(0.24);
+        looseThreeWave.setDeliveryCorridorScore(0.32);
+        looseThreeWave.setPredictedDeadheadKm(2.3);
+        looseThreeWave.setExpectedPostCompletionEmptyKm(1.8);
+
+        DispatchPlan compactThreeWave = new DispatchPlan(
+                driver,
+                new DispatchPlan.Bundle(
+                        "COMPACT-3",
+                        List.of(order("C3-1", 30), order("C3-2", 40), order("C3-3", 50)),
+                        132000.0,
+                        3),
+                List.of());
+        compactThreeWave.setLastDropLandingScore(0.38);
+        compactThreeWave.setDeliveryCorridorScore(0.46);
+        compactThreeWave.setPredictedDeadheadKm(1.7);
+        compactThreeWave.setExpectedPostCompletionEmptyKm(1.2);
+
+        Method method = OmegaDispatchAgent.class.getDeclaredMethod(
+                "passesAiBatchAdmissionGate",
+                DispatchPlan.class,
+                StressRegime.class,
+                WeatherProfile.class);
+        method.setAccessible(true);
+
+        boolean looseAccepted = (boolean) method.invoke(
+                agent,
+                looseThreeWave,
+                StressRegime.STRESS,
+                WeatherProfile.HEAVY_RAIN);
+        boolean compactAccepted = (boolean) method.invoke(
+                agent,
+                compactThreeWave,
+                StressRegime.STRESS,
+                WeatherProfile.HEAVY_RAIN);
+
+        assertFalse(looseAccepted,
+                "Heavy-rain batch admission should reject loose 3-order waves that do not land cleanly");
+        assertTrue(compactAccepted,
+                "Heavy-rain batch admission should keep compact 3-order waves that still finish cleanly");
+    }
+
+    @Test
+    void heavyRainFallbackCoverageIsNotAlwaysOpen() throws Exception {
+        OmegaDispatchAgent agent = new OmegaDispatchAgent(List.of());
+        Method method = OmegaDispatchAgent.class.getDeclaredMethod(
+                "allowFallbackCoverage",
+                double.class,
+                double.class,
+                WeatherProfile.class,
+                int.class,
+                int.class);
+        method.setAccessible(true);
+
+        boolean moderateDemandAllowed = (boolean) method.invoke(
+                agent,
+                0.30,
+                0.42,
+                WeatherProfile.HEAVY_RAIN,
+                5,
+                5);
+        boolean severeDemandAllowed = (boolean) method.invoke(
+                agent,
+                0.56,
+                0.64,
+                WeatherProfile.HEAVY_RAIN,
+                9,
+                5);
+
+        assertFalse(moderateDemandAllowed,
+                "Heavy-rain fallback should not be open by default when demand is still manageable");
+        assertTrue(severeDemandAllowed,
+                "Heavy-rain fallback should reopen when shortage and traffic make rescue unavoidable");
+    }
+
     private static DriverDecisionContext harshStressContext(Driver driver) {
         return new DriverDecisionContext(
                 driver,
@@ -499,6 +626,90 @@ class OmegaStressRegimeTest {
                 0.22,
                 0.1,
                 0.8,
+                List.of(),
+                List.of(),
+                StressRegime.STRESS);
+    }
+
+    private static DriverDecisionContext moderateHeavyRainContext(Driver driver) {
+        return new DriverDecisionContext(
+                driver,
+                List.of(order("MH-1", 0), order("MH-2", 10)),
+                List.of(),
+                0.45,
+                1.1,
+                1.0,
+                1.0,
+                0.9,
+                0.8,
+                0.50,
+                0.54,
+                0.78,
+                0.32,
+                0.30,
+                0.42,
+                0.30,
+                0.22,
+                0.18,
+                0.40,
+                0.36,
+                0.18,
+                0.58,
+                0.2,
+                3.0,
+                1,
+                4.0,
+                1,
+                0,
+                2,
+                true,
+                0.32,
+                1.2,
+                0.20,
+                0.12,
+                0.42,
+                List.of(),
+                List.of(),
+                StressRegime.STRESS);
+    }
+
+    private static DriverDecisionContext severeHeavyRainContext(Driver driver) {
+        return new DriverDecisionContext(
+                driver,
+                List.of(order("SH-1", 0)),
+                List.of(),
+                0.45,
+                1.2,
+                0.9,
+                0.8,
+                0.8,
+                0.7,
+                0.54,
+                0.58,
+                0.82,
+                0.72,
+                0.64,
+                0.18,
+                0.78,
+                0.28,
+                0.20,
+                0.76,
+                0.80,
+                0.10,
+                0.92,
+                0.2,
+                3.5,
+                0,
+                2.0,
+                0,
+                0,
+                1,
+                true,
+                0.18,
+                0.8,
+                0.16,
+                0.08,
+                0.84,
                 List.of(),
                 List.of(),
                 StressRegime.STRESS);

@@ -5,9 +5,11 @@ import com.routechain.domain.Enums.WeatherProfile;
 import com.routechain.domain.Enums.VehicleType;
 import com.routechain.domain.GeoPoint;
 import com.routechain.domain.Order;
+import com.routechain.simulation.DispatchPlan;
 import com.routechain.simulation.SelectionBucket;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -326,6 +328,14 @@ class DriverPlanGeneratorProfileTest {
                 "When a third order is likely, generator should keep a hold-for-third candidate");
         assertTrue(plans.stream().anyMatch(plan -> !plan.getOrders().isEmpty() && plan.getBundleSize() <= 2),
                 "Hold criteria should coexist with actionable downgrade candidates, not replace them entirely");
+        assertTrue(plans.stream()
+                        .filter(plan -> !plan.getOrders().isEmpty() && plan.getBundleSize() <= 2)
+                        .allMatch(plan -> !plan.isStressFallbackOnly()),
+                "Clean-regime sub-three local plans should not be mislabeled as stress fallback");
+        assertTrue(plans.stream()
+                        .filter(plan -> !plan.getOrders().isEmpty() && plan.getBundleSize() <= 2)
+                        .allMatch(plan -> !plan.isHardThreeOrderPolicyActive()),
+                "Plan-level hard-three policy should only stay on hold or real 3+ launch plans");
     }
 
     @Test
@@ -419,6 +429,75 @@ class DriverPlanGeneratorProfileTest {
                 "Non-wave clean-regime plans should stay in the single-local lane instead of being mislabeled as fallback");
         assertFalse(plans.stream().allMatch(com.routechain.simulation.DispatchPlan::isWaitingForThirdOrder),
                 "Sparse clean world should not collapse into hold-only plans");
+    }
+
+    @Test
+    void weakVisibleThreeWaveIsNotPromotedJustToFillQuota() throws Exception {
+        Driver driver = new Driver(
+                "DTEST-WEAK-WAVE",
+                "Weak Wave Driver",
+                new GeoPoint(10.7765, 106.7009),
+                "R1",
+                VehicleType.MOTORBIKE);
+
+        DispatchPlan strongLocalSingle = new DispatchPlan(
+                driver,
+                new DispatchPlan.Bundle("LOCAL-STRONG", List.of(createCompactOrders("LOCAL", 1, "MERCHANT-L", "CLUSTER-L").get(0)), 42000.0, 1),
+                List.of());
+        strongLocalSingle.setSelectionBucket(SelectionBucket.SINGLE_LOCAL);
+        strongLocalSingle.setTotalScore(0.81);
+        strongLocalSingle.setExpectedPostCompletionEmptyKm(0.9);
+
+        DispatchPlan compactTwo = new DispatchPlan(
+                driver,
+                new DispatchPlan.Bundle("COMPACT-2", createCompactOrders("PAIR", 2, "MERCHANT-P", "CLUSTER-P"), 86000.0, 2),
+                List.of());
+        compactTwo.setSelectionBucket(SelectionBucket.SINGLE_LOCAL);
+        compactTwo.setTotalScore(0.75);
+        compactTwo.setExpectedPostCompletionEmptyKm(1.1);
+
+        DispatchPlan weakThreeWave = new DispatchPlan(
+                driver,
+                new DispatchPlan.Bundle("WEAK-3", createCompactOrders("WAVE", 3, "MERCHANT-W", "CLUSTER-W"), 126000.0, 3),
+                List.of());
+        weakThreeWave.setWaveLaunchEligible(true);
+        weakThreeWave.setSelectionBucket(SelectionBucket.WAVE_LOCAL);
+        weakThreeWave.setTotalScore(0.64);
+        weakThreeWave.setPredictedDeadheadKm(2.4);
+        weakThreeWave.setDeliveryCorridorScore(0.40);
+        weakThreeWave.setLastDropLandingScore(0.25);
+        weakThreeWave.setExpectedPostCompletionEmptyKm(2.1);
+        weakThreeWave.setDeliveryZigZagPenalty(0.46);
+
+        DriverPlanGenerator generator = new DriverPlanGenerator();
+        generator.setExecutionProfile(OmegaDispatchAgent.ExecutionProfile.MAINLINE_REALISTIC);
+
+        Method method = DriverPlanGenerator.class.getDeclaredMethod(
+                "promoteHighUtilityMultiOrderWaves",
+                List.class,
+                int.class,
+                StressRegime.class,
+                boolean.class,
+                List.class,
+                List.class,
+                List.class,
+                List.class);
+        method.setAccessible(true);
+
+        List<DispatchPlan> selected = new ArrayList<>(List.of(strongLocalSingle, compactTwo));
+        method.invoke(
+                generator,
+                selected,
+                4,
+                StressRegime.NORMAL,
+                false,
+                List.of(weakThreeWave),
+                List.of(),
+                List.of(),
+                List.of());
+
+        assertFalse(selected.contains(weakThreeWave),
+                "Mainline should not promote a weak 3-order wave just to keep visible batching");
     }
 
     private static List<Order> createCompactOrders(String prefix,

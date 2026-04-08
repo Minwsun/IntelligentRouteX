@@ -1,6 +1,6 @@
 # Handoff chính thức của repo
 
-## 1. Mục đích của file này
+## 1. File này dùng để làm gì
 
 Đây là file handoff canonical của repo ở thời điểm hiện tại. Nếu cần hiểu repo đang ở đâu và nên làm gì tiếp, hãy bắt đầu từ đây.
 
@@ -15,44 +15,51 @@ File này trả lời bốn câu hỏi:
 
 Mục tiêu hiện tại của IntelligentRouteX là:
 
-- ghép đơn thông minh để tối ưu chi phí toàn hệ
-- giảm xe chạy rỗng
-- tránh bắt tài xế chạy pickup quá xa
-- sau khi giao xong, tài xế nên rơi vào vùng có khả năng có đơn tiếp cao
+- ghép đơn thông minh để tối ưu chi phí toàn hệ delivery
+- giảm xe chạy rỗng trước pickup và sau drop
+- tránh bắt tài xế đi lấy hàng quá xa
+- sau khi giao xong, tài xế nên rơi vào vùng có xác suất có đơn tiếp cao
 - route được chọn phải tiện và kinh tế, không chỉ nhanh
 
-Nói cách khác, đây là một hệ `AI-first dispatch` cho food delivery real-time, chứ không phải simulator nearest-driver.
+Nói ngắn gọn:
 
-## 3. Repo hiện đã có gì
+- đây là một lõi `AI-first dispatch`
+- không phải simulator nearest-driver
+- không phải chatbot route
+
+## 3. Repo hiện đã có gì thật
 
 ### 3.1 Core route AI
 
-Repo hiện đã có lõi route theo hướng hybrid AI:
+Repo hiện đã có các lane thật trên hot path:
 
-- route value model
-- batch value model
-- continuation outcome model
-- stress rescue model
-- driver positioning value model
-- ETA / late risk / cancel risk
-- graph shadow, graph affinity, future cell value
+- ETA
+- late risk
+- cancel risk
+- route value
+- batch value
+- continuation outcome
+- stress rescue
+- driver positioning
+- graph affinity / graph shadow / future cell value
+- neural route prior
 
-Điểm quan trọng là model đã có mặt trên hot path, không chỉ tồn tại trên slide hoặc benchmark offline.
+Điểm quan trọng là model không còn nằm ngoài slide; chúng đang đi vào scoring, gating và selection thật.
 
-### 3.2 Execution và backend
+### 3.2 Backend và runtime
 
-Repo hiện đã có:
+Repo đã có:
 
-- Spring Boot API cho user, driver, ops
-- dynamic offer broker có bounded fanout
-- idempotency claim/complete cho write path quan trọng
+- Spring Boot API
+- dynamic offer broker
 - WebSocket realtime
-- profile `production-small`
-- auth/runtime foundation với Redis, outbox, security, Keycloak demo realm
+- idempotent write path
+- `production-small` profile
+- nền auth/runtime với Redis, outbox, Keycloak demo realm
 
-### 3.3 Big Data và evidence
+### 3.3 Big data và evidence
 
-Repo hiện đã có shape rõ cho:
+Repo đã có shape rõ cho:
 
 - Kafka
 - Redis
@@ -62,75 +69,92 @@ Repo hiện đã có shape rõ cho:
 - MinIO/Iceberg
 - MLflow
 
-Ngoài ra benchmark/evidence lane hiện đã có:
+Repo cũng đã có:
 
-- route intelligence verdict
-- route AI certification smoke
-- realistic HCMC scenario batch
+- benchmark lanes
 - ablation proof
+- realistic HCMC batch
 - candidate-level facts
 
-## 4. Trạng thái hiện tại của hệ thống
+## 4. Trạng thái thật hiện tại
 
-### 4.1 Điểm đang tốt
+### 4.1 Điều đang tốt
 
-- hệ thống có AI thật, không còn là rule-only dispatch
-- route AI certification smoke hiện pass ở `CLEAR`
-- benchmark artifacts và evidence stack đã đủ rõ để dùng cho báo cáo nội bộ
-- docs, benchmark và runtime đã bắt đầu hội tụ về cùng một hướng
+- hệ thống có AI thật
+- `route-ai-certification-smoke` hiện đã `PASS`
+- clean-regime smoke đã tốt hơn trước rõ rệt
+- docs canonical và benchmark artifacts đã rõ ràng hơn
+- data facts đã bắt đầu đủ tốt để phục vụ training/evaluation nghiêm túc
 
-### 4.2 Điểm còn yếu
+### 4.2 Điều còn yếu
 
-- `Routing Verdict` mới ở mức `PARTIAL`
-- `Legacy` vẫn còn là tham chiếu mạnh ở một số delta smoke
-- heavy-rain là bucket yếu nhất và vẫn là blocker lớn
-- một số lane AI mới có evidence nhưng chưa đủ được hiệu chỉnh tốt, nhất là stress gate, positioning và batch value
-- data spine end-to-end vẫn còn việc phải hoàn thiện thêm để khớp hoàn toàn với kiến trúc đích
+- `Routing Verdict` vẫn đang là `PARTIAL`
+- `heavy-rain lunch` vẫn là bucket gãy lớn nhất
+- `night off-peak` và `shortage regime` chưa đủ ổn
+- batch value, stress rescue và positioning vẫn cần calibration thêm để tạo lợi thế ổn định hơn qua ablation
 
-### 4.3 Điều đang bị hoãn
+## 5. Slice vừa hoàn thành
 
-- agent plane tạm hoãn như một phần lõi
-- Android demo hoãn sang phase sau
-- multi-module split chưa phải ưu tiên hiện tại
+Nhát cắt gần nhất tập trung vào `landing / post-drop calibration`:
 
-## 5. Ưu tiên triển khai tiếp theo
+- nâng lại cách chấm `lastDropLandingScore` để phản ánh đúng end-zone mạnh
+- không còn quá lệ thuộc vào một score cũ bị under-calibrated từ sequence stage
+- cho route core hợp nhất tốt hơn giữa:
+  - landing score
+  - post-drop opportunity
+  - expected empty km
+  - next-order idle
+- mở rộng outcome facts để lưu thêm tín hiệu post-drop prediction cho data flywheel
 
-Thứ tự nên làm tiếp để tăng xác suất thành công:
+Kết quả trực tiếp:
 
-1. tiếp tục tối ưu heavy-rain rescue và stress regime
-2. hiệu chỉnh continuation và positioning theo outcome thật
-3. siết batch admission để batch ít nhưng có lời thật
-4. tiếp tục giảm fallback domination trong clean-regime
-5. hoàn thiện data spine end-to-end cho training và benchmark
-6. chỉ sau khi route core đủ mạnh mới quay lại Android demo và lớp agent phụ trợ
+- `good-last-zone` không còn kẹt ở `0.0%` trong smoke clean-regime
+- `route-ai-certification-smoke` đã pass lại
 
-## 6. Quy ước tài liệu từ bây giờ
+## 6. Việc đang bị hoãn
 
-Repo dùng bốn file canonical dưới `docs/`:
+Các phần sau tiếp tục bị hoãn khỏi core phase:
+
+- agent plane như một phần lõi
+- Android demo
+- multi-module split
+
+Lý do:
+
+- route core vẫn là thứ quyết định hệ thống có thật sự thông minh hay không
+- nếu lõi chưa mạnh thì mở rộng lớp trình diễn chỉ làm loãng effort
+
+## 7. Ưu tiên triển khai tiếp theo
+
+Thứ tự nên làm tiếp:
+
+1. xử lý `heavy-rain lunch` cho tới khi thoát `BASELINE_BETTER`
+2. giảm borrowed/fallback gây deadhead nổ trong stress
+3. calibration lại continuation và positioning trong stress regime
+4. làm sạch `night off-peak` và `shortage regime`
+5. tiếp tục khóa data spine end-to-end cho training, benchmark, report
+6. chỉ sau khi route đủ mạnh mới quay lại Android demo
+
+## 8. Quy ước tài liệu
+
+Repo đang dùng bốn file canonical:
 
 - `docs/idea/idea.md`
 - `docs/architecture/architecture.md`
 - `docs/summarize/summarize.md`
 - `docs/result/result-latest.md`
 
-Mỗi nhóm có thêm thư mục `history/` để lưu snapshot theo format:
+Mỗi nhóm có `history/` để lưu snapshot theo format:
 
 - `YYYY-MM-DD_HH-mm.md`
 
-Quy ước cập nhật:
+## 9. Kết luận ngắn
 
-- sau mỗi thay đổi lớn, cập nhật `result-latest.md` và tạo snapshot mới trong `docs/result/history/`
-- đồng thời cập nhật `summarize.md` và snapshot trong `docs/summarize/history/`
-- chỉ cập nhật `idea.md` khi mục tiêu hoặc triết lý hệ thống thay đổi
-- chỉ cập nhật `architecture.md` khi boundary hoặc kiến trúc đổi đáng kể
-
-## 7. Kết luận ngắn
-
-Repo hiện đang ở trạng thái:
+Repo hiện ở trạng thái:
 
 - có lõi AI thật
-- có backend và data foundation mạnh
+- có route tiến bộ rõ ở clean smoke
 - có benchmark khách quan hơn trước
-- nhưng route quality vẫn chưa tới mức "đã xong"
+- nhưng chưa thể coi là xong vì heavy-rain vẫn gãy
 
-Nếu cần chọn đúng một việc để tập trung, hãy tiếp tục nâng core route AI cho tới khi thoát `PARTIAL`, thay vì mở rộng thêm lớp phụ trợ.
+Nếu cần chọn đúng một việc để dồn sức, hãy tiếp tục nâng core route AI cho tới khi thoát `PARTIAL`.

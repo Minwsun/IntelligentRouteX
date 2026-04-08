@@ -88,8 +88,18 @@ public interface DispatchFactSink {
             boolean late,
             double realizedProfit,
             double predictedDeadheadKm,
+            double predictedPostCompletionEmptyKm,
             double bundleEfficiency,
+            int bundleSize,
+            String stressRegime,
+            boolean stressFallbackOnly,
             double continuationActualNorm,
+            double batchOutcomeLabel,
+            double positioningOutcomeLabel,
+            double predictedLastDropLandingScore,
+            double predictedPostDropDemandProbability,
+            double predictedNextOrderIdleMinutes,
+            double stressRescueOutcomeLabel,
             Instant recordedAt
     ) {}
 }

@@ -1020,23 +1020,32 @@ public class SequenceOptimizer {
 
     private double computeLastDropLandingScore(GeoPoint lastDrop) {
         if (context == null || context.endZoneCandidates().isEmpty()) {
-            return clamp01(0.45 + (context != null ? context.deliveryDemandGradient() * 0.10 : 0.0));
+            return clamp01(
+                    0.48
+                            + (context != null ? clamp01(context.localPostDropOpportunity()) * 0.18 : 0.0)
+                            + (context != null ? clamp01(context.deliveryDemandGradient()) * 0.10 : 0.0)
+                            - (context != null ? clamp01(context.localEmptyZoneRisk()) * 0.10 : 0.0)
+                            - (context != null ? clamp01(context.endZoneIdleRisk()) * 0.08 : 0.0));
         }
 
         double bestScore = 0.0;
         for (EndZoneCandidate candidate : context.endZoneCandidates()) {
             double distKm = lastDrop.distanceTo(candidate.position()) / 1000.0;
             double proximity = 1.0 / (1.0 + distKm / 1.2);
-            double score = candidate.attractionScore() * 0.32
-                    + candidate.postDropOpportunity() * 0.28
-                    + proximity * 0.18
-                    + Math.min(1.0, candidate.demandForecast10m() / 2.5) * 0.10
-                    + (1.0 - candidate.emptyZoneRisk()) * 0.07
-                    + (1.0 - candidate.corridorExposure()) * 0.03
-                    + (1.0 - candidate.weatherExposure()) * 0.02;
+            double demandScore = Math.min(1.0, candidate.demandForecast10m() / 2.5);
+            double shortageScore = Math.min(1.0, candidate.shortageForecast10m() / 2.5);
+            double lowEmptyRisk = 1.0 - clamp01(candidate.emptyZoneRisk());
+            double score = candidate.attractionScore() * 0.22
+                    + candidate.postDropOpportunity() * 0.24
+                    + proximity * 0.15
+                    + demandScore * 0.14
+                    + lowEmptyRisk * 0.13
+                    + (1.0 - candidate.corridorExposure()) * 0.06
+                    + (1.0 - candidate.weatherExposure()) * 0.04
+                    + shortageScore * 0.02;
             bestScore = Math.max(bestScore, score);
         }
-        return clamp01(bestScore / 1.4);
+        return clamp01(bestScore);
     }
 
     private double computeExpectedPostCompletionEmptyKm(GeoPoint lastDrop) {
@@ -1047,9 +1056,15 @@ public class SequenceOptimizer {
         double bestWeightedKm = Double.MAX_VALUE;
         for (EndZoneCandidate candidate : context.endZoneCandidates()) {
             double distKm = lastDrop.distanceTo(candidate.position()) / 1000.0;
+            double demandScore = Math.min(1.0, candidate.demandForecast10m() / 2.5);
             double opportunity = Math.max(0.25,
-                    candidate.postDropOpportunity() * 0.60 + candidate.attractionScore() * 0.40);
-            double weightedKm = distKm * (1.0 + candidate.emptyZoneRisk() * 0.75) / opportunity;
+                    candidate.postDropOpportunity() * 0.55
+                            + candidate.attractionScore() * 0.25
+                            + demandScore * 0.10
+                            + (1.0 - clamp01(candidate.emptyZoneRisk())) * 0.10);
+            double weightedKm = distKm
+                    * (1.0 + candidate.emptyZoneRisk() * 0.55 + candidate.weatherExposure() * 0.20)
+                    / opportunity;
             bestWeightedKm = Math.min(bestWeightedKm, weightedKm);
         }
         if (bestWeightedKm == Double.MAX_VALUE) {
