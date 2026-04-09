@@ -80,6 +80,54 @@ class OmegaLandingCalibrationTest {
                 "Landing adjustment should preserve strong post-drop opportunity in the plan");
     }
 
+    @Test
+    void harshWeatherLandingAdjustmentDoesNotOverinflatePostDropOpportunity() throws Exception {
+        OmegaDispatchAgent agent = new OmegaDispatchAgent(List.of());
+        Driver driver = driver("D-LANDING-HARSH");
+        DriverDecisionContext context = harshLandingStressContext(driver);
+        Order order = order("LANDING-HARSH-1");
+        DispatchPlan plan = new DispatchPlan(
+                driver,
+                new DispatchPlan.Bundle("LANDING-HARSH-BUNDLE", List.of(order), 42000.0, 1),
+                List.of(
+                        new DispatchPlan.Stop(order.getId(), order.getPickupPoint(), DispatchPlan.Stop.StopType.PICKUP, 2.0),
+                        new DispatchPlan.Stop(order.getId(), order.getDropoffPoint(), DispatchPlan.Stop.StopType.DROPOFF, 11.0)));
+        plan.setDeliveryCorridorScore(0.62);
+        plan.setLastDropLandingScore(0.78);
+        plan.setExpectedPostCompletionEmptyKm(1.3);
+        plan.setExpectedNextOrderIdleMinutes(2.7);
+        plan.setRemainingDropProximityScore(0.80);
+        plan.setDeliveryZigZagPenalty(0.10);
+        plan.setPostDropDemandProbability(0.74);
+
+        Method method = OmegaDispatchAgent.class.getDeclaredMethod(
+                "applySoftLandingAdjustments",
+                DispatchPlan.class,
+                DriverDecisionContext.class,
+                GeoPoint.class,
+                double.class,
+                double.class,
+                double.class,
+                double.class);
+        method.setAccessible(true);
+        method.invoke(
+                agent,
+                plan,
+                context,
+                order.getDropoffPoint(),
+                0.66,
+                0.60,
+                0.72,
+                0.64);
+
+        assertTrue(plan.getLastDropLandingScore() <= 0.55,
+                "Harsh-weather landing should stay capped instead of inflating into a near-perfect hot zone");
+        assertTrue(plan.getPostDropDemandProbability() <= 0.40,
+                "Harsh-weather post-drop opportunity should be cut back when weather and idle risk are both high");
+        assertTrue(plan.getExpectedNextOrderIdleMinutes() >= 3.0,
+                "Harsh-weather calibration should keep realistic next-idle expectations");
+    }
+
     private static DriverDecisionContext strongLandingContext(Driver driver) {
         return new DriverDecisionContext(
                 driver,
@@ -148,6 +196,76 @@ class OmegaLandingCalibrationTest {
                                 0.28,
                                 0.64)),
                 StressRegime.NORMAL);
+    }
+
+    private static DriverDecisionContext harshLandingStressContext(Driver driver) {
+        return new DriverDecisionContext(
+                driver,
+                List.of(order("CTX-HARSH-1")),
+                List.of(),
+                0.28,
+                1.05,
+                0.82,
+                0.88,
+                0.84,
+                0.80,
+                0.30,
+                0.34,
+                0.78,
+                0.76,
+                0.70,
+                0.34,
+                0.22,
+                0.28,
+                0.82,
+                0.76,
+                0.74,
+                0.24,
+                0.36,
+                0.18,
+                4.6,
+                1,
+                2.6,
+                0,
+                0,
+                1,
+                true,
+                0.34,
+                1.0,
+                0.18,
+                0.40,
+                0.74,
+                List.of(new DriverDecisionContext.DropCorridorCandidate(
+                        "C-HARSH",
+                        new GeoPoint(10.7831, 106.7080),
+                        0.46,
+                        1.1,
+                        0.72,
+                        0.78)),
+                List.of(
+                        new DriverDecisionContext.EndZoneCandidate(
+                                new GeoPoint(10.7830, 106.7081),
+                                0.54,
+                                0.34,
+                                0.76,
+                                0.78,
+                                0.9,
+                                0.8,
+                                0.7,
+                                0.34,
+                                0.78),
+                        new DriverDecisionContext.EndZoneCandidate(
+                                new GeoPoint(10.7862, 106.7118),
+                                0.42,
+                                0.22,
+                                0.82,
+                                0.84,
+                                0.6,
+                                0.5,
+                                0.8,
+                                0.24,
+                                0.82)),
+                StressRegime.STRESS);
     }
 
     private static Driver driver(String id) {

@@ -1028,7 +1028,6 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             fallbackPlan.setStressRegime(fallbackRegime);
             fallbackPlan.setHarshWeatherStress(
                     weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM);
-            fallbackPlan.setStressFallbackOnly(true);
 
             double delivDist = order.getPickupPoint().distanceTo(
                     order.getDropoffPoint()) / 1000.0;
@@ -1092,6 +1091,14 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             fallbackPlan.setLateRisk(lateRisk);
             fallbackPlan.setOnTimeProbability(onTimeProbability);
             fallbackPlan.setCancellationRisk(cancelRisk);
+            fallbackPlan.setStressFallbackOnly(shouldMarkFallbackAsStressDowngrade(
+                    fallbackRegime,
+                    weather,
+                    sameZoneDriver,
+                    minimumCoverageFallback,
+                    distKm,
+                    onTimeProbability,
+                    lateRisk));
             fallbackPlan.setCustomerFee(order.getQuotedFee());
             fallbackPlan.setBundleEfficiency(bundleEfficiency);
             fallbackPlan.setEndZoneOpportunity(0.5);
@@ -1509,14 +1516,26 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                                              double endCongestionExposure) {
         double contextCorridorScore = computeCorridorScoreFromContext(ctx, endPoint);
         double contextLandingScore = computeLandingScoreFromContext(ctx, endPoint);
+        double contextPostDropOpportunity = Math.max(
+                clamp01(ctx.localPostDropOpportunity()),
+                clamp01(field.getPostDropOpportunityAt(endPoint, 10)));
         double baseCorridorScore = Math.max(
                 clamp01(plan.getDeliveryCorridorScore()),
                 contextCorridorScore);
-        double baseLandingScore = Math.max(
-                clamp01(plan.getLastDropLandingScore()),
-                contextLandingScore);
         boolean harshStress = ctx.harshWeatherStress()
                 || ctx.stressRegime().isAtLeast(StressRegime.STRESS);
+        double baseLandingScore = harshStress
+                ? clamp01(
+                clamp01(plan.getLastDropLandingScore()) * 0.56
+                        + contextLandingScore * 0.34
+                        + contextPostDropOpportunity * 0.10
+                        - ctx.endZoneIdleRisk() * 0.10
+                        - clamp01(ctx.localEmptyZoneRisk()) * 0.08
+                        - endWeatherExposure * 0.12
+                        - endCongestionExposure * 0.08)
+                : Math.max(
+                clamp01(plan.getLastDropLandingScore()),
+                contextLandingScore);
         double contextExpectedEmptyKm = computeExpectedEmptyKmFromContext(ctx, endPoint);
         double mergedExpectedEmptyKm = plan.getExpectedPostCompletionEmptyKm() > 0
                 ? harshStress
@@ -1530,11 +1549,20 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                         + (1.0 - plan.getDeliveryZigZagPenalty()) * 0.10
                         + clamp01(ctx.deliveryDemandGradient() / 2.5) * 0.05
                         - routeRiskPenalty);
-        double postDropOpportunity = Math.max(
+        double postDropOpportunity = harshStress
+                ? clamp01(
+                clamp01(plan.getPostDropDemandProbability()) * 0.32
+                        + contextPostDropOpportunity * 0.28
+                        + contextLandingScore * 0.12
+                        + clamp01(ctx.deliveryDemandGradient()) * 0.08
+                        + clamp01(1.0 - ctx.endZoneIdleRisk()) * 0.08
+                        + clamp01(1.0 - ctx.localEmptyZoneRisk()) * 0.06
+                        - endWeatherExposure * 0.16
+                        - endCongestionExposure * 0.10
+                        - ctx.endZoneIdleRisk() * 0.14)
+                : Math.max(
                 clamp01(plan.getPostDropDemandProbability()),
-                Math.max(
-                        clamp01(ctx.localPostDropOpportunity()),
-                        clamp01(field.getPostDropOpportunityAt(endPoint, 10))));
+                contextPostDropOpportunity);
         double lowEmptyFinish = clamp01(1.0 - mergedExpectedEmptyKm / 2.6);
         double refinedLanding = clamp01(
                 baseLandingScore * 0.42
@@ -1547,11 +1575,28 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                         - ctx.endZoneIdleRisk() * 0.08
                         - Math.min(0.05, ctx.localMerchantPrepForecast10m() / 40.0)
                         - routeRiskPenalty * 0.85);
+        if (harshStress) {
+            double harshLandingCap = clamp01(
+                    0.46
+                            + refinedCorridor * 0.12
+                            + postDropOpportunity * 0.16
+                            + lowEmptyFinish * 0.10
+                            + adjustedContinuation * 0.06
+                            - ctx.endZoneIdleRisk() * 0.20
+                            - clamp01(ctx.localEmptyZoneRisk()) * 0.12
+                            - endWeatherExposure * 0.18
+                            - endCongestionExposure * 0.12);
+            refinedLanding = Math.min(refinedLanding, harshLandingCap);
+        }
         double expectedEmptyKm = mergedExpectedEmptyKm;
         expectedEmptyKm = Math.max(0.1,
                 expectedEmptyKm * (1.0 + endCongestionExposure * 0.12 + endWeatherExposure * 0.08));
+        if (harshStress) {
+            expectedEmptyKm = Math.max(expectedEmptyKm, contextExpectedEmptyKm * 0.95);
+        }
+        double landingIdleRelief = harshStress ? 0.32 : 0.55;
         double computedNextIdleMinutes = Math.max(0.5,
-                ctx.estimatedIdleMinutes() * (1.0 - refinedLanding * 0.55)
+                ctx.estimatedIdleMinutes() * (1.0 - refinedLanding * landingIdleRelief)
                         + expectedEmptyKm * 0.80
                         + ctx.endZoneIdleRisk() * 1.8
                         - ctx.deliveryDemandGradient() * 0.55
@@ -2015,16 +2060,34 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             seenPlanKeys.add(shortlistKey(plan));
         }
 
-        addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
-                plan -> plan.getBundleSize() >= 3 || plan.isWaveLaunchEligible());
-        addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
-                plan -> plan.getSelectionBucket() == SelectionBucket.EXTENSION_LOCAL);
-        addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
-                plan -> plan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL
-                        && plan.getBundleSize() == 2);
-        addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
-                plan -> plan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL
-                        && plan.getBundleSize() <= 1);
+        boolean harshWeather = weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM;
+        if (harshWeather) {
+            addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
+                    plan -> plan.getSelectionBucket() == SelectionBucket.EXTENSION_LOCAL);
+            addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
+                    plan -> plan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL
+                            && plan.getBundleSize() == 2);
+            addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
+                    plan -> plan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL
+                            && plan.getBundleSize() <= 1);
+            addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
+                    plan -> (plan.getBundleSize() >= 3 || plan.isWaveLaunchEligible())
+                            && plan.getLastDropLandingScore() >= 0.34
+                            && plan.getPostDropDemandProbability() >= 0.32
+                            && plan.getExpectedPostCompletionEmptyKm() <= 1.5
+                            && plan.getBorrowedDependencyScore() <= 0.20);
+        } else {
+            addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
+                    plan -> plan.getBundleSize() >= 3 || plan.isWaveLaunchEligible());
+            addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
+                    plan -> plan.getSelectionBucket() == SelectionBucket.EXTENSION_LOCAL);
+            addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
+                    plan -> plan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL
+                            && plan.getBundleSize() == 2);
+            addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
+                    plan -> plan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL
+                            && plan.getBundleSize() <= 1);
+        }
         if (allowBorrowedShortlist(ctx, weather, trafficIntensity)) {
             addRepresentativePlan(shortlisted, seenPlanKeys, orderPlans,
                     plan -> plan.getSelectionBucket() == SelectionBucket.BORROWED_COVERAGE
@@ -2097,10 +2160,17 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                                            WeatherProfile weather,
                                            double trafficIntensity) {
         if (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM) {
-            return ctx != null
-                    && (ctx.localShortagePressure() >= 0.58
-                    || ctx.localReachableBacklog() <= 1
-                    || ctx.reachableOrders().isEmpty());
+            if (ctx == null) {
+                return false;
+            }
+            boolean severeShortage = ctx.localShortagePressure() >= 0.60
+                    || (ctx.localShortageForecast10m() >= 0.68
+                    && ctx.localReachableBacklog() <= 1
+                    && ctx.nearReadyOrders() == 0);
+            boolean deadEndLocalWorld = ctx.reachableOrders().isEmpty()
+                    && ctx.localEmptyZoneRisk() >= 0.75
+                    && ctx.localPostDropOpportunity() <= 0.16;
+            return severeShortage || deadEndLocalWorld;
         }
         if (trafficIntensity >= 0.52) {
             return true;
@@ -2276,8 +2346,20 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         if (ctx == null) {
             return true;
         }
-        if (ctx.harshWeatherStress() || ctx.stressRegime().isAtLeast(StressRegime.STRESS)) {
+        if (ctx.harshWeatherStress()) {
             return true;
+        }
+        if (ctx.stressRegime().isAtLeast(StressRegime.STRESS)) {
+            boolean urgentStressCoverage = ctx.effectiveSlaSlackMinutes() <= 1.5
+                    || ctx.localShortagePressure() >= 0.52
+                    || ctx.localReachableBacklog() <= 1;
+            boolean cleanEnoughRescue = fallback.getOnTimeProbability() >= 0.84
+                    && fallback.getPredictedDeadheadKm() <= 1.6
+                    && fallback.getLateRisk() <= 0.30
+                    && fallback.getStressRescueScore() >= 0.52;
+            if (urgentStressCoverage || cleanEnoughRescue) {
+                return true;
+            }
         }
         if (ctx.effectiveSlaSlackMinutes() <= 2.0) {
             return true;
@@ -2290,6 +2372,12 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 || ctx.nearReadyOrders() >= 2
                 || ctx.thirdOrderFeasibilityScore() >= 0.58
                 || ctx.waveAssemblyPressure() >= 0.38;
+        if (ctx.stressRegime().isAtLeast(StressRegime.STRESS)
+                && localWaveStillViable
+                && ctx.effectiveSlaSlackMinutes() > 2.5
+                && ctx.localShortagePressure() < 0.52) {
+            return false;
+        }
         if (localWaveStillViable
                 && !fragileCoverage
                 && ctx.effectiveSlaSlackMinutes() > 2.5) {
@@ -2514,6 +2602,9 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             return false;
         }
         double postCompletionCap = plan.getBundleSize() >= 3 ? 3.6 : 2.8;
+        if (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM) {
+            postCompletionCap = plan.getBundleSize() >= 3 ? 1.9 : 1.45;
+        }
         if (plan.getExpectedPostCompletionEmptyKm() > postCompletionCap
                 && plan.getSelectionBucket() != SelectionBucket.EMERGENCY_COVERAGE) {
             plan.setExecutionGatePassed(false);
@@ -2533,7 +2624,30 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                                      StressRegime regime,
                                      WeatherProfile weather) {
         if (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM) {
-            return regime == StressRegime.SEVERE_STRESS ? 2.4 : 3.0;
+            DeliveryServiceTier serviceTier = DeliveryServiceTier.fromWireValue(plan.getServiceTier());
+            boolean severeStress = regime == StressRegime.SEVERE_STRESS;
+            if (plan.getSelectionBucket() == SelectionBucket.EMERGENCY_COVERAGE) {
+                return severeStress ? 1.2 : 1.5;
+            }
+            if (plan.getBundleSize() <= 1) {
+                return switch (serviceTier) {
+                    case INSTANT -> severeStress ? 0.90 : 1.10;
+                    case TWO_HOUR, MULTI_STOP_COD -> severeStress ? 1.05 : 1.25;
+                    case FOUR_HOUR, SCHEDULED -> severeStress ? 1.20 : 1.40;
+                };
+            }
+            if (plan.getBundleSize() == 2) {
+                return switch (serviceTier) {
+                    case INSTANT -> severeStress ? 1.10 : 1.30;
+                    case TWO_HOUR, MULTI_STOP_COD -> severeStress ? 1.25 : 1.45;
+                    case FOUR_HOUR, SCHEDULED -> severeStress ? 1.40 : 1.60;
+                };
+            }
+            return switch (serviceTier) {
+                case INSTANT -> severeStress ? 1.45 : 1.70;
+                case TWO_HOUR, MULTI_STOP_COD -> severeStress ? 1.60 : 1.85;
+                case FOUR_HOUR, SCHEDULED -> severeStress ? 1.75 : 2.00;
+            };
         }
         boolean borrowed = plan.getBorrowedDependencyScore() >= 0.25;
         if (plan.getSelectionBucket() == SelectionBucket.EMERGENCY_COVERAGE) {
@@ -2555,7 +2669,16 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                                     StressRegime regime,
                                     WeatherProfile weather) {
         if (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM) {
-            return regime == StressRegime.SEVERE_STRESS ? 0.58 : 0.54;
+            if (plan.getBundleSize() <= 1
+                    || plan.getSelectionBucket() == SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD
+                    || plan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL) {
+                return regime == StressRegime.SEVERE_STRESS ? 0.76 : 0.72;
+            }
+            if (plan.getBundleSize() == 2
+                    || plan.getSelectionBucket() == SelectionBucket.EXTENSION_LOCAL) {
+                return regime == StressRegime.SEVERE_STRESS ? 0.70 : 0.66;
+            }
+            return regime == StressRegime.SEVERE_STRESS ? 0.62 : 0.58;
         }
         if (plan.getSelectionBucket() == SelectionBucket.EXTENSION_LOCAL) {
             return regime == StressRegime.STRESS ? 0.66 : 0.68;
@@ -2853,11 +2976,20 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 || plan.getBorrowedDependencyScore() >= 0.18;
         boolean harshWeatherFragility = plan.isHarshWeatherStress()
                 || plan.getStressRegime().isAtLeast(StressRegime.STRESS);
+        boolean harshBorrowedLanding = harshWeatherFragility
+                && (plan.getBorrowedDependencyScore() >= 0.18
+                || plan.getPredictedDeadheadKm() >= 1.6);
         if (weakLandingContext || fragileExecution || expensiveContinuation) {
             trust *= 0.30;
         }
         if (harshWeatherFragility) {
             trust *= expensiveContinuation ? 0.12 : 0.32;
+        }
+        if (harshBorrowedLanding
+                && (weakLandingContext
+                || plan.getPostDropDemandProbability() < 0.34
+                || plan.getExpectedNextOrderIdleMinutes() > 4.0)) {
+            trust *= 0.45;
         }
         if (plan.getBundleSize() >= 3) {
             trust *= 0.45;
@@ -2872,6 +3004,12 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 || plan.getPredictedDeadheadKm() >= 1.8
                 || plan.getBorrowedDependencyScore() >= 0.18)) {
             blended = Math.min(blended, neutral + 0.01);
+        }
+        if (harshBorrowedLanding
+                && (weakLandingContext
+                || plan.getPostDropDemandProbability() < 0.34
+                || plan.getExpectedNextOrderIdleMinutes() > 4.0)) {
+            blended = Math.min(blended, neutral + 0.005);
         }
         return clamp01(blended);
     }
@@ -3155,6 +3293,31 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         };
         return remainingSlack <= urgentThreshold
                 || (order.getPickupDelayHazard() >= 0.75 && elapsedMinutes >= 8.0);
+    }
+
+    private boolean shouldMarkFallbackAsStressDowngrade(StressRegime fallbackRegime,
+                                                        WeatherProfile weather,
+                                                        boolean sameZoneDriver,
+                                                        boolean minimumCoverageFallback,
+                                                        double deadheadKm,
+                                                        double onTimeProbability,
+                                                        double lateRisk) {
+        if (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM) {
+            return true;
+        }
+        if (fallbackRegime == StressRegime.SEVERE_STRESS) {
+            return true;
+        }
+        if (minimumCoverageFallback) {
+            return false;
+        }
+        if (fallbackRegime == StressRegime.STRESS) {
+            return !sameZoneDriver
+                    || deadheadKm >= 1.8
+                    || onTimeProbability < 0.80
+                    || lateRisk > 0.20;
+        }
+        return false;
     }
 
     private double computePickupSpreadKm(List<DispatchPlan.Stop> sequence) {

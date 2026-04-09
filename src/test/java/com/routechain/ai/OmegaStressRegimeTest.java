@@ -65,6 +65,73 @@ class OmegaStressRegimeTest {
     }
 
     @Test
+    void cleanFallbackCoverageDoesNotCountAsStressDowngrade() throws Exception {
+        OmegaDispatchAgent agent = new OmegaDispatchAgent(List.of());
+        Method method = OmegaDispatchAgent.class.getDeclaredMethod(
+                "shouldMarkFallbackAsStressDowngrade",
+                StressRegime.class,
+                WeatherProfile.class,
+                boolean.class,
+                boolean.class,
+                double.class,
+                double.class,
+                double.class);
+        method.setAccessible(true);
+
+        boolean downgraded = (boolean) method.invoke(
+                agent,
+                StressRegime.NORMAL,
+                WeatherProfile.CLEAR,
+                true,
+                false,
+                1.0,
+                0.84,
+                0.16);
+
+        assertFalse(downgraded,
+                "Clean same-zone fallback coverage should stay out of stress-downgrade accounting");
+    }
+
+    @Test
+    void severeOrHarshFallbackStillCountsAsStressDowngrade() throws Exception {
+        OmegaDispatchAgent agent = new OmegaDispatchAgent(List.of());
+        Method method = OmegaDispatchAgent.class.getDeclaredMethod(
+                "shouldMarkFallbackAsStressDowngrade",
+                StressRegime.class,
+                WeatherProfile.class,
+                boolean.class,
+                boolean.class,
+                double.class,
+                double.class,
+                double.class);
+        method.setAccessible(true);
+
+        boolean heavyRainDowngraded = (boolean) method.invoke(
+                agent,
+                StressRegime.STRESS,
+                WeatherProfile.HEAVY_RAIN,
+                false,
+                false,
+                1.4,
+                0.79,
+                0.22);
+        boolean severeStressDowngraded = (boolean) method.invoke(
+                agent,
+                StressRegime.SEVERE_STRESS,
+                WeatherProfile.CLEAR,
+                true,
+                false,
+                1.1,
+                0.83,
+                0.16);
+
+        assertTrue(heavyRainDowngraded,
+                "Harsh-weather fallback should remain classified as a stress downgrade");
+        assertTrue(severeStressDowngraded,
+                "Severe-stress fallback should remain classified as a stress downgrade");
+    }
+
+    @Test
     void hardThreeOrderLaunchOnlyAppliesInCleanRegime() {
         Driver driver = new Driver(
                 "D-STRESS",
@@ -300,6 +367,62 @@ class OmegaStressRegimeTest {
     }
 
     @Test
+    void heavyRainExecutionGateRejectsLongSingleButKeepsShortLocalRescue() throws Exception {
+        OmegaDispatchAgent agent = new OmegaDispatchAgent(List.of());
+        Driver driver = new Driver(
+                "D-RAIN-EXEC",
+                "Rain Execution Driver",
+                new GeoPoint(10.7765, 106.7009),
+                "R1",
+                VehicleType.MOTORBIKE);
+
+        DispatchPlan longSingle = new DispatchPlan(
+                driver,
+                new DispatchPlan.Bundle("RAIN-LONG", List.of(order("RL-1", 0)), 42000.0, 1),
+                List.of());
+        longSingle.setSelectionBucket(SelectionBucket.SINGLE_LOCAL);
+        longSingle.setServiceTier("instant");
+        longSingle.setPredictedDeadheadKm(1.7);
+        longSingle.setOnTimeProbability(0.74);
+        longSingle.setExpectedPostCompletionEmptyKm(1.6);
+        longSingle.setExecutionScore(0.71);
+
+        DispatchPlan shortSingle = new DispatchPlan(
+                driver,
+                new DispatchPlan.Bundle("RAIN-SHORT", List.of(order("RS-1", 10)), 42000.0, 1),
+                List.of());
+        shortSingle.setSelectionBucket(SelectionBucket.SINGLE_LOCAL);
+        shortSingle.setServiceTier("instant");
+        shortSingle.setPredictedDeadheadKm(0.9);
+        shortSingle.setOnTimeProbability(0.79);
+        shortSingle.setExpectedPostCompletionEmptyKm(1.1);
+        shortSingle.setExecutionScore(0.74);
+
+        Method method = OmegaDispatchAgent.class.getDeclaredMethod(
+                "passesExecutionGate",
+                DispatchPlan.class,
+                StressRegime.class,
+                WeatherProfile.class);
+        method.setAccessible(true);
+
+        boolean longAccepted = (boolean) method.invoke(
+                agent,
+                longSingle,
+                StressRegime.STRESS,
+                WeatherProfile.HEAVY_RAIN);
+        boolean shortAccepted = (boolean) method.invoke(
+                agent,
+                shortSingle,
+                StressRegime.STRESS,
+                WeatherProfile.HEAVY_RAIN);
+
+        assertFalse(longAccepted,
+                "Heavy-rain execution should reject long single-order rescues that still look too expensive");
+        assertTrue(shortAccepted,
+                "Heavy-rain execution should keep short local rescues that remain feasible");
+    }
+
+    @Test
     void heavyRainLocalMainlineSingleIsNotDowngradedIntoFallbackOnly() throws Exception {
         OmegaDispatchAgent agent = new OmegaDispatchAgent(List.of());
         Driver driver = new Driver(
@@ -515,9 +638,12 @@ class OmegaStressRegimeTest {
                         3),
                 List.of());
         looseThreeWave.setLastDropLandingScore(0.24);
+        looseThreeWave.setPostDropDemandProbability(0.26);
         looseThreeWave.setDeliveryCorridorScore(0.32);
         looseThreeWave.setPredictedDeadheadKm(2.3);
         looseThreeWave.setExpectedPostCompletionEmptyKm(1.8);
+        looseThreeWave.setBorrowedDependencyScore(0.24);
+        looseThreeWave.setBatchValueScore(0.30);
 
         DispatchPlan compactThreeWave = new DispatchPlan(
                 driver,
@@ -528,9 +654,12 @@ class OmegaStressRegimeTest {
                         3),
                 List.of());
         compactThreeWave.setLastDropLandingScore(0.38);
+        compactThreeWave.setPostDropDemandProbability(0.40);
         compactThreeWave.setDeliveryCorridorScore(0.46);
         compactThreeWave.setPredictedDeadheadKm(1.7);
         compactThreeWave.setExpectedPostCompletionEmptyKm(1.2);
+        compactThreeWave.setBorrowedDependencyScore(0.08);
+        compactThreeWave.setBatchValueScore(0.54);
 
         Method method = OmegaDispatchAgent.class.getDeclaredMethod(
                 "passesAiBatchAdmissionGate",
@@ -589,6 +718,54 @@ class OmegaStressRegimeTest {
                 "Heavy-rain fallback should reopen when shortage and traffic make rescue unavoidable");
     }
 
+    @Test
+    void cleanStressDoesNotAlwaysOpenFallbackSlot() throws Exception {
+        OmegaDispatchAgent agent = new OmegaDispatchAgent(List.of());
+        Driver driver = new Driver(
+                "D-CLEAN-FALLBACK",
+                "Clean Fallback Driver",
+                new GeoPoint(10.7765, 106.7009),
+                "R1",
+                VehicleType.MOTORBIKE);
+
+        DispatchPlan fallback = new DispatchPlan(
+                driver,
+                new DispatchPlan.Bundle("CLEAN-FALLBACK", List.of(order("CF-1", 0)), 42000.0, 1),
+                List.of());
+        fallback.setSelectionBucket(SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD);
+        fallback.setStressFallbackOnly(true);
+        fallback.setOnTimeProbability(0.80);
+        fallback.setPredictedDeadheadKm(1.9);
+        fallback.setLateRisk(0.18);
+        fallback.setStressRescueScore(0.46);
+
+        Method method = OmegaDispatchAgent.class.getDeclaredMethod(
+                "shouldAllowFallbackSlot",
+                DriverDecisionContext.class,
+                DispatchPlan.class,
+                boolean.class,
+                boolean.class);
+        method.setAccessible(true);
+
+        boolean relaxedCleanStressAllowed = (boolean) method.invoke(
+                agent,
+                cleanStressContext(driver),
+                fallback,
+                true,
+                false);
+        boolean realShortageAllowed = (boolean) method.invoke(
+                agent,
+                cleanShortageContext(driver),
+                fallback,
+                false,
+                false);
+
+        assertFalse(relaxedCleanStressAllowed,
+                "Clean-regime stress should not auto-open fallback when local batching is still viable");
+        assertTrue(realShortageAllowed,
+                "Fallback slot should reopen when clean-regime shortage is materially real");
+    }
+
     private static DriverDecisionContext harshStressContext(Driver driver) {
         return new DriverDecisionContext(
                 driver,
@@ -626,6 +803,90 @@ class OmegaStressRegimeTest {
                 0.22,
                 0.1,
                 0.8,
+                List.of(),
+                List.of(),
+                StressRegime.STRESS);
+    }
+
+    private static DriverDecisionContext cleanStressContext(Driver driver) {
+        return new DriverDecisionContext(
+                driver,
+                List.of(order("CS-1", 0), order("CS-2", 10), order("CS-3", 20)),
+                List.of(),
+                0.50,
+                1.1,
+                1.2,
+                1.3,
+                1.3,
+                1.2,
+                0.42,
+                0.46,
+                0.08,
+                0.26,
+                0.22,
+                0.48,
+                0.34,
+                0.20,
+                0.10,
+                0.26,
+                0.28,
+                0.18,
+                0.44,
+                0.24,
+                3.4,
+                2,
+                4.8,
+                1,
+                1,
+                3,
+                false,
+                0.64,
+                2.2,
+                0.30,
+                0.42,
+                0.28,
+                List.of(),
+                List.of(),
+                StressRegime.STRESS);
+    }
+
+    private static DriverDecisionContext cleanShortageContext(Driver driver) {
+        return new DriverDecisionContext(
+                driver,
+                List.of(order("CQ-1", 0)),
+                List.of(),
+                0.54,
+                1.0,
+                0.8,
+                0.8,
+                0.7,
+                0.7,
+                0.46,
+                0.52,
+                0.10,
+                0.24,
+                0.18,
+                0.44,
+                0.52,
+                0.22,
+                0.16,
+                0.30,
+                0.32,
+                0.12,
+                0.68,
+                0.18,
+                2.4,
+                0,
+                1.8,
+                0,
+                0,
+                1,
+                false,
+                0.20,
+                0.8,
+                0.12,
+                0.16,
+                0.54,
                 List.of(),
                 List.of(),
                 StressRegime.STRESS);
