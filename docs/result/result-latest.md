@@ -37,7 +37,7 @@ Mục tiêu của file này là ghi đúng evidence hiện có, không viết th
 
 - smoke certification đã chuyển từ `FAIL` sang `PASS`
 - nguyên nhân fail trước đó là `good-last-zone`
-- sau khi hiệu chỉnh landing/post-drop scoring, lane này đã vượt absolute gate
+- sau khi hiệu chỉnh landing và post-drop scoring, lane này đã vượt absolute gate
 
 ### Route intelligence verdict smoke
 
@@ -63,7 +63,7 @@ Các lane AI đang có mặt trên hot path:
 - continuation outcome
 - stress rescue
 - driver positioning
-- graph affinity / graph shadow / future cell value
+- graph affinity, graph shadow, future cell value
 - neural route prior
 
 Ablation smoke gần nhất cho thấy:
@@ -118,7 +118,7 @@ Kết luận đúng ở thời điểm này:
 - `night off-peak`
   - verdict `BASELINE_BETTER`
   - completion nhỉnh hơn
-  - nhưng deadhead tăng và fallback/borrowed vẫn còn cao
+  - nhưng deadhead tăng và fallback hoặc borrowed vẫn còn cao
 
 - `shortage regime`
   - verdict `BASELINE_BETTER`
@@ -137,21 +137,33 @@ Kết luận đúng ở thời điểm này:
 
 Đây vẫn là blocker số 1 của toàn phase route.
 
-## 6. Điều đã tốt lên trong nhát cắt này
+## 6. Truth-layer note
+
+Truth layer hiện đã được siết theo hướng đúng:
+
+- `openPickupDemand` chỉ đại diện cho demand pickup còn mở thật
+- `committedPickupPressure` giữ riêng áp lực pickup đã commit
+
+Điều này cần được hiểu như một guard của hệ thống:
+
+- không mô tả stale pickup hotspot như bug chắc chắn còn mở
+- nhưng vẫn phải giữ regression coverage để continuation, positioning và graph foresight không vô tình kéo hotspot cũ quay lại
+
+## 7. Điều đã tốt lên trong nhát cắt gần nhất
 
 - landing score không còn bị dìm quá thấp so với post-drop opportunity thật
 - `good-last-zone` ở clean smoke đã thoát mức `0.0%`
-- candidate/outcome facts đã giữ thêm tín hiệu post-drop để training về sau bớt mù
+- candidate và outcome facts đã giữ thêm tín hiệu post-drop để training về sau bớt mù
 - smoke certification đã pass lại
 
-## 7. Điểm yếu còn lại
+## 8. Điểm yếu còn lại
 
 - `Routing Verdict` vẫn là `PARTIAL`
 - heavy-rain rescue vẫn chưa ổn
-- shortage và night off-peak vẫn chưa đủ sạch
+- `morning off-peak`, `night off-peak` và `shortage regime` vẫn chưa đủ sạch
 - một số lane AI mới vẫn cần calibration thêm để ablation tạo lợi thế rõ hơn
 
-## 8. Kết luận ngắn
+## 9. Kết luận ngắn
 
 Trạng thái đúng của hệ thống hiện tại là:
 
@@ -163,5 +175,5 @@ Trạng thái đúng của hệ thống hiện tại là:
 Ưu tiên tiếp theo vẫn phải là:
 
 1. heavy-rain rescue
-2. continuation/positioning trong stress
-3. shortage + night off-peak cleanup
+2. continuation và positioning trong stress
+3. morning, night và shortage cleanup

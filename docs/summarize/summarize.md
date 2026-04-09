@@ -41,7 +41,7 @@ Repo hiện đã có các lane thật trên hot path:
 - continuation outcome
 - stress rescue
 - driver positioning
-- graph affinity / graph shadow / future cell value
+- graph affinity, graph shadow, future cell value
 - neural route prior
 
 Điểm quan trọng là model không còn nằm ngoài slide; chúng đang đi vào scoring, gating và selection thật.
@@ -83,39 +83,47 @@ Repo cũng đã có:
 - hệ thống có AI thật
 - `route-ai-certification-smoke` hiện đã `PASS`
 - clean-regime smoke đã tốt hơn trước rõ rệt
-- docs canonical và benchmark artifacts đã rõ ràng hơn
-- data facts đã bắt đầu đủ tốt để phục vụ training/evaluation nghiêm túc
+- docs canonical đã được chuẩn hóa
+- data facts đã đủ tốt hơn để phục vụ training và evaluation nghiêm túc
 
 ### 4.2 Điều còn yếu
 
-- `Routing Verdict` vẫn đang là `PARTIAL`
+- `Routing Verdict` vẫn là `PARTIAL`
 - `heavy-rain lunch` vẫn là bucket gãy lớn nhất
-- `night off-peak` và `shortage regime` chưa đủ ổn
+- `morning off-peak`, `night off-peak` và `shortage regime` vẫn chưa đủ sạch
 - batch value, stress rescue và positioning vẫn cần calibration thêm để tạo lợi thế ổn định hơn qua ablation
 
-## 5. Slice vừa hoàn thành
+## 5. Truth-layer guard cần giữ
 
-Nhát cắt gần nhất tập trung vào `landing / post-drop calibration`:
+Truth layer hiện đã đi đúng hướng:
 
-- nâng lại cách chấm `lastDropLandingScore` để phản ánh đúng end-zone mạnh
-- không còn quá lệ thuộc vào một score cũ bị under-calibrated từ sequence stage
-- cho route core hợp nhất tốt hơn giữa:
-  - landing score
-  - post-drop opportunity
-  - expected empty km
-  - next-order idle
-- mở rộng outcome facts để lưu thêm tín hiệu post-drop prediction cho data flywheel
+- `openPickupDemand` dùng cho hotspot, forecast và reposition
+- `committedPickupPressure` dùng cho prep burden và congestion signal
 
-Kết quả trực tiếp:
+Điều này có nghĩa là stale pickup hotspot không nên được mô tả như một bug chắc chắn còn mở. Đúng hơn, đây là một regression guard:
 
-- `good-last-zone` không còn kẹt ở `0.0%` trong smoke clean-regime
-- `route-ai-certification-smoke` đã pass lại
+- logic đã được siết
+- test đã có để bảo vệ hướng xử lý này
+- nhưng khi tune continuation, positioning hoặc graph foresight thì vẫn phải giữ coverage để không vô tình ghim lại pickup cũ
 
-## 6. Việc đang bị hoãn
+## 6. Slice vừa hoàn thành
+
+Nhát cắt gần nhất tập trung vào hai mảng:
+
+- làm rõ lại narrative tài liệu canonical theo hướng `smart batching first`
+- giữ route core là trung tâm, còn advisory hoặc agent chỉ là shadow
+
+Điểm đang đúng ở thời điểm này:
+
+- mục tiêu hệ thống đã khóa rõ
+- kiến trúc đã mô tả đúng vai trò của truth layer
+- trạng thái benchmark hiện tại đã được ghi thành evidence thay vì marketing
+
+## 7. Việc đang bị hoãn
 
 Các phần sau tiếp tục bị hoãn khỏi core phase:
 
-- agent plane như một phần lõi
+- agent plane mới như một phần lõi
 - Android demo
 - multi-module split
 
@@ -124,18 +132,21 @@ Lý do:
 - route core vẫn là thứ quyết định hệ thống có thật sự thông minh hay không
 - nếu lõi chưa mạnh thì mở rộng lớp trình diễn chỉ làm loãng effort
 
-## 7. Ưu tiên triển khai tiếp theo
+## 8. Ưu tiên triển khai tiếp theo
 
 Thứ tự nên làm tiếp:
 
 1. xử lý `heavy-rain lunch` cho tới khi thoát `BASELINE_BETTER`
-2. giảm borrowed/fallback gây deadhead nổ trong stress
+2. giảm borrowed và fallback gây deadhead nổ trong stress
 3. calibration lại continuation và positioning trong stress regime
-4. làm sạch `night off-peak` và `shortage regime`
-5. tiếp tục khóa data spine end-to-end cho training, benchmark, report
-6. chỉ sau khi route đủ mạnh mới quay lại Android demo
+4. làm sạch `morning off-peak`, `night off-peak` và `shortage regime`
+5. khóa data spine end-to-end cho training, benchmark và report
 
-## 8. Quy ước tài liệu
+Kế hoạch hành động ngắn hạn đã được tách riêng tại:
+
+- [docs/nextstepplan.md](E:\Code _Project\IntelligentRouteX\docs\nextstepplan.md)
+
+## 9. Quy ước tài liệu
 
 Repo đang dùng bốn file canonical:
 
@@ -148,13 +159,15 @@ Mỗi nhóm có `history/` để lưu snapshot theo format:
 
 - `YYYY-MM-DD_HH-mm.md`
 
-## 9. Kết luận ngắn
+`docs/nextstepplan.md` chỉ là snapshot hành động tạm thời, không thay vai trò của bốn file canonical trên.
+
+## 10. Kết luận ngắn
 
 Repo hiện ở trạng thái:
 
 - có lõi AI thật
-- có route tiến bộ rõ ở clean smoke
+- đã có tiến bộ rõ ở clean smoke
 - có benchmark khách quan hơn trước
-- nhưng chưa thể coi là xong vì heavy-rain vẫn gãy
+- nhưng chưa thể coi là xong vì `Routing Verdict` vẫn là `PARTIAL` và `heavy-rain lunch` vẫn là blocker lớn nhất
 
 Nếu cần chọn đúng một việc để dồn sức, hãy tiếp tục nâng core route AI cho tới khi thoát `PARTIAL`.
