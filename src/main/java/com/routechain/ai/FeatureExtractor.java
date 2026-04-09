@@ -3,10 +3,13 @@ package com.routechain.ai;
 import com.routechain.domain.*;
 import com.routechain.domain.Enums.*;
 import com.routechain.graph.FutureCellValue;
+import com.routechain.graph.GraphFeatureNamespaces;
 import com.routechain.graph.GraphShadowSnapshot;
+import com.routechain.infra.FeatureStore;
 import com.routechain.simulation.DispatchPlan;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Standardized feature engineering for all AI models.
@@ -21,6 +24,15 @@ import java.util.List;
  * - Cancel features (5D) — cancellation risk prediction
  */
 public class FeatureExtractor {
+    private final FeatureStore featureStore;
+
+    public FeatureExtractor() {
+        this(null);
+    }
+
+    public FeatureExtractor(FeatureStore featureStore) {
+        this.featureStore = featureStore;
+    }
 
     // ── Plan features (15D) ─────────────────────────────────────────────
 
@@ -32,6 +44,16 @@ public class FeatureExtractor {
         double[] f = new double[15];
         List<Order> orders = plan.getOrders();
         Driver driver = plan.getDriver();
+        Map<String, Object> traceTraffic = traceTrafficFeatures(plan);
+        GeoPoint endPt = plan.getEndZonePoint();
+        Map<String, Object> endZoneTraffic = zoneTrafficFeatures(field, endPt);
+        double pickupFriction = numericFeature(traceTraffic, "pickupFrictionScore", plan.getPickupFrictionScore());
+        double dropReachability = numericFeature(traceTraffic, "dropReachabilityScore", plan.getDropReachabilityScore());
+        double corridorCongestion = numericFeature(traceTraffic, "corridorCongestionScore", plan.getCorridorCongestionScore());
+        double zoneSlowdown = Math.max(
+                numericFeature(traceTraffic, "zoneSlowdownIndex", plan.getZoneSlowdownIndex()),
+                numericFeature(endZoneTraffic, "slowdownIndex", 0.0));
+        double travelTimeDrift = numericFeature(traceTraffic, "travelTimeDriftScore", plan.getTravelTimeDriftScore());
 
         // 0: bundleSize
         f[0] = orders.size() / 5.0;
@@ -58,22 +80,26 @@ public class FeatureExtractor {
         f[7] = plan.getCustomerFee() / 35000.0;
 
         // 8: deadheadKm
-        f[8] = Math.min(1.0, plan.getPredictedDeadheadKm() / 6.0);
+        f[8] = clamp01(
+                Math.min(1.0, plan.getPredictedDeadheadKm() / 6.0)
+                        * (1.0 + pickupFriction * 0.18 + travelTimeDrift * 0.10));
 
         // 9: continuationValue
         f[9] = plan.getEndZoneOpportunity();
 
         // 10: post-drop opportunity
-        GeoPoint endPt = plan.getEndZonePoint();
-        f[10] = field != null ? field.getPostDropOpportunityAt(endPt, 10) : 0.3;
+        double basePostDrop = field != null ? field.getPostDropOpportunityAt(endPt, 10) : 0.3;
+        double zoneReachability = numericFeature(endZoneTraffic, "dropReachabilityScore", dropReachability);
+        f[10] = clamp01(basePostDrop * 0.70 + Math.max(dropReachability, zoneReachability) * 0.30);
 
         // 11: endZoneDriverDensity
         f[11] = field != null ? Math.min(1.0, field.getDriverDensityAt(endPt) / 5.0) : 0.3;
 
         // 12: congestionExposure
-        f[12] = field != null
+        double baseCongestion = field != null
                 ? Math.min(1.0, Math.max(trafficIntensity, field.getTrafficForecastAt(endPt, 10)))
                 : Math.min(1.0, trafficIntensity);
+        f[12] = clamp01(Math.max(baseCongestion, Math.max(corridorCongestion, zoneSlowdown)));
 
         // 13: detourRatio
         double standaloneDist = computeStandaloneDistance(orders);
@@ -96,16 +122,22 @@ public class FeatureExtractor {
                                       SpatiotemporalField field,
                                       WeatherProfile weather, Driver driver) {
         double[] f = new double[10];
+        Map<String, Object> zoneTraffic = zoneTrafficFeatures(field, endPos);
 
         f[0] = field != null ? Math.min(1.0, field.getDemandAt(endPos) / 3.0) : 0.3;
-        f[1] = field != null ? field.getPostDropOpportunityAt(endPos, 10) : 0.3;
+        double basePostDrop = field != null ? field.getPostDropOpportunityAt(endPos, 10) : 0.3;
+        double dropReachability = numericFeature(zoneTraffic, "dropReachabilityScore", 0.0);
+        f[1] = clamp01(basePostDrop * 0.72 + dropReachability * 0.28);
         f[2] = field != null ? field.getSpikeAt(endPos) : 0.1;
         f[3] = field != null ? Math.min(1.0, field.getDriverDensityAt(endPos) / 5.0) : 0.3;
         f[4] = field != null ? field.getShortageForecastAt(endPos, 10) : 0.3;
-        f[5] = field != null ? field.getTrafficForecastAt(endPos, 10) : 0.3;
+        double baseTraffic = field != null ? field.getTrafficForecastAt(endPos, 10) : 0.3;
+        f[5] = clamp01(Math.max(baseTraffic, numericFeature(zoneTraffic, "slowdownIndex", 0.0)));
         f[6] = endHour / 24.0;
         f[7] = field != null
-                ? Math.max(weather.ordinal() / 3.0, field.getWeatherForecastAt(endPos, 10))
+                ? Math.max(
+                Math.max(weather.ordinal() / 3.0, field.getWeatherForecastAt(endPos, 10)),
+                numericFeature(zoneTraffic, "weatherSeverity", 0.0))
                 : weather.ordinal() / 3.0;
         f[8] = driver.getComputedUtilization();
         f[9] = Math.min(1.0, driver.getCompletedOrders() / 20.0);
@@ -289,14 +321,19 @@ public class FeatureExtractor {
                                         GraphShadowSnapshot snapshot,
                                         double traffic,
                                         WeatherProfile weather) {
+        Map<String, Object> zoneTraffic = zoneTrafficFeatures(field, targetPos);
+        double dropReachability = numericFeature(zoneTraffic, "dropReachabilityScore", 0.0);
         double demand5 = field == null ? 0.0 : clamp01(field.getForecastDemandAt(targetPos, 5) / 3.0);
         double demand10 = field == null ? 0.0 : clamp01(field.getForecastDemandAt(targetPos, 10) / 3.0);
         double demand15 = field == null ? 0.0 : clamp01(field.getForecastDemandAt(targetPos, 15) / 3.0);
+        demand10 = clamp01(demand10 * 0.85 + dropReachability * 0.15);
+        demand15 = clamp01(demand15 * 0.90 + dropReachability * 0.10);
         double postDrop = field == null ? 0.0 : clamp01(field.getPostDropOpportunityAt(targetPos, 10));
         double emptyRisk = field == null ? 0.5 : clamp01(field.getEmptyZoneRiskAt(targetPos, 10));
         double graphCentrality = resolveFutureCellValue(targetPos, field, snapshot).graphCentralityScore();
         double shortage = field == null ? 0.0 : clamp01(field.getShortageForecastAt(targetPos, 10));
         double congestion = field == null ? traffic : clamp01(Math.max(traffic, field.getTrafficForecastAt(targetPos, 10)));
+        congestion = clamp01(Math.max(congestion, numericFeature(zoneTraffic, "slowdownIndex", 0.0)));
         double weatherExposure = field == null
                 ? weather.ordinal() / 3.0
                 : clamp01(Math.max(weather.ordinal() / 3.0, field.getWeatherForecastAt(targetPos, 10)));
@@ -304,6 +341,7 @@ public class FeatureExtractor {
                 ? 0.0
                 : clamp01((currentPos.distanceTo(targetPos) / 1000.0) / 2.0);
         double attraction = field == null ? 0.0 : clamp01(field.getRiskAdjustedAttractionAt(targetPos));
+        attraction = clamp01(Math.max(attraction, dropReachability * 0.82));
         return new double[] {
                 demand5,
                 demand10,
@@ -405,5 +443,36 @@ public class FeatureExtractor {
 
     private double clamp01(double value) {
         return Math.max(0.0, Math.min(1.0, value));
+    }
+
+    private Map<String, Object> traceTrafficFeatures(DispatchPlan plan) {
+        if (featureStore == null || plan == null || plan.getTraceId() == null || plan.getTraceId().isBlank()) {
+            return Map.of();
+        }
+        return featureStore.get(GraphFeatureNamespaces.TRAFFIC_FEATURES, "latest:trace:" + plan.getTraceId())
+                .orElse(Map.of());
+    }
+
+    private Map<String, Object> zoneTrafficFeatures(SpatiotemporalField field, GeoPoint point) {
+        if (featureStore == null || field == null || point == null) {
+            return Map.of();
+        }
+        String cellId = field.cellKeyOf(point);
+        if (cellId == null || cellId.isBlank()) {
+            return Map.of();
+        }
+        return featureStore.get(GraphFeatureNamespaces.TRAFFIC_FEATURES, "latest:zone:" + cellId)
+                .orElse(Map.of());
+    }
+
+    private double numericFeature(Map<String, Object> features, String key, double fallback) {
+        if (features == null || features.isEmpty()) {
+            return fallback;
+        }
+        Object value = features.get(key);
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        return fallback;
     }
 }

@@ -5,7 +5,11 @@ import com.routechain.domain.*;
 import com.routechain.domain.Enums.*;
 import com.routechain.graph.GraphExplanationTrace;
 import com.routechain.graph.GraphFeatureNamespaces;
+import com.routechain.graph.RoadGraphProvider;
+import com.routechain.graph.RoadGraphSnapshot;
 import com.routechain.graph.GraphShadowSnapshot;
+import com.routechain.graph.TrafficFeatureEstimate;
+import com.routechain.graph.TrafficFeatureEstimator;
 import com.routechain.infra.DispatchFactSink;
 import com.routechain.infra.EventContractCatalog;
 import com.routechain.infra.FeatureStore;
@@ -95,6 +99,8 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
     private final ReplayTrainer replayTrainer;
     private final ModelArtifactProvider modelArtifactProvider;
     private final FeatureStore featureStore;
+    private final RoadGraphProvider roadGraphProvider;
+    private final TrafficFeatureEstimator trafficFeatureEstimator;
     private final DispatchFactSink dispatchFactSink;
     private final NeuralRoutePriorClient neuralRoutePriorClient;
     private final LLMAdvisorClient llmAdvisorClient;
@@ -128,12 +134,14 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
     public OmegaDispatchAgent(List<Region> regions) {
         this.regions = regions;
         this.field = new SpatiotemporalField();
-        this.featureExtractor = new FeatureExtractor();
+        this.featureStore = PlatformRuntimeBootstrap.getFeatureStore();
+        this.featureExtractor = new FeatureExtractor(featureStore);
         this.decisionLog = new DecisionLog();
         this.policySelector = new PolicySelector();
         this.horizonPlanner = new HorizonPlanner();
         this.modelArtifactProvider = PlatformRuntimeBootstrap.getModelArtifactProvider();
-        this.featureStore = PlatformRuntimeBootstrap.getFeatureStore();
+        this.roadGraphProvider = PlatformRuntimeBootstrap.getRoadGraphProvider();
+        this.trafficFeatureEstimator = PlatformRuntimeBootstrap.getTrafficFeatureEstimator();
         this.dispatchFactSink = PlatformRuntimeBootstrap.getDispatchFactSink();
         this.neuralRoutePriorClient = new NeuralRoutePriorClient();
         this.llmAdvisorClient = PlatformRuntimeBootstrap.getLlmAdvisorClient();
@@ -535,6 +543,12 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         DispatchPlan.Bundle bundle = plan.getBundle();
         List<DispatchPlan.Stop> seq = plan.getSequence();
         plan.setRunId(activeRunId);
+        if (plan.getTraceId() == null || plan.getTraceId().isBlank()) {
+            String bundleId = bundle == null || bundle.bundleId() == null || bundle.bundleId().isBlank()
+                    ? "bundle-unknown"
+                    : bundle.bundleId();
+            plan.setTraceId("OMEGA-DC-" + activeRunId + "-" + dispatchSequence + "-" + driver.getId() + "-" + bundleId);
+        }
         long inferenceStartedNanos = System.nanoTime();
 
         if (seq.isEmpty()) {
@@ -546,6 +560,25 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         double deadheadKm = driver.getCurrentLocation().distanceTo(
                 seq.get(0).location()) / 1000.0;
         plan.setPredictedDeadheadKm(deadheadKm);
+        DeliveryServiceTier serviceTier = DeliveryServiceTier.dominantForOrders(
+                plan.getOrders(),
+                executionProfile.name());
+        plan.setServiceTier(serviceTier.wireValue());
+        GeoPoint pickupPoint = seq.get(0).location();
+        GeoPoint endPoint = plan.getEndZonePoint();
+        RoadGraphSnapshot roadGraphSnapshot = roadGraphProvider.snapshot(
+                activeRunId,
+                plan.getServiceTier(),
+                driver.getCurrentLocation(),
+                pickupPoint,
+                endPoint,
+                field,
+                traffic,
+                weather);
+        double graphTrafficDrag = roadGraphSnapshot.approachDrift().driftRatio() * 0.08
+                + roadGraphSnapshot.deliveryDrift().driftRatio() * 0.10
+                + roadGraphSnapshot.approachCorridor().congestionScore() * 0.04
+                + roadGraphSnapshot.deliveryCorridor().congestionScore() * 0.05;
 
         // ETA prediction
         double totalDist = computeRouteDistanceKm(
@@ -562,6 +595,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             case HEAVY_RAIN -> pickupCongestionExposure * 0.07 + pickupWeatherExposure * 0.06 + 0.03;
             case STORM -> pickupCongestionExposure * 0.10 + pickupWeatherExposure * 0.08 + 0.06;
         };
+        operationalDrag += graphTrafficDrag;
         predictedETA *= (1.0 + operationalDrag);
         final double adjustedPredictedETA = predictedETA;
         plan.setPredictedTotalMinutes(adjustedPredictedETA);
@@ -621,22 +655,25 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         }
 
         // Continuation value — END-STATE as primary objective component
-        GeoPoint endPoint = plan.getEndZonePoint();
         int estimatedEndHour = (hour + (int) (predictedETA / 60)) % 24;
         double[] endFeatures = featureExtractor.endStateFeatures(
                 endPoint, estimatedEndHour, field, weather, driver);
         double continuationValue = continuationValueModel
                 .predictNormalized(endFeatures);
-        DeliveryServiceTier serviceTier = DeliveryServiceTier.dominantForOrders(
-                plan.getOrders(),
-                executionProfile.name());
-        plan.setServiceTier(serviceTier.wireValue());
-        GeoPoint pickupPoint = seq.get(0).location();
         double merchantPrepForecastMinutes = field.getMerchantPrepForecastMinutesAt(pickupPoint, 10);
         double merchantPrepRisk = computeMerchantPrepRisk(plan, merchantPrepForecastMinutes, currentTime);
         double borrowSuccessProbability = field.getBorrowSuccessProbabilityAt(pickupPoint, 10);
         plan.setMerchantPrepRiskScore(merchantPrepRisk);
         plan.setBorrowSuccessProbability(borrowSuccessProbability);
+        TrafficFeatureEstimate trafficFeatureEstimate = trafficFeatureEstimator.estimateAndStore(
+                activeRunId,
+                plan,
+                ctx,
+                roadGraphSnapshot,
+                field,
+                traffic,
+                weather);
+        applyBigDataTrafficFeatures(plan, roadGraphSnapshot, trafficFeatureEstimate);
         double endWeatherExposure = field.getWeatherExposureAt(endPoint);
         double endCongestionExposure = field.getCongestionExposureAt(endPoint);
         StressRegime effectiveRegime = elevateStressRegime(
@@ -649,15 +686,22 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 endCongestionExposure,
                 Math.max(field.getShortageAt(seq.get(0).location()), field.getShortageAt(endPoint)));
         syncThreeOrderPolicyFlags(plan, ctx, effectiveRegime);
-        double endStateRiskPenalty = endCongestionExposure * 0.22
-                + endWeatherExposure * 0.18;
+        double endStateRiskPenalty = endCongestionExposure * 0.18
+                + endWeatherExposure * 0.16
+                + trafficFeatureEstimate.zoneSlowdownIndex() * 0.18
+                + trafficFeatureEstimate.trafficUncertaintyScore() * 0.05;
         double adjustedContinuation = Math.max(0.05,
-                continuationValue * (1.0 - endStateRiskPenalty));
+                continuationValue * (1.0 - endStateRiskPenalty)
+                        + trafficFeatureEstimate.dropReachabilityScore() * 0.08);
         double futureOrderSignal = field.getForecastDemandAt(endPoint, 10) * 0.45
                 + field.getForecastDemandAt(endPoint, 15) * 0.35
                 + field.getForecastDemandAt(endPoint, 30) * 0.20;
         double nextOrderScore = Math.max(0.05, Math.min(1.0,
-                futureOrderSignal * (1.0 - endCongestionExposure * 0.25 - endWeatherExposure * 0.20)));
+                futureOrderSignal * (1.0
+                        - endCongestionExposure * 0.20
+                        - endWeatherExposure * 0.16
+                        - trafficFeatureEstimate.zoneSlowdownIndex() * 0.18)
+                        + trafficFeatureEstimate.dropReachabilityScore() * 0.12));
 
         if (ablationMode == AblationMode.NO_CONTINUATION) {
             adjustedContinuation = 0.0;
@@ -668,22 +712,31 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         plan.setNextOrderAcquisitionScore(nextOrderScore);
         plan.setContinuationValueScore(adjustedContinuation);
         plan.setEndZoneOpportunityScore(nextOrderScore);
-        plan.setTrafficExposureScore(endCongestionExposure);
+        plan.setTrafficExposureScore(clamp01(Math.max(
+                endCongestionExposure,
+                trafficFeatureEstimate.corridorCongestionScore())));
         plan.setWeatherExposureScore(endWeatherExposure);
-        plan.setPostDropDemandProbability(field.getPostDropOpportunityAt(endPoint, 10));
+        plan.setPostDropDemandProbability(clamp01(
+                field.getPostDropOpportunityAt(endPoint, 10) * 0.72
+                        + trafficFeatureEstimate.dropReachabilityScore() * 0.28));
         plan.setTrafficForecastAbsError(ctx == null
                 ? 0.0
-                : Math.abs(ctx.localTrafficForecast10m() - traffic));
+                : Math.abs(ctx.localTrafficForecast10m() - traffic)
+                + trafficFeatureEstimate.travelTimeDriftScore() * 0.15);
         plan.setWeatherForecastHitRate(ctx == null
                 ? 1.0
                 : clamp01(1.0 - Math.abs(ctx.localWeatherForecast10m() - weatherSeverity(weather))));
 
         double congestionPenalty = Math.min(1.0,
-                traffic * 0.35
-                        + endCongestionExposure * 0.45
-                        + endWeatherExposure * 0.20);
+                traffic * 0.24
+                        + endCongestionExposure * 0.22
+                        + trafficFeatureEstimate.corridorCongestionScore() * 0.34
+                        + trafficFeatureEstimate.zoneSlowdownIndex() * 0.12
+                        + endWeatherExposure * 0.08);
         plan.setCongestionPenalty(congestionPenalty);
-        plan.setRepositionPenalty(deadheadKm > 3.0 ? 0.3 + endWeatherExposure * 0.08 : 0.1);
+        plan.setRepositionPenalty(deadheadKm > 3.0
+                ? 0.3 + endWeatherExposure * 0.08 + trafficFeatureEstimate.pickupFrictionScore() * 0.05
+                : 0.1 + trafficFeatureEstimate.zoneSlowdownIndex() * 0.04);
         applySoftLandingAdjustments(plan, ctx, endPoint,
                 adjustedContinuation, nextOrderScore,
                 endWeatherExposure, endCongestionExposure);
@@ -829,9 +882,12 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 : 0.0;
         double landingContinuityBonus = plan.getLastDropLandingScore() * 0.05
                 + plan.getPostDropDemandProbability() * 0.04
+                + plan.getDropReachabilityScore() * 0.03
                 + Math.max(0.0, 1.0 - plan.getExpectedPostCompletionEmptyKm() / 3.0) * 0.03;
         double continuityRiskPenalty = plan.getBorrowedDependencyScore() * 0.08
                 + plan.getEmptyRiskAfter() * 0.06
+                + plan.getPickupFrictionScore() * 0.03
+                + plan.getTrafficUncertaintyScore() * 0.02
                 + Math.max(0.0, plan.getExpectedPostCompletionEmptyKm() - 1.5) * 0.03;
         double finalScore = robustScore * blend[0]
                 + executionScore * blend[1]
@@ -854,8 +910,6 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         plan.setTotalScore(finalScore);
         plan.setConfidence(pred.confidence());
         plan.setModelInferenceLatencyMs((System.nanoTime() - inferenceStartedNanos) / 1_000_000L);
-        plan.setTraceId("OMEGA-DC-" + System.nanoTime()
-                + "-" + driver.getId());
 
         return true;
     }
@@ -1507,6 +1561,21 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         return bestPoint;
     }
 
+    private void applyBigDataTrafficFeatures(DispatchPlan plan,
+                                             RoadGraphSnapshot roadGraphSnapshot,
+                                             TrafficFeatureEstimate trafficFeatureEstimate) {
+        if (plan == null || roadGraphSnapshot == null || trafficFeatureEstimate == null) {
+            return;
+        }
+        plan.setPickupFrictionScore(trafficFeatureEstimate.pickupFrictionScore());
+        plan.setDropReachabilityScore(trafficFeatureEstimate.dropReachabilityScore());
+        plan.setCorridorCongestionScore(trafficFeatureEstimate.corridorCongestionScore());
+        plan.setZoneSlowdownIndex(trafficFeatureEstimate.zoneSlowdownIndex());
+        plan.setTravelTimeDriftScore(trafficFeatureEstimate.travelTimeDriftScore());
+        plan.setTrafficUncertaintyScore(trafficFeatureEstimate.trafficUncertaintyScore());
+        plan.setRoadGraphBackend(roadGraphSnapshot.backend());
+    }
+
     private void applySoftLandingAdjustments(DispatchPlan plan,
                                              DriverDecisionContext ctx,
                                              GeoPoint endPoint,
@@ -1514,6 +1583,9 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                                              double nextOrderScore,
                                              double endWeatherExposure,
                                              double endCongestionExposure) {
+        double bigDataReachability = clamp01(plan.getDropReachabilityScore());
+        double bigDataSlowdown = clamp01(plan.getZoneSlowdownIndex());
+        double bigDataCorridorCongestion = clamp01(plan.getCorridorCongestionScore());
         double contextCorridorScore = computeCorridorScoreFromContext(ctx, endPoint);
         double contextLandingScore = computeLandingScoreFromContext(ctx, endPoint);
         double contextPostDropOpportunity = Math.max(
@@ -1548,20 +1620,25 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                         + plan.getRemainingDropProximityScore() * 0.15
                         + (1.0 - plan.getDeliveryZigZagPenalty()) * 0.10
                         + clamp01(ctx.deliveryDemandGradient() / 2.5) * 0.05
-                        - routeRiskPenalty);
+                        + bigDataReachability * 0.04
+                        - routeRiskPenalty
+                        - bigDataCorridorCongestion * 0.06);
         double postDropOpportunity = harshStress
                 ? clamp01(
                 clamp01(plan.getPostDropDemandProbability()) * 0.32
                         + contextPostDropOpportunity * 0.28
+                        + bigDataReachability * 0.10
                         + contextLandingScore * 0.12
                         + clamp01(ctx.deliveryDemandGradient()) * 0.08
                         + clamp01(1.0 - ctx.endZoneIdleRisk()) * 0.08
                         + clamp01(1.0 - ctx.localEmptyZoneRisk()) * 0.06
                         - endWeatherExposure * 0.16
                         - endCongestionExposure * 0.10
+                        - bigDataSlowdown * 0.10
                         - ctx.endZoneIdleRisk() * 0.14)
                 : Math.max(
-                clamp01(plan.getPostDropDemandProbability()),
+                clamp01(plan.getPostDropDemandProbability()) * 0.80
+                        + bigDataReachability * 0.20,
                 contextPostDropOpportunity);
         double lowEmptyFinish = clamp01(1.0 - mergedExpectedEmptyKm / 2.6);
         double refinedLanding = clamp01(
@@ -1570,9 +1647,11 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                         + adjustedContinuation * 0.15
                         + nextOrderScore * 0.10
                         + refinedCorridor * 0.08
+                        + bigDataReachability * 0.05
                         + lowEmptyFinish * 0.07
                         + clamp01(ctx.deliveryDemandGradient()) * 0.04
                         - ctx.endZoneIdleRisk() * 0.08
+                        - bigDataSlowdown * 0.05
                         - Math.min(0.05, ctx.localMerchantPrepForecast10m() / 40.0)
                         - routeRiskPenalty * 0.85);
         if (harshStress) {
@@ -1590,7 +1669,11 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         }
         double expectedEmptyKm = mergedExpectedEmptyKm;
         expectedEmptyKm = Math.max(0.1,
-                expectedEmptyKm * (1.0 + endCongestionExposure * 0.12 + endWeatherExposure * 0.08));
+                expectedEmptyKm * (1.0
+                        + endCongestionExposure * 0.12
+                        + endWeatherExposure * 0.08
+                        + bigDataSlowdown * 0.10
+                        + plan.getTrafficUncertaintyScore() * 0.04));
         if (harshStress) {
             expectedEmptyKm = Math.max(expectedEmptyKm, contextExpectedEmptyKm * 0.95);
         }
@@ -2482,6 +2565,8 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         double cancelPenalty = clamp01(plan.getCancellationRisk());
         double postEmptyPenalty = clamp01(plan.getExpectedPostCompletionEmptyKm() / 3.2);
         double zigZagPenalty = clamp01(plan.getDeliveryZigZagPenalty());
+        double pickupFrictionPenalty = clamp01(plan.getPickupFrictionScore());
+        double driftPenalty = clamp01(plan.getTravelTimeDriftScore());
         double onTime = clamp01(plan.getOnTimeProbability());
         double weatherWeight = (weather == WeatherProfile.CLEAR || weather == WeatherProfile.LIGHT_RAIN) ? 1.0 : 1.15;
         double regimeWeight = regime == StressRegime.NORMAL ? 1.0
@@ -2492,7 +2577,9 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 + clamp01(1.0 - cancelPenalty) * 0.10
                 + clamp01(1.0 - postEmptyPenalty) * 0.10
                 + clamp01(1.0 - zigZagPenalty) * 0.06
-                + clamp01(1.0 - plan.getMerchantPrepRiskScore()) * 0.05;
+                + clamp01(1.0 - plan.getMerchantPrepRiskScore()) * 0.05
+                + clamp01(1.0 - pickupFrictionPenalty) * 0.04
+                + clamp01(1.0 - driftPenalty) * 0.03;
         score += serviceTierExecutionBias(plan.getServiceTier(), plan.getOnTimeProbability(), plan.getPredictedDeadheadKm());
         return clamp01(score / (weatherWeight * regimeWeight));
     }
@@ -2511,6 +2598,8 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         double nextOrder = clamp01(plan.getNextOrderAcquisitionScore());
         double continuationValue = clamp01(plan.getContinuationValueScore());
         double postDropOpportunity = clamp01(plan.getPostDropDemandProbability());
+        double dropReachability = clamp01(plan.getDropReachabilityScore());
+        double lowZoneSlowdown = clamp01(1.0 - plan.getZoneSlowdownIndex());
         double lowEmptyFinish = clamp01(1.0 - plan.getExpectedPostCompletionEmptyKm() / 3.2);
         double lowIdleAfter = clamp01(1.0 - plan.getExpectedNextOrderIdleMinutes() / 8.0);
         DeliveryServiceTier serviceTier = DeliveryServiceTier.fromWireValue(plan.getServiceTier());
@@ -2521,16 +2610,20 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                     + nextOrder * 0.12
                     + continuationValue * 0.08
                     + postDropOpportunity * 0.20
+                    + dropReachability * 0.08
                     + lowEmptyFinish * 0.12
-                    + lowIdleAfter * 0.04;
+                    + lowIdleAfter * 0.04
+                    + lowZoneSlowdown * 0.04;
         } else {
             score = corridor * 0.18
                     + landing * 0.18
                     + nextOrder * 0.20
                     + continuationValue * 0.18
                     + postDropOpportunity * 0.16
+                    + dropReachability * 0.08
                     + lowEmptyFinish * 0.07
-                    + lowIdleAfter * 0.03;
+                    + lowIdleAfter * 0.03
+                    + lowZoneSlowdown * 0.04;
         }
         score += serviceTierContinuationBias(plan.getServiceTier(), postDropOpportunity, lowEmptyFinish);
         double regimeWeight = regime == StressRegime.NORMAL ? 1.0
@@ -2566,6 +2659,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         double replacement = clamp01(plan.getReplacementDepth());
         double lowBorrow = clamp01(1.0 - plan.getBorrowedDependencyScore());
         double lowEmptyRisk = clamp01(1.0 - plan.getEmptyRiskAfter());
+        double lowTrafficUncertainty = clamp01(1.0 - plan.getTrafficUncertaintyScore());
         double localOpportunity = ctx == null ? 0.0 : clamp01(ctx.localPostDropOpportunity());
         double localLowRisk = ctx == null ? 0.0 : clamp01(1.0 - ctx.localEmptyZoneRisk());
         double score = coverage * 0.30
@@ -2574,6 +2668,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 + lowEmptyRisk * 0.16
                 + localOpportunity * 0.08
                 + localLowRisk * 0.05
+                + lowTrafficUncertainty * 0.03
                 + clamp01(plan.getBorrowSuccessProbability()) * 0.01;
         double regimeWeight = regime == StressRegime.NORMAL ? 1.0
                 : regime == StressRegime.STRESS ? 0.90 : 0.78;
@@ -3648,6 +3743,13 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 plan.getNeuralPriorScore(),
                 plan.getServiceTier(),
                 activeRouteLatencyMode,
+                plan.getPickupFrictionScore(),
+                plan.getDropReachabilityScore(),
+                plan.getCorridorCongestionScore(),
+                plan.getZoneSlowdownIndex(),
+                plan.getTravelTimeDriftScore(),
+                plan.getTrafficUncertaintyScore(),
+                plan.getRoadGraphBackend(),
                 semanticPlanSummary(plan),
                 contextSnapshot,
                 contextFeatures == null ? new double[0] : contextFeatures.clone(),
@@ -3836,6 +3938,13 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         snapshot.put("batchValueScore", plan.getBatchValueScore());
         snapshot.put("stressRescueScore", plan.getStressRescueScore());
         snapshot.put("positioningValueScore", plan.getPositioningValueScore());
+        snapshot.put("pickupFrictionScore", plan.getPickupFrictionScore());
+        snapshot.put("dropReachabilityScore", plan.getDropReachabilityScore());
+        snapshot.put("corridorCongestionScore", plan.getCorridorCongestionScore());
+        snapshot.put("zoneSlowdownIndex", plan.getZoneSlowdownIndex());
+        snapshot.put("travelTimeDriftScore", plan.getTravelTimeDriftScore());
+        snapshot.put("trafficUncertaintyScore", plan.getTrafficUncertaintyScore());
+        snapshot.put("roadGraphBackend", plan.getRoadGraphBackend());
         snapshot.put("reachableOrders", ctx == null ? 0 : ctx.reachableOrders().size());
         snapshot.put("nearReadyOrders", ctx == null ? 0 : ctx.nearReadyOrders());
         snapshot.put("localTrafficIntensity", ctx == null ? 0.0 : ctx.localTrafficIntensity());
@@ -3906,6 +4015,13 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         summary.put("postDropDemandProbability", plan.getPostDropDemandProbability());
         summary.put("trafficExposureScore", plan.getTrafficExposureScore());
         summary.put("weatherExposureScore", plan.getWeatherExposureScore());
+        summary.put("pickupFrictionScore", plan.getPickupFrictionScore());
+        summary.put("dropReachabilityScore", plan.getDropReachabilityScore());
+        summary.put("corridorCongestionScore", plan.getCorridorCongestionScore());
+        summary.put("zoneSlowdownIndex", plan.getZoneSlowdownIndex());
+        summary.put("travelTimeDriftScore", plan.getTravelTimeDriftScore());
+        summary.put("trafficUncertaintyScore", plan.getTrafficUncertaintyScore());
+        summary.put("roadGraphBackend", plan.getRoadGraphBackend());
         summary.put("neuralPriorScore", plan.getNeuralPriorScore());
         summary.put("neuralPriorUsed", plan.isNeuralPriorUsed());
         summary.put("neuralPriorVersion", plan.getNeuralPriorVersion());

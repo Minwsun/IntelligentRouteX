@@ -73,6 +73,13 @@ public class DispatchPlan {
     private double borrowSuccessProbability;
     private double trafficForecastAbsError;
     private double weatherForecastHitRate;
+    private double pickupFrictionScore;
+    private double dropReachabilityScore;
+    private double corridorCongestionScore;
+    private double zoneSlowdownIndex;
+    private double travelTimeDriftScore;
+    private double trafficUncertaintyScore;
+    private String roadGraphBackend = "heuristic";
     private boolean executionGatePassed = true;
     private long modelInferenceLatencyMs;
     private double neuralPriorScore;
@@ -170,6 +177,13 @@ public class DispatchPlan {
     public double getBorrowSuccessProbability() { return borrowSuccessProbability; }
     public double getTrafficForecastAbsError() { return trafficForecastAbsError; }
     public double getWeatherForecastHitRate() { return weatherForecastHitRate; }
+    public double getPickupFrictionScore() { return pickupFrictionScore; }
+    public double getDropReachabilityScore() { return dropReachabilityScore; }
+    public double getCorridorCongestionScore() { return corridorCongestionScore; }
+    public double getZoneSlowdownIndex() { return zoneSlowdownIndex; }
+    public double getTravelTimeDriftScore() { return travelTimeDriftScore; }
+    public double getTrafficUncertaintyScore() { return trafficUncertaintyScore; }
+    public String getRoadGraphBackend() { return roadGraphBackend; }
     public boolean isExecutionGatePassed() { return executionGatePassed; }
     public long getModelInferenceLatencyMs() { return modelInferenceLatencyMs; }
     public double getNeuralPriorScore() { return neuralPriorScore; }
@@ -288,6 +302,29 @@ public class DispatchPlan {
     public void setWeatherForecastHitRate(double weatherForecastHitRate) {
         this.weatherForecastHitRate = Math.max(0.0, Math.min(1.0, weatherForecastHitRate));
     }
+    public void setPickupFrictionScore(double pickupFrictionScore) {
+        this.pickupFrictionScore = clamp01(pickupFrictionScore);
+    }
+    public void setDropReachabilityScore(double dropReachabilityScore) {
+        this.dropReachabilityScore = clamp01(dropReachabilityScore);
+    }
+    public void setCorridorCongestionScore(double corridorCongestionScore) {
+        this.corridorCongestionScore = clamp01(corridorCongestionScore);
+    }
+    public void setZoneSlowdownIndex(double zoneSlowdownIndex) {
+        this.zoneSlowdownIndex = clamp01(zoneSlowdownIndex);
+    }
+    public void setTravelTimeDriftScore(double travelTimeDriftScore) {
+        this.travelTimeDriftScore = clamp01(travelTimeDriftScore);
+    }
+    public void setTrafficUncertaintyScore(double trafficUncertaintyScore) {
+        this.trafficUncertaintyScore = clamp01(trafficUncertaintyScore);
+    }
+    public void setRoadGraphBackend(String roadGraphBackend) {
+        this.roadGraphBackend = (roadGraphBackend == null || roadGraphBackend.isBlank())
+                ? "heuristic"
+                : roadGraphBackend;
+    }
     public void setExecutionGatePassed(boolean executionGatePassed) {
         this.executionGatePassed = executionGatePassed;
     }
@@ -322,6 +359,10 @@ public class DispatchPlan {
     public void setTraceId(String v) { this.traceId = v; }
     public void setLegacyGuardrailPlan(boolean legacyGuardrailPlan) {
         this.legacyGuardrailPlan = legacyGuardrailPlan;
+    }
+
+    private double clamp01(double value) {
+        return Math.max(0.0, Math.min(1.0, value));
     }
 
     @Override

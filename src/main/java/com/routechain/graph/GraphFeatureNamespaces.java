@@ -7,6 +7,8 @@ package com.routechain.graph;
 public final class GraphFeatureNamespaces {
     public static final String ONLINE_FEATURES = "online_features";
     public static final String GRAPH_FEATURES = "graph_features";
+    public static final String ROAD_GRAPH_FEATURES = "road_graph_features";
+    public static final String TRAFFIC_FEATURES = "traffic_features";
     public static final String MODEL_SCORES = "model_scores";
     public static final String POLICY_STATE = "policy_state";
 

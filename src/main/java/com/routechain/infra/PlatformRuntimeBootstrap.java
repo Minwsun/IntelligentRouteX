@@ -12,6 +12,9 @@ import com.routechain.ai.OfflineFallbackLLMAdvisorClient;
 import com.routechain.ai.ModelBundleManifest;
 import com.routechain.graph.GraphAffinityScorer;
 import com.routechain.graph.GraphShadowProjector;
+import com.routechain.graph.OsmOsrmGraphProvider;
+import com.routechain.graph.RoadGraphProvider;
+import com.routechain.graph.TrafficFeatureEstimator;
 import com.routechain.infra.Events.*;
 import com.routechain.simulation.ReplayCompareResult;
 import com.routechain.simulation.RunReport;
@@ -32,6 +35,9 @@ public final class PlatformRuntimeBootstrap {
     private static final InMemoryFeatureStore FEATURE_STORE = new InMemoryFeatureStore();
     private static final GraphShadowProjector GRAPH_SHADOW_PROJECTOR = new GraphShadowProjector(FEATURE_STORE);
     private static final GraphAffinityScorer GRAPH_AFFINITY_SCORER = new GraphAffinityScorer();
+    private static final RoadGraphProvider ROAD_GRAPH_PROVIDER = new OsmOsrmGraphProvider();
+    private static final TrafficFeatureEstimator TRAFFIC_FEATURE_ESTIMATOR =
+            new TrafficFeatureEstimator(FEATURE_STORE);
     private static final DispatchOptimizer DISPATCH_OPTIMIZER = new TimefoldOnlineOptimizer();
     private static final JsonlDispatchFactSink DISPATCH_FACT_SINK =
             new JsonlDispatchFactSink(ROOT.resolve("facts"));
@@ -81,6 +87,14 @@ public final class PlatformRuntimeBootstrap {
 
     public static GraphAffinityScorer getGraphAffinityScorer() {
         return GRAPH_AFFINITY_SCORER;
+    }
+
+    public static RoadGraphProvider getRoadGraphProvider() {
+        return ROAD_GRAPH_PROVIDER;
+    }
+
+    public static TrafficFeatureEstimator getTrafficFeatureEstimator() {
+        return TRAFFIC_FEATURE_ESTIMATOR;
     }
 
     public static DispatchOptimizer getDispatchOptimizer() {
