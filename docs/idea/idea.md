@@ -1,3 +1,15 @@
+---
+doc_id: "canonical.idea"
+doc_kind: "canonical_idea"
+canonical: true
+priority: 100
+updated_at: "2026-04-09T16:50:05+07:00"
+git_sha: "39b5e91"
+tags: ["idea", "route-core", "batching", "business-objective"]
+depends_on: []
+bootstrap: true
+---
+
 # Ý tưởng cốt lõi của IntelligentRouteX
 
 ## 1. Tuyên bố mục tiêu hiện tại

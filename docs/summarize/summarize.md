@@ -1,3 +1,15 @@
+---
+doc_id: "canonical.summarize"
+doc_kind: "canonical_handoff"
+canonical: true
+priority: 100
+updated_at: "2026-04-09T16:50:05+07:00"
+git_sha: "39b5e91"
+tags: ["handoff", "current-state", "route-core", "priority"]
+depends_on: ["canonical.idea", "canonical.architecture", "canonical.result"]
+bootstrap: true
+---
+
 # Handoff chính thức của repo
 
 ## 1. File này dùng để làm gì

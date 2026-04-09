@@ -1,3 +1,15 @@
+---
+doc_id: "canonical.result"
+doc_kind: "canonical_result"
+canonical: true
+priority: 100
+updated_at: "2026-04-09T16:50:05+07:00"
+git_sha: "39b5e91"
+tags: ["benchmark", "result", "verdict", "evidence"]
+depends_on: []
+bootstrap: true
+---
+
 # Kết quả gần nhất của hệ thống
 
 ## 1. Nguồn kết quả

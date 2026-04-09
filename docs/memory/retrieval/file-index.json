@@ -1,0 +1,660 @@
+{
+  "version": 1,
+  "generated_at": "2026-04-09T16:50:05+07:00",
+  "git_sha": "39b5e91",
+  "files": [
+    {
+      "path": "docs/idea/idea.md",
+      "doc_id": "canonical.idea",
+      "doc_kind": "canonical_idea",
+      "canonical_source": true,
+      "archive": false,
+      "bootstrap": true,
+      "priority": 100,
+      "tags": [
+        "idea",
+        "route-core",
+        "batching",
+        "business-objective"
+      ],
+      "topic": "system-goal",
+      "scenario": "all",
+      "language": "vi",
+      "evidence_type": "narrative",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "canonical.idea::1",
+        "canonical.idea::2",
+        "canonical.idea::3"
+      ]
+    },
+    {
+      "path": "docs/architecture/architecture.md",
+      "doc_id": "canonical.architecture",
+      "doc_kind": "canonical_architecture",
+      "canonical_source": true,
+      "archive": false,
+      "bootstrap": true,
+      "priority": 98,
+      "tags": [
+        "architecture",
+        "route-core",
+        "data-spine",
+        "truth-layer"
+      ],
+      "topic": "system-architecture",
+      "scenario": "all",
+      "language": "vi",
+      "evidence_type": "narrative",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "canonical.architecture::1",
+        "canonical.architecture::2"
+      ]
+    },
+    {
+      "path": "docs/summarize/summarize.md",
+      "doc_id": "canonical.summarize",
+      "doc_kind": "canonical_handoff",
+      "canonical_source": true,
+      "archive": false,
+      "bootstrap": true,
+      "priority": 100,
+      "tags": [
+        "handoff",
+        "current-state",
+        "route-core",
+        "priority"
+      ],
+      "topic": "current-state",
+      "scenario": "all",
+      "language": "vi",
+      "evidence_type": "narrative",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "canonical.summarize::1",
+        "canonical.summarize::2"
+      ]
+    },
+    {
+      "path": "docs/result/result-latest.md",
+      "doc_id": "canonical.result",
+      "doc_kind": "canonical_result",
+      "canonical_source": true,
+      "archive": false,
+      "bootstrap": true,
+      "priority": 100,
+      "tags": [
+        "benchmark",
+        "result",
+        "verdict",
+        "evidence"
+      ],
+      "topic": "benchmark-state",
+      "scenario": "multi-scenario",
+      "language": "vi",
+      "evidence_type": "benchmark-summary",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "canonical.result::1",
+        "canonical.result::2"
+      ]
+    },
+    {
+      "path": "docs/nextstepplan.md",
+      "doc_id": "working.nextstepplan",
+      "doc_kind": "temporary_plan",
+      "canonical_source": false,
+      "archive": false,
+      "bootstrap": true,
+      "priority": 95,
+      "tags": [
+        "next-step",
+        "workstream",
+        "route-core",
+        "phase-plan"
+      ],
+      "topic": "active-plan",
+      "scenario": "current-phase",
+      "language": "vi",
+      "evidence_type": "working-plan",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "working.nextstepplan::1",
+        "working.nextstepplan::2"
+      ]
+    },
+    {
+      "path": "docs/backend-runbook-ai-first.md",
+      "doc_id": "operational.backend-runbook",
+      "doc_kind": "operational_runbook",
+      "canonical_source": true,
+      "archive": false,
+      "bootstrap": false,
+      "priority": 88,
+      "tags": [
+        "runbook",
+        "ops",
+        "benchmark",
+        "memory-pack"
+      ],
+      "topic": "operations",
+      "scenario": "local-runtime",
+      "language": "en",
+      "evidence_type": "runbook",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "operational.backend-runbook::1",
+        "operational.backend-runbook::2"
+      ]
+    },
+    {
+      "path": "SUMARISE.md",
+      "doc_id": "archive.legacy-summarise",
+      "doc_kind": "legacy_redirect",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 10,
+      "tags": [
+        "archive",
+        "redirect",
+        "legacy"
+      ],
+      "topic": "legacy-handoff",
+      "scenario": "legacy",
+      "language": "vi",
+      "evidence_type": "archive-note",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "archive.legacy-summarise::1"
+      ]
+    },
+    {
+      "path": "docs/backend-architecture-v1.md",
+      "doc_id": "archive.backend-architecture-v1",
+      "doc_kind": "legacy_architecture",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 10,
+      "tags": [
+        "archive",
+        "architecture",
+        "legacy"
+      ],
+      "topic": "legacy-architecture",
+      "scenario": "legacy",
+      "language": "vi",
+      "evidence_type": "archive-note",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "archive.backend-architecture-v1::1"
+      ]
+    },
+    {
+      "path": "docs/routechain-apex-architecture.md",
+      "doc_id": "archive.routechain-apex-architecture",
+      "doc_kind": "legacy_architecture",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 10,
+      "tags": [
+        "archive",
+        "architecture",
+        "legacy"
+      ],
+      "topic": "legacy-architecture",
+      "scenario": "legacy",
+      "language": "vi",
+      "evidence_type": "archive-note",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "archive.routechain-apex-architecture::1"
+      ]
+    },
+    {
+      "path": "docs/result.md",
+      "doc_id": "archive.result-note",
+      "doc_kind": "legacy_result",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 10,
+      "tags": [
+        "archive",
+        "result",
+        "legacy"
+      ],
+      "topic": "legacy-result",
+      "scenario": "legacy",
+      "language": "vi",
+      "evidence_type": "archive-note",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "archive.result-note::1"
+      ]
+    },
+    {
+      "path": "docs/required.md",
+      "doc_id": "archive.required-note",
+      "doc_kind": "legacy_scope",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 10,
+      "tags": [
+        "archive",
+        "scope",
+        "legacy"
+      ],
+      "topic": "legacy-scope",
+      "scenario": "legacy",
+      "language": "vi",
+      "evidence_type": "archive-note",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "archive.required-note::1"
+      ]
+    },
+    {
+      "path": "docs/idea/history/2026-04-08_22-09.md",
+      "doc_id": "history.idea.2026-04-08_22-09",
+      "doc_kind": "idea_history_snapshot",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 20,
+      "tags": [
+        "history",
+        "idea",
+        "snapshot"
+      ],
+      "topic": "idea-history",
+      "scenario": "history",
+      "language": "vi",
+      "evidence_type": "history-snapshot",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "history.idea.2026-04-08_22-09::1"
+      ]
+    },
+    {
+      "path": "docs/idea/history/2026-04-09_15-49.md",
+      "doc_id": "history.idea.2026-04-09_15-49",
+      "doc_kind": "idea_history_snapshot",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 20,
+      "tags": [
+        "history",
+        "idea",
+        "snapshot"
+      ],
+      "topic": "idea-history",
+      "scenario": "history",
+      "language": "vi",
+      "evidence_type": "history-snapshot",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "history.idea.2026-04-09_15-49::1"
+      ]
+    },
+    {
+      "path": "docs/idea/history/required-scope-2026-04-05.md",
+      "doc_id": "history.idea.required-scope-2026-04-05",
+      "doc_kind": "idea_history_snapshot",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 20,
+      "tags": [
+        "history",
+        "idea",
+        "snapshot"
+      ],
+      "topic": "idea-history",
+      "scenario": "history",
+      "language": "vi",
+      "evidence_type": "history-snapshot",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "history.idea.required-scope-2026-04-05::1"
+      ]
+    },
+    {
+      "path": "docs/architecture/history/2026-04-08_22-09.md",
+      "doc_id": "history.architecture.2026-04-08_22-09",
+      "doc_kind": "architecture_history_snapshot",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 20,
+      "tags": [
+        "history",
+        "architecture",
+        "snapshot"
+      ],
+      "topic": "architecture-history",
+      "scenario": "history",
+      "language": "vi",
+      "evidence_type": "history-snapshot",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "history.architecture.2026-04-08_22-09::1"
+      ]
+    },
+    {
+      "path": "docs/architecture/history/2026-04-09_15-49.md",
+      "doc_id": "history.architecture.2026-04-09_15-49",
+      "doc_kind": "architecture_history_snapshot",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 20,
+      "tags": [
+        "history",
+        "architecture",
+        "snapshot"
+      ],
+      "topic": "architecture-history",
+      "scenario": "history",
+      "language": "vi",
+      "evidence_type": "history-snapshot",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "history.architecture.2026-04-09_15-49::1"
+      ]
+    },
+    {
+      "path": "docs/summarize/history/2026-04-08_22-09.md",
+      "doc_id": "history.summarize.2026-04-08_22-09",
+      "doc_kind": "summarize_history_snapshot",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 20,
+      "tags": [
+        "history",
+        "summarize",
+        "snapshot"
+      ],
+      "topic": "summarize-history",
+      "scenario": "history",
+      "language": "vi",
+      "evidence_type": "history-snapshot",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "history.summarize.2026-04-08_22-09::1"
+      ]
+    },
+    {
+      "path": "docs/summarize/history/2026-04-08_23-56.md",
+      "doc_id": "history.summarize.2026-04-08_23-56",
+      "doc_kind": "summarize_history_snapshot",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 20,
+      "tags": [
+        "history",
+        "summarize",
+        "snapshot"
+      ],
+      "topic": "summarize-history",
+      "scenario": "history",
+      "language": "vi",
+      "evidence_type": "history-snapshot",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "history.summarize.2026-04-08_23-56::1"
+      ]
+    },
+    {
+      "path": "docs/summarize/history/2026-04-09_15-49.md",
+      "doc_id": "history.summarize.2026-04-09_15-49",
+      "doc_kind": "summarize_history_snapshot",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 20,
+      "tags": [
+        "history",
+        "summarize",
+        "snapshot"
+      ],
+      "topic": "summarize-history",
+      "scenario": "history",
+      "language": "vi",
+      "evidence_type": "history-snapshot",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "history.summarize.2026-04-09_15-49::1"
+      ]
+    },
+    {
+      "path": "docs/result/history/2026-04-08_22-09.md",
+      "doc_id": "history.result.2026-04-08_22-09",
+      "doc_kind": "result_history_snapshot",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 20,
+      "tags": [
+        "history",
+        "result",
+        "snapshot"
+      ],
+      "topic": "result-history",
+      "scenario": "history",
+      "language": "vi",
+      "evidence_type": "history-snapshot",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "history.result.2026-04-08_22-09::1"
+      ]
+    },
+    {
+      "path": "docs/result/history/2026-04-08_23-56.md",
+      "doc_id": "history.result.2026-04-08_23-56",
+      "doc_kind": "result_history_snapshot",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 20,
+      "tags": [
+        "history",
+        "result",
+        "snapshot"
+      ],
+      "topic": "result-history",
+      "scenario": "history",
+      "language": "vi",
+      "evidence_type": "history-snapshot",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "history.result.2026-04-08_23-56::1"
+      ]
+    },
+    {
+      "path": "docs/result/history/2026-04-09_15-49.md",
+      "doc_id": "history.result.2026-04-09_15-49",
+      "doc_kind": "result_history_snapshot",
+      "canonical_source": false,
+      "archive": true,
+      "bootstrap": false,
+      "priority": 20,
+      "tags": [
+        "history",
+        "result",
+        "snapshot"
+      ],
+      "topic": "result-history",
+      "scenario": "history",
+      "language": "vi",
+      "evidence_type": "history-snapshot",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "history.result.2026-04-09_15-49::1"
+      ]
+    },
+    {
+      "path": "docs/memory/decision-log/DEC-001-smart-batching-first.md",
+      "doc_id": "decision.dec-001",
+      "doc_kind": "decision_log",
+      "canonical_source": false,
+      "archive": false,
+      "bootstrap": false,
+      "priority": 72,
+      "tags": [
+        "decision-log",
+        "smart-batching-first"
+      ],
+      "topic": "decision-log",
+      "scenario": "all",
+      "language": "vi",
+      "evidence_type": "decision",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "decision.dec-001::1"
+      ]
+    },
+    {
+      "path": "docs/memory/decision-log/DEC-002-route-core-over-agent.md",
+      "doc_id": "decision.dec-002",
+      "doc_kind": "decision_log",
+      "canonical_source": false,
+      "archive": false,
+      "bootstrap": false,
+      "priority": 72,
+      "tags": [
+        "decision-log",
+        "route-core-over-agent"
+      ],
+      "topic": "decision-log",
+      "scenario": "all",
+      "language": "vi",
+      "evidence_type": "decision",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "decision.dec-002::1"
+      ]
+    },
+    {
+      "path": "docs/memory/decision-log/DEC-003-truth-layer-open-vs-committed-demand.md",
+      "doc_id": "decision.dec-003",
+      "doc_kind": "decision_log",
+      "canonical_source": false,
+      "archive": false,
+      "bootstrap": false,
+      "priority": 72,
+      "tags": [
+        "decision-log",
+        "truth-layer-open-vs-committed-demand"
+      ],
+      "topic": "decision-log",
+      "scenario": "all",
+      "language": "vi",
+      "evidence_type": "decision",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "decision.dec-003::1"
+      ]
+    },
+    {
+      "path": "docs/memory/decision-log/DEC-004-hybrid-file-first-memory.md",
+      "doc_id": "decision.dec-004",
+      "doc_kind": "decision_log",
+      "canonical_source": false,
+      "archive": false,
+      "bootstrap": false,
+      "priority": 72,
+      "tags": [
+        "decision-log",
+        "hybrid-file-first-memory"
+      ],
+      "topic": "decision-log",
+      "scenario": "all",
+      "language": "vi",
+      "evidence_type": "decision",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "decision.dec-004::1"
+      ]
+    },
+    {
+      "path": "docs/memory/START_HERE.md",
+      "doc_id": "memory.start-here",
+      "doc_kind": "memory_bootstrap",
+      "canonical_source": false,
+      "archive": false,
+      "bootstrap": true,
+      "priority": 96,
+      "tags": [
+        "memory",
+        "bootstrap",
+        "start-here"
+      ],
+      "topic": "bootstrap",
+      "scenario": "all",
+      "language": "vi",
+      "evidence_type": "generated-summary",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "memory.start-here::1"
+      ]
+    },
+    {
+      "path": "docs/memory/handoff/latest.md",
+      "doc_id": "memory.handoff.latest",
+      "doc_kind": "memory_handoff",
+      "canonical_source": false,
+      "archive": false,
+      "bootstrap": true,
+      "priority": 94,
+      "tags": [
+        "memory",
+        "handoff",
+        "current-state"
+      ],
+      "topic": "handoff",
+      "scenario": "current-phase",
+      "language": "vi",
+      "evidence_type": "generated-summary",
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91",
+      "chunk_ids": [
+        "memory.handoff.latest::1"
+      ]
+    }
+  ]
+}

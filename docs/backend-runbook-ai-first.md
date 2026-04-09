@@ -1,3 +1,15 @@
+---
+doc_id: "operational.backend-runbook"
+doc_kind: "operational_runbook"
+canonical: true
+priority: 88
+updated_at: "2026-04-09T16:50:05+07:00"
+git_sha: "39b5e91"
+tags: ["runbook", "ops", "benchmark", "memory-pack"]
+depends_on: ["canonical.architecture"]
+bootstrap: false
+---
+
 # Backend Runbook (AI-First, Windows CPU)
 
 ## 1-command demo flow
@@ -100,6 +112,15 @@ Demo identities imported into Keycloak:
 - `ops-demo / demo123`
 
 ## Manual commands
+
+### Refresh and validate AI memory pack
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/docs/refresh_ai_memory.ps1 -RepoRoot D:\Project\IntelligentRouteX
+powershell -ExecutionPolicy Bypass -File scripts/docs/validate_ai_memory.ps1 -RepoRoot D:\Project\IntelligentRouteX
+```
+
+This refreshes the file-first AI memory pack, writes the generated retrieval-ready files under `docs/memory/`, and validates that canonical docs still win over history and legacy notes.
 
 ### Runtime setup
 

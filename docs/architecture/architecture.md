@@ -1,3 +1,15 @@
+---
+doc_id: "canonical.architecture"
+doc_kind: "canonical_architecture"
+canonical: true
+priority: 98
+updated_at: "2026-04-09T16:50:05+07:00"
+git_sha: "39b5e91"
+tags: ["architecture", "route-core", "data-spine", "truth-layer"]
+depends_on: ["canonical.idea"]
+bootstrap: true
+---
+
 # Kiến trúc hiện tại của IntelligentRouteX
 
 ## 1. Tư tưởng kiến trúc

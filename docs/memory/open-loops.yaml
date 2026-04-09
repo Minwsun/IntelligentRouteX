@@ -1,0 +1,103 @@
+{
+  "generated_at": "2026-04-09T16:50:05+07:00",
+  "git_sha": "39b5e91",
+  "loops": [
+    {
+      "id": "loop-01-heavy-rain-rescue-v-stress-lane",
+      "title": "Heavy-rain rescue và stress lane",
+      "status": "open",
+      "impact": "high",
+      "owner_scope": "route_core",
+      "evidence_refs": [
+        "docs/nextstepplan.md",
+        "docs/result/result-latest.md",
+        "docs/summarize/summarize.md"
+      ],
+      "next_action": "giảm fallbackDirect",
+      "acceptance": [
+        "heavy rain lunch thoát BASELINE BETTER",
+        "deadhead không còn vọt bất thường",
+        "completion không còn tụt quá xa Legacy"
+      ],
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91"
+    },
+    {
+      "id": "loop-02-continuation-v-positioning-calibration",
+      "title": "Continuation và positioning calibration",
+      "status": "open",
+      "impact": "high",
+      "owner_scope": "route_core",
+      "evidence_refs": [
+        "docs/nextstepplan.md",
+        "docs/result/result-latest.md",
+        "docs/summarize/summarize.md"
+      ],
+      "next_action": "để driver sau khi giao xong rơi đúng vùng có xác suất có đơn tiếp cao",
+      "acceptance": [
+        "để driver sau khi giao xong rơi đúng vùng có xác suất có đơn tiếp cao",
+        "giảm idle after drop và empty km"
+      ],
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91"
+    },
+    {
+      "id": "loop-03-smart-batching-admission",
+      "title": "Smart batching admission",
+      "status": "open",
+      "impact": "medium",
+      "owner_scope": "route_core",
+      "evidence_refs": [
+        "docs/nextstepplan.md",
+        "docs/result/result-latest.md",
+        "docs/summarize/summarize.md"
+      ],
+      "next_action": "ưu tiên batch 2 và compact hoặc corridor aligned bundles",
+      "acceptance": [
+        "ưu tiên batch 2 và compact hoặc corridor aligned bundles",
+        "chỉ giữ batch khi utility toàn hệ thật sự thắng solo và local extension"
+      ],
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91"
+    },
+    {
+      "id": "loop-04-cleanup-c-c-bucket-c-n-y-u-ngo-i-heavy-rain",
+      "title": "Cleanup các bucket còn yếu ngoài heavy-rain",
+      "status": "open",
+      "impact": "medium",
+      "owner_scope": "route_core",
+      "evidence_refs": [
+        "docs/nextstepplan.md",
+        "docs/result/result-latest.md",
+        "docs/summarize/summarize.md"
+      ],
+      "next_action": "giảm fallback hoặc borrowed domination",
+      "acceptance": [
+        "giảm fallback hoặc borrowed domination",
+        "làm route ổn định hơn trong các bucket đang bị baseline giữ lại"
+      ],
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91"
+    },
+    {
+      "id": "loop-05-data-spine-end-to-end",
+      "title": "Data spine end-to-end",
+      "status": "open",
+      "impact": "medium",
+      "owner_scope": "data_spine",
+      "evidence_refs": [
+        "docs/nextstepplan.md",
+        "docs/result/result-latest.md",
+        "docs/summarize/summarize.md"
+      ],
+      "next_action": "candidate level facts đủ cho training và audit",
+      "acceptance": [
+        "candidate level facts đủ cho training và audit",
+        "ClickHouse query được KPI thật cho benchmark và report",
+        "MLflow join được model version với benchmark result"
+      ],
+      "updated_at": "2026-04-09T16:50:05+07:00",
+      "git_sha": "39b5e91"
+    }
+  ]
+}
