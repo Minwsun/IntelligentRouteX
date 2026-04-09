@@ -1,7 +1,7 @@
 # AI session handoff
 
-- Generated at: `2026-04-09T16:50:05+07:00`
-- Git SHA: `39b5e91`
+- Generated at: `2026-04-10T00:08:52+07:00`
+- Git SHA: `1ddb17b`
 
 ## Current goal
 
@@ -22,11 +22,11 @@ mặc định tìm cách ghép đơn một cách thông minh để tối ưu chi
 
 ## Active workstreams
 
-- Heavy-rain rescue và stress lane: giảm fallbackDirect
-- Continuation và positioning calibration: để driver sau khi giao xong rơi đúng vùng có xác suất có đơn tiếp cao
-- Smart batching admission: ưu tiên batch 2 và compact hoặc corridor aligned bundles
-- Cleanup các bucket còn yếu ngoài heavy-rain: giảm fallback hoặc borrowed domination
-- Data spine end-to-end: candidate level facts đủ cho training và audit
+- Streaming traffic surrogate từ telemetry thật: đưa driver progress events, actual trip duration, pickup arrival, offer delay và weather snapshots vào Kafka/Flink
+- HCMC delivery digital twin: materialize zone, corridor, merchant cluster và landing zone theo hướng vận hành delivery
+- Recalibrate route core trên feature bigdata-first: retrain hoặc recalibrate ETA, route value, batch value, continuation và positioning trên feature mới
+- Evidence spine và warehouse KPI: candidate level facts đủ cho training, audit và report
+- Route-quality cleanup sau khi có feature backbone thật: dùng feature backbone mới để quay lại cleanup các bucket route quality còn yếu
 
 ## Deferred work
 

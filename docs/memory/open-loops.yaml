@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-04-09T16:50:05+07:00",
-  "git_sha": "39b5e91",
+  "generated_at": "2026-04-10T00:08:52+07:00",
+  "git_sha": "1ddb17b",
   "loops": [
     {
-      "id": "loop-01-heavy-rain-rescue-v-stress-lane",
-      "title": "Heavy-rain rescue và stress lane",
+      "id": "loop-01-streaming-traffic-surrogate-t-telemetry-th-t",
+      "title": "Streaming traffic surrogate từ telemetry thật",
       "status": "open",
       "impact": "high",
       "owner_scope": "route_core",
@@ -13,18 +13,18 @@
         "docs/result/result-latest.md",
         "docs/summarize/summarize.md"
       ],
-      "next_action": "giảm fallbackDirect",
+      "next_action": "đưa driver progress events, actual trip duration, pickup arrival, offer delay và weather snapshots vào Kafka/Flink",
       "acceptance": [
-        "heavy rain lunch thoát BASELINE BETTER",
-        "deadhead không còn vọt bất thường",
-        "completion không còn tụt quá xa Legacy"
+        "có corridor live stats và zone feature snapshots sinh ra từ dữ liệu runtime thật",
+        "Redis có feature nóng cho route core",
+        "ClickHouse và Iceberg có lịch sử đủ để replay và train"
       ],
-      "updated_at": "2026-04-09T16:50:05+07:00",
-      "git_sha": "39b5e91"
+      "updated_at": "2026-04-10T00:08:52+07:00",
+      "git_sha": "1ddb17b"
     },
     {
-      "id": "loop-02-continuation-v-positioning-calibration",
-      "title": "Continuation và positioning calibration",
+      "id": "loop-02-hcmc-delivery-digital-twin",
+      "title": "HCMC delivery digital twin",
       "status": "open",
       "impact": "high",
       "owner_scope": "route_core",
@@ -33,17 +33,17 @@
         "docs/result/result-latest.md",
         "docs/summarize/summarize.md"
       ],
-      "next_action": "để driver sau khi giao xong rơi đúng vùng có xác suất có đơn tiếp cao",
+      "next_action": "materialize zone, corridor, merchant cluster và landing zone theo hướng vận hành delivery",
       "acceptance": [
-        "để driver sau khi giao xong rơi đúng vùng có xác suất có đơn tiếp cao",
-        "giảm idle after drop và empty km"
+        "có map trạng thái zone/corridor đủ tốt để feed continuation và positioning",
+        "feature path giữa graph substrate và route scoring rõ ràng, không còn mơ hồ"
       ],
-      "updated_at": "2026-04-09T16:50:05+07:00",
-      "git_sha": "39b5e91"
+      "updated_at": "2026-04-10T00:08:52+07:00",
+      "git_sha": "1ddb17b"
     },
     {
-      "id": "loop-03-smart-batching-admission",
-      "title": "Smart batching admission",
+      "id": "loop-03-recalibrate-route-core-tr-n-feature-bigdata-first",
+      "title": "Recalibrate route core trên feature bigdata-first",
       "status": "open",
       "impact": "medium",
       "owner_scope": "route_core",
@@ -52,17 +52,18 @@
         "docs/result/result-latest.md",
         "docs/summarize/summarize.md"
       ],
-      "next_action": "ưu tiên batch 2 và compact hoặc corridor aligned bundles",
+      "next_action": "retrain hoặc recalibrate ETA, route value, batch value, continuation và positioning trên feature mới",
       "acceptance": [
-        "ưu tiên batch 2 và compact hoặc corridor aligned bundles",
-        "chỉ giữ batch khi utility toàn hệ thật sự thắng solo và local extension"
+        "route ai certification smoke tiếp tục PASS",
+        "route core tận dụng được pickup friction, reachability, drift và slowdown để chọn plan tốt hơn",
+        "ablation của các lane chính tạo delta rõ hơn"
       ],
-      "updated_at": "2026-04-09T16:50:05+07:00",
-      "git_sha": "39b5e91"
+      "updated_at": "2026-04-10T00:08:52+07:00",
+      "git_sha": "1ddb17b"
     },
     {
-      "id": "loop-04-cleanup-c-c-bucket-c-n-y-u-ngo-i-heavy-rain",
-      "title": "Cleanup các bucket còn yếu ngoài heavy-rain",
+      "id": "loop-04-evidence-spine-v-warehouse-kpi",
+      "title": "Evidence spine và warehouse KPI",
       "status": "open",
       "impact": "medium",
       "owner_scope": "route_core",
@@ -71,33 +72,34 @@
         "docs/result/result-latest.md",
         "docs/summarize/summarize.md"
       ],
-      "next_action": "giảm fallback hoặc borrowed domination",
+      "next_action": "candidate level facts đủ cho training, audit và report",
       "acceptance": [
-        "giảm fallback hoặc borrowed domination",
-        "làm route ổn định hơn trong các bucket đang bị baseline giữ lại"
+        "report không còn phụ thuộc vào prose thủ công làm nguồn thật duy nhất",
+        "có clean slice, traffic heavy slice và weather heavy slice đọc được từ warehouse",
+        "champion/challenger promotion có evidence rõ ràng"
       ],
-      "updated_at": "2026-04-09T16:50:05+07:00",
-      "git_sha": "39b5e91"
+      "updated_at": "2026-04-10T00:08:52+07:00",
+      "git_sha": "1ddb17b"
     },
     {
-      "id": "loop-05-data-spine-end-to-end",
-      "title": "Data spine end-to-end",
+      "id": "loop-05-route-quality-cleanup-sau-khi-c-feature-backbone-th-t",
+      "title": "Route-quality cleanup sau khi có feature backbone thật",
       "status": "open",
       "impact": "medium",
-      "owner_scope": "data_spine",
+      "owner_scope": "route_core",
       "evidence_refs": [
         "docs/nextstepplan.md",
         "docs/result/result-latest.md",
         "docs/summarize/summarize.md"
       ],
-      "next_action": "candidate level facts đủ cho training và audit",
+      "next_action": "dùng feature backbone mới để quay lại cleanup các bucket route quality còn yếu",
       "acceptance": [
-        "candidate level facts đủ cho training và audit",
-        "ClickHouse query được KPI thật cho benchmark và report",
-        "MLflow join được model version với benchmark result"
+        "Routing Verdict tiến lên khỏi PARTIAL",
+        "clean regime mạnh hơn một cách ổn định",
+        "sau đó mới quay lại các bucket khó như heavy rain lunch, night off peak, shortage regime"
       ],
-      "updated_at": "2026-04-09T16:50:05+07:00",
-      "git_sha": "39b5e91"
+      "updated_at": "2026-04-10T00:08:52+07:00",
+      "git_sha": "1ddb17b"
     }
   ]
 }

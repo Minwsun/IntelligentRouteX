@@ -3,8 +3,8 @@ doc_id: "working.nextstepplan"
 doc_kind: "temporary_plan"
 canonical: false
 priority: 95
-updated_at: "2026-04-09T16:50:05+07:00"
-git_sha: "39b5e91"
+updated_at: "2026-04-10T00:08:52+07:00"
+git_sha: "1ddb17b"
 tags: ["next-step", "workstream", "route-core", "phase-plan"]
 depends_on: ["canonical.summarize", "canonical.result"]
 bootstrap: true
@@ -12,125 +12,127 @@ bootstrap: true
 
 # Kế hoạch bước tiếp theo của core route AI
 
-- Thời gian chốt kế hoạch: `2026-04-09 15:49` (Asia/Saigon)
-- Base SHA: `0befe35`
-- Vai trò của file: snapshot hành động tạm thời cho phase hiện tại
+- Thời gian chốt kế hoạch: `2026-04-09 23:58` (Asia/Saigon)
+- Base SHA: `1ddb17b`
+- Vai trò của file: snapshot hành động tạm thời cho phase kế tiếp, sau khi nhát cắt `OSM/OSRM + self-derived traffic surrogate` đã vào route core
 
 ## 1. Mục tiêu phase hiện tại
 
 Mục tiêu chính của phase này là:
 
-> đưa route từ `Routing Verdict = PARTIAL` lên tối thiểu `YES with caveat`, trong khi vẫn giữ `AI Verdict = YES` và giữ benchmark đủ khách quan để báo cáo.
+> biến nhát cắt `open-source-first road graph + traffic surrogate` thành một `bigdata-first feature backbone` thật sự, đủ mạnh để session AI tiếp theo tiếp tục route research mà không phải thiết kế lại từ đầu.
 
-Điều này phải được làm theo đúng tinh thần của `smart batching first`:
+Điều này phải giữ đúng hai nguyên tắc đã khóa:
 
-- mặc định tìm batch tốt
-- nhưng không ghép bằng mọi giá
-- utility toàn hệ phải thắng thì mới giữ batch
+- route core vẫn là nơi ra quyết định cuối
+- big data phải trở thành nơi sinh feature, evidence và model promotion, chứ không chỉ là nơi log để đọc lại sau
 
 ## 2. Hiện trạng ngắn gọn
 
-Trạng thái benchmark gần nhất:
+Trạng thái benchmark gần nhất đã verify:
 
 - `AI Verdict = YES`
 - `Routing Verdict = PARTIAL`
 - `route-ai-certification-smoke = PASS`
 
-Blocker lớn nhất hiện tại:
+Nhát cắt vừa xong đã thêm:
 
-- `heavy-rain lunch` vẫn `BASELINE_BETTER`
+- `RoadGraphProvider`
+- `OsmOsrmGraphProvider`
+- `TrafficFeatureEstimator`
+- route features cho pickup friction, landing reachability, corridor congestion, drift và uncertainty
 
-Các vùng còn cần cleanup sau heavy-rain:
+Điểm còn thiếu:
 
-- `morning off-peak`
-- `night off-peak`
-- `shortage regime`
+- feature hiện mới ở mức surrogate từ graph + field state
+- chưa có full telemetry-driven streaming spine đi vào Redis/ClickHouse/Iceberg/MLflow
+- evidence rộng hơn vẫn còn blocker như `heavy-rain lunch`
 
 Truth-layer note:
 
 - `openPickupDemand` và `committedPickupPressure` đã được tách
-- stale pickup hotspot hiện phải được giữ như regression guard, không phải bug mở chắc chắn
+- stale pickup hotspot phải tiếp tục được giữ như regression guard, không phải bug mở chắc chắn
 
 ## 3. Workstreams theo thứ tự cứng
 
-### Workstream 1: Heavy-rain rescue và stress lane
+### Workstream 1: Streaming traffic surrogate từ telemetry thật
 
 Mục tiêu:
 
-- giảm `fallbackDirect`
-- giảm borrowed sai vùng
-- tránh deadhead nổ trong rescue
-- ưu tiên rescue plan có SLA chance thật
+- đưa `driver_progress_events`, actual trip duration, pickup arrival, offer delay và weather snapshots vào Kafka/Flink
+- biến traffic surrogate từ logic nội bộ thành feature sống theo zone và corridor
+- giữ route core chỉ đọc feature store nội bộ, không gọi external traffic API trực tiếp
 
 Kết quả mong muốn:
 
-- `heavy-rain lunch` thoát `BASELINE_BETTER`
-- deadhead không còn vọt bất thường
-- completion không còn tụt quá xa `Legacy`
+- có `corridor_live_stats` và `zone_feature_snapshots` sinh ra từ dữ liệu runtime thật
+- Redis có feature nóng cho route core
+- ClickHouse và Iceberg có lịch sử đủ để replay và train
 
-### Workstream 2: Continuation và positioning calibration
-
-Mục tiêu:
-
-- để driver sau khi giao xong rơi đúng vùng có xác suất có đơn tiếp cao
-- giảm idle-after-drop và empty-km
-
-Tập trung vào:
-
-- post-drop opportunity
-- next-order idle
-- expected post-completion empty km
-- giảm optimism quá mức trong stress regime
-
-### Workstream 3: Smart batching admission
+### Workstream 2: HCMC delivery digital twin
 
 Mục tiêu:
 
-- ưu tiên batch-2 và compact hoặc corridor-aligned bundles
-- chỉ giữ batch khi utility toàn hệ thật sự thắng solo và local extension
+- materialize zone, corridor, merchant cluster và landing zone theo hướng vận hành delivery
+- gắn các feature như open demand, active supply, pickup friction, slowdown và post-drop opportunity vào digital twin
+- làm cho route core nhìn được trạng thái thành phố, không chỉ nhìn từng order riêng lẻ
 
-Tập trung vào:
+Kết quả mong muốn:
 
-- deadhead
-- courier minutes
-- lateness risk
-- landing quality sau drop
+- có map trạng thái zone/corridor đủ tốt để feed continuation và positioning
+- feature path giữa graph substrate và route scoring rõ ràng, không còn mơ hồ
 
-### Workstream 4: Cleanup các bucket còn yếu ngoài heavy-rain
-
-Thứ tự:
-
-1. `morning off-peak`
-2. `night off-peak`
-3. `shortage regime`
+### Workstream 3: Recalibrate route core trên feature bigdata-first
 
 Mục tiêu:
 
-- giảm fallback hoặc borrowed domination
-- làm route ổn định hơn trong các bucket đang bị baseline giữ lại
+- retrain hoặc recalibrate ETA, route value, batch value, continuation và positioning trên feature mới
+- giảm bias “quá dè chừng” trong `CLEAR` nhưng vẫn giữ được safety
+- làm cho pickup, drop và deadhead được cải thiện nhờ data-informed scoring chứ không chỉ heuristic
 
-### Workstream 5: Data spine end-to-end
+Kết quả mong muốn:
+
+- route-ai-certification-smoke tiếp tục `PASS`
+- route core tận dụng được pickup friction, reachability, drift và slowdown để chọn plan tốt hơn
+- ablation của các lane chính tạo delta rõ hơn
+
+### Workstream 4: Evidence spine và warehouse KPI
 
 Mục tiêu:
 
-- candidate-level facts đủ cho training và audit
-- ClickHouse query được KPI thật cho benchmark và report
-- MLflow join được model version với benchmark result
+- candidate-level facts đủ cho training, audit và report
+- ClickHouse query được KPI thật cho benchmark slices
+- MLflow join được model version, feature schema và benchmark result
 
-Flow cần khóa:
+Kết quả mong muốn:
 
-- operational writes -> outbox -> Kafka -> Flink -> ClickHouse + MinIO/Iceberg -> MLflow metadata
+- report không còn phụ thuộc vào prose thủ công làm nguồn thật duy nhất
+- có clean slice, traffic-heavy slice và weather-heavy slice đọc được từ warehouse
+- champion/challenger promotion có evidence rõ ràng
+
+### Workstream 5: Route-quality cleanup sau khi có feature backbone thật
+
+Mục tiêu:
+
+- dùng feature backbone mới để quay lại cleanup các bucket route-quality còn yếu
+- ưu tiên giảm cancellation, pickup deadhead và empty-after-drop trong môi trường thuận lợi trước
+- chỉ quay lại heavy-rain khi lane clean và bigdata spine đã ổn hơn
+
+Kết quả mong muốn:
+
+- `Routing Verdict` tiến lên khỏi `PARTIAL`
+- clean-regime mạnh hơn một cách ổn định
+- sau đó mới quay lại các bucket khó như `heavy-rain lunch`, `night off-peak`, `shortage regime`
 
 ## 4. Acceptance criteria
 
 Phase này chỉ được coi là đạt khi:
 
 - `AI Verdict = YES` vẫn giữ
-- `Routing Verdict >= YES with caveat`
-- `heavy-rain lunch` tối thiểu thoát `BASELINE_BETTER`
-- `morning off-peak`, `night off-peak` và `shortage regime` không còn là các bucket yếu cố hữu
-- batch quality tốt hơn current champion
-- KPI benchmark có thể truy từ data spine thật, không chỉ từ local artifact files
+- `route-ai-certification-smoke` vẫn `PASS`
+- route core đọc được feature bigdata-first từ data spine nội bộ, không chỉ từ surrogate cục bộ
+- KPI benchmark và route evidence truy được từ ClickHouse hoặc Iceberg thật
+- session AI mới có thể đọc canonical docs + memory pack và tiếp tục đúng hướng mà không phải đoán lại kiến trúc
 
 ## 5. Việc đang hoãn
 
@@ -142,5 +144,5 @@ Các việc sau tiếp tục bị hoãn để không làm loãng effort:
 
 Lý do:
 
-- route core vẫn là phần quyết định hệ thống có thật sự thông minh hay không
-- nếu route chưa mạnh thì lớp trình diễn sẽ không cứu được chất lượng lõi
+- feature backbone và route core vẫn là phần quyết định hệ thống có thật sự đủ thông minh hay không
+- nếu nền data + route chưa khóa, mở rộng lớp trình diễn sẽ không tạo ra giá trị nghiên cứu thật

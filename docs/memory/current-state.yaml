@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-04-09T16:50:05+07:00",
-  "git_sha": "39b5e91",
+  "generated_at": "2026-04-10T00:08:52+07:00",
+  "git_sha": "1ddb17b",
   "workspace_dirty": true,
   "current_goal": "mặc định tìm cách ghép đơn một cách thông minh để tối ưu chi phí toàn hệ giao nhận, nhưng chỉ giữ batch khi utility tổng của khách hàng, tài xế và marketplace tốt hơn so với giao tách lẻ.",
   "current_verdict": {
@@ -19,9 +19,9 @@
     "Android demo",
     "multi module split"
   ],
-  "next_milestone": "Routing Verdict = YES with caveat",
+  "next_milestone": "route ai certification smoke vẫn PASS",
   "truth_layer_guard": "openPickupDemand chỉ dùng cho demand pickup còn mở; committedPickupPressure giữ riêng áp lực pickup đã commit và phải được bảo vệ như regression guard.",
-  "primary_runbook_command": "powershell -ExecutionPolicy Bypass -File scripts/run_backend_demo.ps1 -RepoRoot D:\\Project\\IntelligentRouteX",
+  "primary_runbook_command": "powershell -ExecutionPolicy Bypass -File scripts/run_backend_demo.ps1 -RepoRoot E:\\Code _Project\\IntelligentRouteX",
   "bootstrap_order": [
     "docs/memory/current-state.yaml",
     "docs/memory/open-loops.yaml",

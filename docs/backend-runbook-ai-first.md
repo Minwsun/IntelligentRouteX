@@ -3,8 +3,8 @@ doc_id: "operational.backend-runbook"
 doc_kind: "operational_runbook"
 canonical: true
 priority: 88
-updated_at: "2026-04-09T16:50:05+07:00"
-git_sha: "39b5e91"
+updated_at: "2026-04-10T00:08:52+07:00"
+git_sha: "1ddb17b"
 tags: ["runbook", "ops", "benchmark", "memory-pack"]
 depends_on: ["canonical.architecture"]
 bootstrap: false
@@ -15,7 +15,7 @@ bootstrap: false
 ## 1-command demo flow
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/run_backend_demo.ps1 -RepoRoot D:\Project\IntelligentRouteX
+powershell -ExecutionPolicy Bypass -File scripts/run_backend_demo.ps1 -RepoRoot E:\Code _Project\IntelligentRouteX
 ```
 
 This command performs:
@@ -29,8 +29,8 @@ This command performs:
 ### Start/stop local single-node stack
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/start_production_small_spine.ps1 -RepoRoot D:\Project\IntelligentRouteX
-powershell -ExecutionPolicy Bypass -File scripts/stop_production_small_spine.ps1 -RepoRoot D:\Project\IntelligentRouteX
+powershell -ExecutionPolicy Bypass -File scripts/start_production_small_spine.ps1 -RepoRoot E:\Code _Project\IntelligentRouteX
+powershell -ExecutionPolicy Bypass -File scripts/stop_production_small_spine.ps1 -RepoRoot E:\Code _Project\IntelligentRouteX
 ```
 
 This stack brings up the production-small shape used for demo and future integration:
@@ -47,7 +47,7 @@ This stack brings up the production-small shape used for demo and future integra
 ### Full big-data + control-room demo
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/run_bigdata_control_room_demo.ps1 -RepoRoot D:\Project\IntelligentRouteX
+powershell -ExecutionPolicy Bypass -File scripts/run_bigdata_control_room_demo.ps1 -RepoRoot E:\Code _Project\IntelligentRouteX
 ```
 
 This command:
@@ -113,11 +113,23 @@ Demo identities imported into Keycloak:
 
 ## Manual commands
 
+### Route smoke after the open-source traffic slice
+
+```powershell
+./gradlew.bat --no-daemon --max-workers=1 routeIntelligenceVerdictSmoke -x test
+```
+
+Use this after route-core or feature-store changes to verify that:
+
+1. `route-ai-certification-smoke` still passes.
+2. `routeIntelligenceVerdictSmoke` still reports `AI = YES`.
+3. The open-source traffic surrogate does not silently push `CLEAR` runs outside the safety baseline.
+
 ### Refresh and validate AI memory pack
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/docs/refresh_ai_memory.ps1 -RepoRoot D:\Project\IntelligentRouteX
-powershell -ExecutionPolicy Bypass -File scripts/docs/validate_ai_memory.ps1 -RepoRoot D:\Project\IntelligentRouteX
+powershell -ExecutionPolicy Bypass -File scripts/docs/refresh_ai_memory.ps1 -RepoRoot E:\Code _Project\IntelligentRouteX
+powershell -ExecutionPolicy Bypass -File scripts/docs/validate_ai_memory.ps1 -RepoRoot E:\Code _Project\IntelligentRouteX
 ```
 
 This refreshes the file-first AI memory pack, writes the generated retrieval-ready files under `docs/memory/`, and validates that canonical docs still win over history and legacy notes.
@@ -125,26 +137,26 @@ This refreshes the file-first AI memory pack, writes the generated retrieval-rea
 ### Runtime setup
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/model/setup_neural_runtime.ps1 -RepoRoot D:\Project\IntelligentRouteX
+powershell -ExecutionPolicy Bypass -File scripts/model/setup_neural_runtime.ps1 -RepoRoot E:\Code _Project\IntelligentRouteX
 ```
 
 ### Download/verify model assets
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/model/download_models.ps1 -RepoRoot D:\Project\IntelligentRouteX
+powershell -ExecutionPolicy Bypass -File scripts/model/download_models.ps1 -RepoRoot E:\Code _Project\IntelligentRouteX
 ```
 
 ### Start/stop sidecar
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/model/start_neural_sidecar.ps1 -RepoRoot D:\Project\IntelligentRouteX
-powershell -ExecutionPolicy Bypass -File scripts/model/stop_neural_sidecar.ps1 -RepoRoot D:\Project\IntelligentRouteX
+powershell -ExecutionPolicy Bypass -File scripts/model/start_neural_sidecar.ps1 -RepoRoot E:\Code _Project\IntelligentRouteX
+powershell -ExecutionPolicy Bypass -File scripts/model/stop_neural_sidecar.ps1 -RepoRoot E:\Code _Project\IntelligentRouteX
 ```
 
 ### Recovery benchmark loop
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/benchmark/run_recovery_loop.ps1 -RepoRoot D:\Project\IntelligentRouteX
+powershell -ExecutionPolicy Bypass -File scripts/benchmark/run_recovery_loop.ps1 -RepoRoot E:\Code _Project\IntelligentRouteX
 ```
 
 ### Realistic HCMC scenario batch
@@ -156,13 +168,13 @@ powershell -ExecutionPolicy Bypass -File scripts/benchmark/run_recovery_loop.ps1
 ### Dataset workspace bootstrap
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/benchmark/fetch_route_research_datasets.ps1 -RepoRoot D:\Project\IntelligentRouteX
+powershell -ExecutionPolicy Bypass -File scripts/benchmark/fetch_route_research_datasets.ps1 -RepoRoot E:\Code _Project\IntelligentRouteX
 ```
 
 Optional Amazon last-mile download:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/benchmark/fetch_route_research_datasets.ps1 -RepoRoot D:\Project\IntelligentRouteX -FetchAmazonLastMile
+powershell -ExecutionPolicy Bypass -File scripts/benchmark/fetch_route_research_datasets.ps1 -RepoRoot E:\Code _Project\IntelligentRouteX -FetchAmazonLastMile
 ```
 
 ### Control room console only
@@ -178,3 +190,4 @@ powershell -ExecutionPolicy Bypass -File scripts/benchmark/fetch_route_research_
 - `ops/production-small/docker-compose.yml` is the local-first production-small shape for demo and artifact-driven development.
 - `benchmark-baselines/dataset-manifest.json` documents how each public dataset is used and what it is allowed to prove.
 - The route intelligence agent is an analytics/modelops sidecar, not a live routing dependency.
+- The current open-source traffic backbone is `osm-osrm-surrogate-v1`; it is a route graph substrate plus self-derived traffic features, not a vendor traffic API dependency.
