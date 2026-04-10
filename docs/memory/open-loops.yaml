@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-04-10T00:08:52+07:00",
-  "git_sha": "1ddb17b",
+  "generated_at": "2026-04-10T18:32:00+07:00",
+  "git_sha": "53d7480",
   "loops": [
     {
       "id": "loop-01-streaming-traffic-surrogate-t-telemetry-th-t",
@@ -19,8 +19,8 @@
         "Redis có feature nóng cho route core",
         "ClickHouse và Iceberg có lịch sử đủ để replay và train"
       ],
-      "updated_at": "2026-04-10T00:08:52+07:00",
-      "git_sha": "1ddb17b"
+      "updated_at": "2026-04-10T18:32:00+07:00",
+      "git_sha": "53d7480"
     },
     {
       "id": "loop-02-hcmc-delivery-digital-twin",
@@ -38,8 +38,8 @@
         "có map trạng thái zone/corridor đủ tốt để feed continuation và positioning",
         "feature path giữa graph substrate và route scoring rõ ràng, không còn mơ hồ"
       ],
-      "updated_at": "2026-04-10T00:08:52+07:00",
-      "git_sha": "1ddb17b"
+      "updated_at": "2026-04-10T18:32:00+07:00",
+      "git_sha": "53d7480"
     },
     {
       "id": "loop-03-recalibrate-route-core-tr-n-feature-bigdata-first",
@@ -58,8 +58,8 @@
         "route core tận dụng được pickup friction, reachability, drift và slowdown để chọn plan tốt hơn",
         "ablation của các lane chính tạo delta rõ hơn"
       ],
-      "updated_at": "2026-04-10T00:08:52+07:00",
-      "git_sha": "1ddb17b"
+      "updated_at": "2026-04-10T18:32:00+07:00",
+      "git_sha": "53d7480"
     },
     {
       "id": "loop-04-evidence-spine-v-warehouse-kpi",
@@ -78,8 +78,8 @@
         "có clean slice, traffic heavy slice và weather heavy slice đọc được từ warehouse",
         "champion/challenger promotion có evidence rõ ràng"
       ],
-      "updated_at": "2026-04-10T00:08:52+07:00",
-      "git_sha": "1ddb17b"
+      "updated_at": "2026-04-10T18:32:00+07:00",
+      "git_sha": "53d7480"
     },
     {
       "id": "loop-05-route-quality-cleanup-sau-khi-c-feature-backbone-th-t",
@@ -98,8 +98,8 @@
         "clean regime mạnh hơn một cách ổn định",
         "sau đó mới quay lại các bucket khó như heavy rain lunch, night off peak, shortage regime"
       ],
-      "updated_at": "2026-04-10T00:08:52+07:00",
-      "git_sha": "1ddb17b"
+      "updated_at": "2026-04-10T18:32:00+07:00",
+      "git_sha": "53d7480"
     }
   ]
 }

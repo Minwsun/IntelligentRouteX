@@ -61,6 +61,7 @@ public final class JsonlDispatchFactSink implements DispatchFactSink {
 
     private synchronized void append(Path file, Object payload) {
         try {
+            Files.createDirectories(file.getParent());
             Files.writeString(
                     file,
                     GSON.toJson(payload) + System.lineSeparator(),

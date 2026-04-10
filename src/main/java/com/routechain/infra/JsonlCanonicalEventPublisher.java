@@ -36,6 +36,7 @@ public final class JsonlCanonicalEventPublisher implements CanonicalEventPublish
                 payload
         );
         try {
+            Files.createDirectories(eventTapeFile.getParent());
             Files.writeString(
                     eventTapeFile,
                     GSON.toJson(envelope) + System.lineSeparator(),
