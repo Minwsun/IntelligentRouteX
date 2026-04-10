@@ -46,6 +46,8 @@ public final class BenchmarkArtifactWriter {
     private static final Path CERTIFICATION_CSV = ROOT.resolve("route_ai_certification.csv");
     private static final Path REPO_CERTIFICATION_CSV = ROOT.resolve("repo_intelligence_certification.csv");
     private static final Path ROUTE_INTELLIGENCE_VERDICT_CSV = ROOT.resolve("route_intelligence_verdict.csv");
+    private static final Path PUBLIC_RESEARCH_CSV = ROOT.resolve("public_research_benchmark.csv");
+    private static final Path BATCH_INTELLIGENCE_CSV = ROOT.resolve("batch_intelligence_certification.csv");
     private static final Path CITY_TWIN_CSV = CONTROL_ROOM_DIR.resolve("city_twin_cells.csv");
     private static final Path FUTURE_CELL_VALUE_CSV = CONTROL_ROOM_DIR.resolve("future_cell_values.csv");
     private static final Path DRIVER_FUTURE_VALUE_CSV = CONTROL_ROOM_DIR.resolve("driver_future_values.csv");
@@ -575,6 +577,93 @@ public final class BenchmarkArtifactWriter {
         }
     }
 
+    public static void writePublicResearchBenchmarkSummary(PublicResearchBenchmarkSummary summary) {
+        if (summary == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(CERTIFICATION_DIR);
+            Path jsonPath = CERTIFICATION_DIR.resolve(safe(summary.laneName()) + ".json");
+            Path markdownPath = CERTIFICATION_DIR.resolve(safe(summary.laneName()) + ".md");
+            Files.writeString(
+                    jsonPath,
+                    GSON.toJson(summary),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            Files.writeString(
+                    markdownPath,
+                    renderPublicResearchBenchmarkMarkdown(summary),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            appendCsv(
+                    PUBLIC_RESEARCH_CSV,
+                    "laneName,generatedAt,gitRevision,overallPass,familyCount",
+                    String.format(
+                            "%s,%s,%s,%s,%d",
+                            safe(summary.laneName()),
+                            safe(String.valueOf(summary.generatedAt())),
+                            safe(summary.gitRevision()),
+                            Boolean.toString(summary.overallPass()),
+                            summary.familyResults().size()
+                    )
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to write public research benchmark summary", e);
+        }
+    }
+
+    public static void writeBatchIntelligenceCertificationSummary(BatchIntelligenceCertificationSummary summary) {
+        if (summary == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(CERTIFICATION_DIR);
+            Path jsonPath = CERTIFICATION_DIR.resolve(safe(summary.laneName()) + ".json");
+            Path markdownPath = CERTIFICATION_DIR.resolve(safe(summary.laneName()) + ".md");
+            Files.writeString(
+                    jsonPath,
+                    GSON.toJson(summary),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            Files.writeString(
+                    markdownPath,
+                    renderBatchIntelligenceCertificationMarkdown(summary),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            appendCsv(
+                    BATCH_INTELLIGENCE_CSV,
+                    "laneName,generatedAt,gitRevision,batch2SampleCount,contextsWithSingleComparator,contextsWithExtensionComparator,utilityVsSingleMean,utilityVsExtensionMean,marginalDeadheadPerAddedOrderMean,lastDropLandingScoreMean,postDropDemandProbabilityMean,expectedPostCompletionEmptyKmMean,inflationRate,overallPass",
+                    String.format(
+                            "%s,%s,%s,%d,%d,%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%s",
+                            safe(summary.laneName()),
+                            safe(String.valueOf(summary.generatedAt())),
+                            safe(summary.gitRevision()),
+                            summary.batch2SampleCount(),
+                            summary.contextsWithSingleComparator(),
+                            summary.contextsWithExtensionComparator(),
+                            summary.utilityVsSingleMean(),
+                            summary.utilityVsExtensionMean(),
+                            summary.marginalDeadheadPerAddedOrderMean(),
+                            summary.lastDropLandingScoreMean(),
+                            summary.postDropDemandProbabilityMean(),
+                            summary.expectedPostCompletionEmptyKmMean(),
+                            summary.inflationRate(),
+                            Boolean.toString(summary.overallPass())
+                    )
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to write batch intelligence certification summary", e);
+        }
+    }
+
     public static void writeRouteIntelligenceVerdictSummary(RouteIntelligenceVerdictSummary summary) {
         if (summary == null) {
             return;
@@ -1042,6 +1131,73 @@ public final class BenchmarkArtifactWriter {
         return builder.toString();
     }
 
+    private static String renderPublicResearchBenchmarkMarkdown(PublicResearchBenchmarkSummary summary) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# Public Research Benchmark").append(System.lineSeparator()).append(System.lineSeparator());
+        builder.append("- Lane: ").append(summary.laneName()).append(System.lineSeparator());
+        builder.append("- Generated: ").append(summary.generatedAt()).append(System.lineSeparator());
+        builder.append("- Git SHA: ").append(summary.gitRevision()).append(System.lineSeparator());
+        builder.append("- Overall pass: ").append(summary.overallPass()).append(System.lineSeparator());
+        builder.append(System.lineSeparator()).append("## Families").append(System.lineSeparator());
+        for (ResearchBenchmarkFamilyResult family : summary.familyResults()) {
+            builder.append("- ").append(family.familyId())
+                    .append(": pass=").append(family.pass())
+                    .append(" samples=").append(family.sampleCount())
+                    .append(" gain=").append(String.format("%.2f", family.overallGainPercentMean()))
+                    .append(" completion=").append(String.format("%+.2f", family.completionDeltaMean()))
+                    .append(" deadhead=").append(String.format("%+.2f", family.deadheadDeltaMean()))
+                    .append(" postDrop=").append(String.format("%+.2f", family.postDropDeltaMean()))
+                    .append(" safety=").append(String.format("%.1f%%", family.safetyPassRate()))
+                    .append(System.lineSeparator());
+            for (String note : family.notes()) {
+                builder.append("  - ").append(note).append(System.lineSeparator());
+            }
+        }
+        if (!summary.notes().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
+            for (String note : summary.notes()) {
+                builder.append("- ").append(note).append(System.lineSeparator());
+            }
+        }
+        return builder.toString();
+    }
+
+    private static String renderBatchIntelligenceCertificationMarkdown(BatchIntelligenceCertificationSummary summary) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# Batch Intelligence Certification").append(System.lineSeparator()).append(System.lineSeparator());
+        builder.append("- Lane: ").append(summary.laneName()).append(System.lineSeparator());
+        builder.append("- Generated: ").append(summary.generatedAt()).append(System.lineSeparator());
+        builder.append("- Git SHA: ").append(summary.gitRevision()).append(System.lineSeparator());
+        builder.append("- Overall pass: ").append(summary.overallPass()).append(System.lineSeparator());
+        builder.append("- Batch-2 samples: ").append(summary.batch2SampleCount()).append(System.lineSeparator());
+        builder.append("- Single comparators: ").append(summary.contextsWithSingleComparator()).append(System.lineSeparator());
+        builder.append("- Extension comparators: ").append(summary.contextsWithExtensionComparator()).append(System.lineSeparator());
+        builder.append("- Utility vs single: ").append(String.format("%+.4f", summary.utilityVsSingleMean())).append(System.lineSeparator());
+        builder.append("- Utility vs extension: ").append(String.format("%+.4f", summary.utilityVsExtensionMean())).append(System.lineSeparator());
+        builder.append("- Marginal deadhead per added order: ")
+                .append(String.format("%.4f", summary.marginalDeadheadPerAddedOrderMean()))
+                .append(System.lineSeparator());
+        builder.append("- Last-drop landing: ")
+                .append(String.format("%.4f", summary.lastDropLandingScoreMean()))
+                .append(System.lineSeparator());
+        builder.append("- Post-drop demand: ")
+                .append(String.format("%.4f", summary.postDropDemandProbabilityMean()))
+                .append(System.lineSeparator());
+        builder.append("- Expected empty km: ")
+                .append(String.format("%.4f", summary.expectedPostCompletionEmptyKmMean()))
+                .append(System.lineSeparator());
+        builder.append("- Inflation rate: ")
+                .append(String.format("%.1f%%", summary.inflationRate()))
+                .append(System.lineSeparator());
+        if (!summary.notes().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
+            for (String note : summary.notes()) {
+                builder.append("- ").append(note).append(System.lineSeparator());
+            }
+        }
+        return builder.toString();
+    }
+
     private static String renderRouteIntelligenceVerdictMarkdown(RouteIntelligenceVerdictSummary summary) {
         StringBuilder builder = new StringBuilder();
         builder.append("# AI And Route Intelligence Verdict").append(System.lineSeparator()).append(System.lineSeparator());
@@ -1112,6 +1268,38 @@ public final class BenchmarkArtifactWriter {
                         .append(" deadhead=").append(String.format("%.1f%%", group.deadheadDistanceRatio()))
                         .append(System.lineSeparator());
             }
+        }
+
+        if (summary.publicResearchSummary() != null) {
+            builder.append(System.lineSeparator()).append("## Public Research Benchmark").append(System.lineSeparator());
+            builder.append("- Overall pass: ").append(summary.publicResearchSummary().overallPass())
+                    .append(System.lineSeparator());
+            for (ResearchBenchmarkFamilyResult family : summary.publicResearchSummary().familyResults()) {
+                builder.append("- ").append(family.familyId())
+                        .append(": pass=").append(family.pass())
+                        .append(" samples=").append(family.sampleCount())
+                        .append(" gain=").append(String.format("%.2f", family.overallGainPercentMean()))
+                        .append(" completion=").append(String.format("%+.2f", family.completionDeltaMean()))
+                        .append(" deadhead=").append(String.format("%+.2f", family.deadheadDeltaMean()))
+                        .append(System.lineSeparator());
+            }
+        }
+
+        if (summary.batchIntelligenceSummary() != null) {
+            builder.append(System.lineSeparator()).append("## Batch Intelligence").append(System.lineSeparator());
+            builder.append("- Overall pass: ").append(summary.batchIntelligenceSummary().overallPass())
+                    .append(System.lineSeparator());
+            builder.append("- Batch-2 samples: ").append(summary.batchIntelligenceSummary().batch2SampleCount())
+                    .append(System.lineSeparator());
+            builder.append("- Utility vs single: ")
+                    .append(String.format("%+.4f", summary.batchIntelligenceSummary().utilityVsSingleMean()))
+                    .append(System.lineSeparator());
+            builder.append("- Utility vs extension: ")
+                    .append(String.format("%+.4f", summary.batchIntelligenceSummary().utilityVsExtensionMean()))
+                    .append(System.lineSeparator());
+            builder.append("- Inflation rate: ")
+                    .append(String.format("%.1f%%", summary.batchIntelligenceSummary().inflationRate()))
+                    .append(System.lineSeparator());
         }
 
         builder.append(System.lineSeparator()).append("## Architecture Evidence").append(System.lineSeparator());

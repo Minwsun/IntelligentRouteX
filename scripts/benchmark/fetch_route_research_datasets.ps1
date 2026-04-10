@@ -12,6 +12,7 @@ if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
 $datasetRoots = @(
     "benchmarks\\vrp\\solomon",
     "benchmarks\\vrp\\homberger",
+    "benchmarks\\vrp\\li-lim-pdptw",
     "benchmarks\\vrp\\amazon-lastmile",
     "benchmarks\\vrp\\hcmc-xedu"
 )
@@ -25,6 +26,7 @@ foreach ($relativePath in $datasetRoots) {
 
 Write-Host "== Route research dataset workspace prepared =="
 Write-Host "Solomon / Homberger : download manually from SINTEF benchmark pages"
+Write-Host "Li & Lim PDPTW      : download manually from SINTEF benchmark pages"
 Write-Host "Xe Du HCMC          : download manually from Kaggle"
 
 if ($FetchAmazonLastMile) {

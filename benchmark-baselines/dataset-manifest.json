@@ -20,6 +20,15 @@
       "notes": "Use as scale-up academic benchmark."
     },
     {
+      "datasetId": "li-lim-pdptw",
+      "displayName": "Li & Lim PDPTW benchmark",
+      "sourceUrl": "https://www.sintef.no/projectweb/top/pdptw/li-lim-benchmark/",
+      "localPath": "benchmarks/vrp/li-lim-pdptw",
+      "acquisition": "manual-download",
+      "usage": "Tier A pickup-and-delivery benchmark for pairing quality, precedence feasibility, and shared-route detour control",
+      "notes": "Use to prove batching and pickup-delivery pairing quality, not as a direct food-delivery superiority claim."
+    },
+    {
       "datasetId": "amazon-last-mile-2021",
       "displayName": "Amazon Last Mile Routing Challenge 2021",
       "sourceUrl": "s3://amazon-last-mile-challenges/almrrc2021",

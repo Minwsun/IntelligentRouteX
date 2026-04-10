@@ -141,6 +141,30 @@ tasks.register<JavaExec>("researchBenchmark") {
     args("research")
 }
 
+val publicResearchBenchmarkCertificationSummary by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Summarizes public research benchmark evidence across benchmark families."
+    mainClass.set("com.routechain.simulation.PublicResearchBenchmarkCertificationRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("certification")
+}
+
+val batchIntelligenceCertificationSummary by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Certifies that selected batch-2 plans beat local comparators."
+    mainClass.set("com.routechain.simulation.BatchIntelligenceCertificationRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("certification")
+}
+
+publicResearchBenchmarkCertificationSummary.configure {
+    mustRunAfter("researchBenchmark")
+}
+
+batchIntelligenceCertificationSummary.configure {
+    mustRunAfter("scenarioBatchCertification")
+}
+
 tasks.register<JavaExec>("counterfactualArena") {
     group = "application"
     mainClass.set("com.routechain.simulation.CounterfactualArenaRunner")
@@ -382,6 +406,8 @@ routeIntelligenceVerdictCertificationSummary.configure {
     mustRunAfter(aiInfluenceAblationCertification)
     mustRunAfter(hybridBenchmarkTrackA)
     mustRunAfter(scenarioBatchCertification)
+    mustRunAfter(publicResearchBenchmarkCertificationSummary)
+    mustRunAfter(batchIntelligenceCertificationSummary)
 }
 
 tasks.register("routeAiCertificationSmoke") {
@@ -449,6 +475,9 @@ tasks.register("routeIntelligenceVerdictCertification") {
     dependsOn("routeIntelligenceVerdictSmoke")
     dependsOn(scenarioBatchCertification)
     dependsOn(hybridBenchmarkTrackA)
+    dependsOn("researchBenchmark")
+    dependsOn(publicResearchBenchmarkCertificationSummary)
+    dependsOn(batchIntelligenceCertificationSummary)
     dependsOn(aiInfluenceAblationCertification)
     dependsOn(routeIntelligenceVerdictCertificationSummary)
 }

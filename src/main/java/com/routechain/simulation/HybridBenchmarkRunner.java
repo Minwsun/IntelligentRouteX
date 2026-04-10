@@ -18,7 +18,7 @@ import java.util.function.ToDoubleFunction;
 /**
  * Hybrid benchmark harness:
  * 1) Track A: production-realism multi-seed stress runs.
- * 2) Track B: research-standard adapter for Solomon/Homberger-style instances.
+ * 2) Track B: research-standard adapter for Solomon/Homberger/Li-Lim-style instances.
  */
 public final class HybridBenchmarkRunner {
 
@@ -127,7 +127,7 @@ public final class HybridBenchmarkRunner {
             System.out.println("=================================================");
             List<BenchmarkCaseSpec> researchCases = buildResearchCases();
             if (researchCases.isEmpty()) {
-                System.out.println("[HybridBenchmark] No Solomon/Homberger files found under "
+                System.out.println("[HybridBenchmark] No Solomon/Homberger/Li-Lim files found under "
                         + RESEARCH_ROOT + ". Track B skipped.");
             } else {
                 for (BenchmarkCaseSpec spec : researchCases) {
@@ -186,6 +186,7 @@ public final class HybridBenchmarkRunner {
         List<BenchmarkCaseSpec> cases = new ArrayList<>();
         cases.addAll(buildResearchCasesForFamily("solomon"));
         cases.addAll(buildResearchCasesForFamily("homberger"));
+        cases.addAll(buildResearchCasesForFamily("li-lim-pdptw"));
         return cases;
     }
 
@@ -248,6 +249,15 @@ public final class HybridBenchmarkRunner {
         }
         if (upper.startsWith("C")) {
             return new ResearchProfile("clustered_customers", "c", 1400, 25, 0.96, 0.38, WeatherProfile.CLEAR);
+        }
+        if ("li-lim-pdptw".equalsIgnoreCase(family)) {
+            if (upper.startsWith("LC")) {
+                return new ResearchProfile("pickup_delivery_clustered", "lc", 1500, 25, 1.02, 0.42, WeatherProfile.CLEAR);
+            }
+            if (upper.startsWith("LR")) {
+                return new ResearchProfile("pickup_delivery_random", "lr", 1600, 50, 1.12, 0.52, WeatherProfile.CLEAR);
+            }
+            return new ResearchProfile("pickup_delivery_mixed", "ll", 1600, 50, 1.08, 0.50, WeatherProfile.LIGHT_RAIN);
         }
         if ("homberger".equalsIgnoreCase(family)) {
             return new ResearchProfile("large_scale_timewindow", "h", 1800, 50, 1.25, 0.66, WeatherProfile.LIGHT_RAIN);

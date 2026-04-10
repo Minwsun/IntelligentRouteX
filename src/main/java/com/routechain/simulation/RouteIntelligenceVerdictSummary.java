@@ -27,6 +27,8 @@ public record RouteIntelligenceVerdictSummary(
         int requiredAblationCount,
         RouteAiCertificationSummary routeHotPathSummary,
         RepoIntelligenceCertificationSummary repoCertificationSummary,
+        PublicResearchBenchmarkSummary publicResearchSummary,
+        BatchIntelligenceCertificationSummary batchIntelligenceSummary,
         List<AiComponentEvidence> architectureEvidence,
         List<PolicyAblationResult> ablationEvidence,
         List<String> blockers,

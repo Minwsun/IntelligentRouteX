@@ -40,6 +40,8 @@ public final class RouteIntelligenceVerdictRunner {
                 : "smoke";
         RouteAiCertificationSummary routeSummary = ensureRouteSummary();
         RepoIntelligenceCertificationSummary repoSummary = ensureRepoSummary(laneName);
+        PublicResearchBenchmarkSummary publicResearchSummary = ensurePublicResearchSummary(laneName);
+        BatchIntelligenceCertificationSummary batchSummary = ensureBatchIntelligenceSummary(laneName);
         List<AiComponentEvidence> architectureEvidence = auditOmegaArchitecture();
         List<PolicyAblationResult> ablationEvidence = readAblationEvidence(laneName);
 
@@ -82,9 +84,20 @@ public final class RouteIntelligenceVerdictRunner {
                 ablationEvidencePass,
                 materialAblationCount,
                 coreModelImpactDetected);
-        String routingVerdict = determineRoutingVerdict(laneName, repoSummary);
-        String confidence = determineConfidence(laneName, architectureAuditPass, ablationEvidencePass);
-        String claimReadiness = determineClaimReadiness(aiVerdict, routingVerdict, confidence, repoSummary);
+        String routingVerdict = determineRoutingVerdict(laneName, repoSummary, publicResearchSummary, batchSummary);
+        String confidence = determineConfidence(
+                laneName,
+                architectureAuditPass,
+                ablationEvidencePass,
+                publicResearchSummary,
+                batchSummary);
+        String claimReadiness = determineClaimReadiness(
+                aiVerdict,
+                routingVerdict,
+                confidence,
+                repoSummary,
+                publicResearchSummary,
+                batchSummary);
 
         if (!architectureAuditPass) {
             blockers.add("architecture audit did not find every required live-path component");
@@ -95,6 +108,12 @@ public final class RouteIntelligenceVerdictRunner {
         if (isLegacyUnderperforming(repoSummary)) {
             blockers.add("Omega still underperforms Legacy on at least one major reference delta");
         }
+        if (requiresDeepEvidence(laneName) && (publicResearchSummary == null || !publicResearchSummary.overallPass())) {
+            blockers.add("public research benchmark evidence is missing or failing");
+        }
+        if (requiresDeepEvidence(laneName) && (batchSummary == null || !batchSummary.overallPass())) {
+            blockers.add("batch intelligence certification is missing or failing");
+        }
         if ("smoke".equals(laneName)) {
             blockers.add("only smoke evidence is present; certification-grade confidence needs the certification lane");
         }
@@ -102,6 +121,12 @@ public final class RouteIntelligenceVerdictRunner {
         List<String> notes = new ArrayList<>();
         notes.add("route hot-path smoke verdict=" + (routeSummary.overallPass() ? "PASS" : "FAIL"));
         notes.add("repo lane verdict=" + repoSummary.overallVerdict());
+        if (publicResearchSummary != null) {
+            notes.add("public research benchmark overallPass=" + publicResearchSummary.overallPass());
+        }
+        if (batchSummary != null) {
+            notes.add("batch intelligence overallPass=" + batchSummary.overallPass());
+        }
         notes.add("required components=" + detectedRequiredComponentCount + "/" + requiredComponentCount);
         notes.add("material ablations=" + materialAblationCount + "/" + REQUIRED_ABLATION_POLICIES.size());
         if (repoSummary.legacyReference() != null) {
@@ -128,6 +153,8 @@ public final class RouteIntelligenceVerdictRunner {
                 REQUIRED_ABLATION_POLICIES.size(),
                 routeSummary,
                 repoSummary,
+                publicResearchSummary,
+                batchSummary,
                 architectureEvidence,
                 ablationEvidence,
                 blockers,
@@ -164,6 +191,36 @@ public final class RouteIntelligenceVerdictRunner {
             }
         }
         return readRequiredJson(path, RepoIntelligenceCertificationSummary.class, "repo intelligence summary");
+    }
+
+    private static PublicResearchBenchmarkSummary ensurePublicResearchSummary(String laneName) {
+        if (!requiresDeepEvidence(laneName)) {
+            return null;
+        }
+        Path path = CERTIFICATION_DIR.resolve("public-research-benchmark-" + laneName + ".json");
+        if (Files.notExists(path)) {
+            try {
+                PublicResearchBenchmarkCertificationRunner.main(new String[]{laneName});
+            } catch (Exception ignored) {
+                // Summary is written before failure is thrown.
+            }
+        }
+        return readRequiredJson(path, PublicResearchBenchmarkSummary.class, "public research benchmark summary");
+    }
+
+    private static BatchIntelligenceCertificationSummary ensureBatchIntelligenceSummary(String laneName) {
+        if (!requiresDeepEvidence(laneName)) {
+            return null;
+        }
+        Path path = CERTIFICATION_DIR.resolve("batch-intelligence-certification-" + laneName + ".json");
+        if (Files.notExists(path)) {
+            try {
+                BatchIntelligenceCertificationRunner.main(new String[]{laneName});
+            } catch (Exception ignored) {
+                // Summary is written before failure is thrown.
+            }
+        }
+        return readRequiredJson(path, BatchIntelligenceCertificationSummary.class, "batch intelligence summary");
     }
 
     private static List<AiComponentEvidence> auditOmegaArchitecture() {
@@ -263,7 +320,9 @@ public final class RouteIntelligenceVerdictRunner {
     }
 
     private static String determineRoutingVerdict(String laneName,
-                                                  RepoIntelligenceCertificationSummary repoSummary) {
+                                                  RepoIntelligenceCertificationSummary repoSummary,
+                                                  PublicResearchBenchmarkSummary publicResearchSummary,
+                                                  BatchIntelligenceCertificationSummary batchSummary) {
         if (repoSummary == null
                 || !repoSummary.overallPass()
                 || repoSummary.routeQualityGate() == null
@@ -274,6 +333,11 @@ public final class RouteIntelligenceVerdictRunner {
                 || !repoSummary.stressSafetyGate().pass()) {
             return "NO";
         }
+        if (requiresDeepEvidence(laneName)
+                && (publicResearchSummary == null || !publicResearchSummary.overallPass()
+                || batchSummary == null || !batchSummary.overallPass())) {
+            return "PARTIAL";
+        }
         if ("smoke".equals(laneName) || isLegacyUnderperforming(repoSummary)) {
             return "PARTIAL";
         }
@@ -282,12 +346,20 @@ public final class RouteIntelligenceVerdictRunner {
 
     private static String determineConfidence(String laneName,
                                               boolean architectureAuditPass,
-                                              boolean ablationEvidencePass) {
+                                              boolean ablationEvidencePass,
+                                              PublicResearchBenchmarkSummary publicResearchSummary,
+                                              BatchIntelligenceCertificationSummary batchSummary) {
         if (!architectureAuditPass) {
             return "LOW";
         }
         if ("nightly".equals(laneName) || "certification".equals(laneName)) {
-            return ablationEvidencePass ? "HIGH" : "MEDIUM";
+            return ablationEvidencePass
+                    && publicResearchSummary != null
+                    && publicResearchSummary.overallPass()
+                    && batchSummary != null
+                    && batchSummary.overallPass()
+                    ? "HIGH"
+                    : "MEDIUM";
         }
         return ablationEvidencePass ? "MEDIUM" : "LOW";
     }
@@ -295,10 +367,16 @@ public final class RouteIntelligenceVerdictRunner {
     private static String determineClaimReadiness(String aiVerdict,
                                                   String routingVerdict,
                                                   String confidence,
-                                                  RepoIntelligenceCertificationSummary repoSummary) {
+                                                  RepoIntelligenceCertificationSummary repoSummary,
+                                                  PublicResearchBenchmarkSummary publicResearchSummary,
+                                                  BatchIntelligenceCertificationSummary batchSummary) {
         if ("YES".equals(aiVerdict)
                 && "YES".equals(routingVerdict)
                 && "HIGH".equals(confidence)
+                && publicResearchSummary != null
+                && publicResearchSummary.overallPass()
+                && batchSummary != null
+                && batchSummary.overallPass()
                 && !isLegacyUnderperforming(repoSummary)) {
             return "CUSTOMER_READY";
         }
@@ -306,6 +384,10 @@ public final class RouteIntelligenceVerdictRunner {
             return "INTERNAL_ONLY";
         }
         return "REVIEW_REQUIRED";
+    }
+
+    private static boolean requiresDeepEvidence(String laneName) {
+        return "certification".equals(laneName) || "nightly".equals(laneName);
     }
 
     private static boolean isLegacyUnderperforming(RepoIntelligenceCertificationSummary repoSummary) {

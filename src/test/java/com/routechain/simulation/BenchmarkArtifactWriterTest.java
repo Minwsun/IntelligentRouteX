@@ -290,6 +290,58 @@ class BenchmarkArtifactWriterTest {
     }
 
     @Test
+    void shouldPersistPublicResearchAndBatchIntelligenceArtifacts() throws IOException {
+        Path root = Path.of("build", "routechain-apex", "benchmarks");
+        deleteRecursively(root);
+
+        PublicResearchBenchmarkSummary researchSummary = new PublicResearchBenchmarkSummary(
+                BenchmarkSchema.VERSION,
+                "public-research-benchmark-certification",
+                Instant.parse("2026-04-10T00:00:00Z"),
+                "abc123",
+                List.of(new ResearchBenchmarkFamilyResult(
+                        "li-lim-pdptw",
+                        3,
+                        0.8,
+                        0.4,
+                        -0.6,
+                        0.5,
+                        100.0,
+                        true,
+                        List.of()
+                )),
+                true,
+                List.of("all research families healthy")
+        );
+        BatchIntelligenceCertificationSummary batchSummary = new BatchIntelligenceCertificationSummary(
+                BenchmarkSchema.VERSION,
+                "batch-intelligence-certification-certification",
+                Instant.parse("2026-04-10T00:00:00Z"),
+                "abc123",
+                12,
+                12,
+                7,
+                0.12,
+                0.03,
+                1.10,
+                0.72,
+                0.68,
+                1.40,
+                8.0,
+                true,
+                List.of("batch utility remains positive")
+        );
+
+        BenchmarkArtifactWriter.writePublicResearchBenchmarkSummary(researchSummary);
+        BenchmarkArtifactWriter.writeBatchIntelligenceCertificationSummary(batchSummary);
+
+        assertTrue(Files.exists(root.resolve("certification").resolve("public-research-benchmark-certification.json")));
+        assertTrue(Files.exists(root.resolve("certification").resolve("batch-intelligence-certification-certification.json")));
+        assertTrue(Files.readString(root.resolve("public_research_benchmark.csv")).contains("public-research-benchmark-certification"));
+        assertTrue(Files.readString(root.resolve("batch_intelligence_certification.csv")).contains("batch-intelligence-certification-certification"));
+    }
+
+    @Test
     void shouldPersistRouteIntelligenceVerdictArtifacts() throws IOException {
         Path root = Path.of("build", "routechain-apex", "benchmarks");
         deleteRecursively(root);
@@ -360,6 +412,8 @@ class BenchmarkArtifactWriterTest {
                         "PASS_WITH_WARNING",
                         List.of("smoke lane green")
                 ),
+                null,
+                null,
                 List.of(new AiComponentEvidence(
                         "Neural route prior",
                         true,
