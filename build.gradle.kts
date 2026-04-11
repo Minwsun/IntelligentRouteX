@@ -199,6 +199,20 @@ tasks.register<JavaExec>("performanceBenchmarkSmoke") {
     args("smoke")
 }
 
+tasks.register<JavaExec>("compactBenchmark") {
+    group = "application"
+    description = "Runs the compact core benchmark lane against the nearest-greedy baseline."
+    mainClass.set("com.routechain.simulation.CompactBenchmarkRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
+tasks.register<JavaExec>("compactVerdict") {
+    group = "verification"
+    description = "Runs the compact verdict lane and writes JSON/MD artifacts."
+    mainClass.set("com.routechain.simulation.CompactVerdictRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 val routeAiRegressionSmoke by tasks.registering(Test::class) {
     group = "verification"
     description = "Runs the route/AI smoke regression suite."

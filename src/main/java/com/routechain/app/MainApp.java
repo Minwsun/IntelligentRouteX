@@ -7,6 +7,7 @@ import com.routechain.infra.EventBus;
 import com.routechain.infra.Events;
 import com.routechain.infra.MapBridge;
 import com.routechain.infra.RouteCoreRuntime;
+import com.routechain.core.CompactEvidenceBundle;
 import com.routechain.simulation.JavaFxDemoScenarioSpec;
 import com.routechain.simulation.SimulationEngine;
 import com.routechain.simulation.SmartDemo3x10Scenario;
@@ -45,6 +46,7 @@ public class MainApp extends Application {
 
     // ── Observable state ────────────────────────────────────────────────
     private final StringProperty simStatusText = new SimpleStringProperty("IDLE");
+    private final StringProperty dispatchModeText = new SimpleStringProperty("OMEGA");
     private final DoubleProperty onTimePercent = new SimpleDoubleProperty(100);
     private final DoubleProperty deadheadPercent = new SimpleDoubleProperty(0);
     private final DoubleProperty netPerHour = new SimpleDoubleProperty(0);
@@ -55,6 +57,7 @@ public class MainApp extends Application {
     private final StringProperty aiInsightTitle = new SimpleStringProperty("AI INSIGHT");
     private final StringProperty aiInsightText = new SimpleStringProperty("System ready. Press RUN SIMULATION to begin.");
     private final StringProperty aiInsightDelta = new SimpleStringProperty("");
+    private final StringProperty compactWeightText = new SimpleStringProperty("Compact weights idle");
     private final ObservableList<String> alertMessages = FXCollections.observableArrayList();
     private final BooleanProperty showDriverPanel = new SimpleBooleanProperty(false);
     private final StringProperty selectedDriverName = new SimpleStringProperty("");
@@ -362,7 +365,11 @@ public class MainApp extends Application {
         Label liveBadge = new Label("LIVE");
         liveBadge.getStyleClass().add("badge-live");
 
-        topRow.getChildren().addAll(clock, pmLabel, liveBadge);
+        Label modeBadge = new Label();
+        modeBadge.getStyleClass().add("badge-info");
+        modeBadge.textProperty().bind(dispatchModeText);
+
+        topRow.getChildren().addAll(clock, pmLabel, liveBadge, modeBadge);
 
         // Active counts
         HBox counters = new HBox(16);
@@ -375,7 +382,20 @@ public class MainApp extends Application {
         driversLabel.textProperty().bind(activeDriversCount.asString("🏍 %d drivers"));
         counters.getChildren().addAll(ordersLabel, driversLabel);
 
-        return createCollapsibleCard("⏱", "SIM CLOCK", topRow, counters, false);
+        ChoiceBox<SimulationEngine.DispatchMode> modePicker = new ChoiceBox<>(
+                FXCollections.observableArrayList(SimulationEngine.DispatchMode.values()));
+        modePicker.setValue(simEngine.getDispatchMode());
+        modePicker.setMaxWidth(Double.MAX_VALUE);
+        modePicker.getStyleClass().add("sim-btn");
+        modePicker.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, newValue) -> {
+            if (newValue != null) {
+                simEngine.setDispatchMode(newValue);
+                dispatchModeText.set(newValue.name());
+            }
+        });
+
+        VBox fullContent = new VBox(10, counters, modePicker);
+        return createCollapsibleCard("⏱", "SIM CLOCK", topRow, fullContent, false);
     }
 
     private VBox createAiInsightCard() {
@@ -394,7 +414,13 @@ public class MainApp extends Application {
         delta.getStyleClass().add("metric-delta-positive");
         delta.textProperty().bind(aiInsightDelta);
 
-        VBox fullContent = new VBox(8, body, delta);
+        Label compactWeights = new Label();
+        compactWeights.getStyleClass().add("label-eyebrow");
+        compactWeights.setWrapText(true);
+        compactWeights.setMaxWidth(240);
+        compactWeights.textProperty().bind(compactWeightText);
+
+        VBox fullContent = new VBox(8, body, delta, compactWeights);
         return createCollapsibleCard("🧠", "AI INSIGHTS", eyebrow, fullContent, false);
     }
 
@@ -1009,6 +1035,41 @@ public class MainApp extends Application {
             // FLUSH: ONE single JS command with ALL accumulated data
             // ════════════════════════════════════════════════════════
             mapBridge.flushFrame();
+
+            Platform.runLater(() -> {
+                dispatchModeText.set(simEngine.getDispatchMode().name());
+                if (simEngine.getDispatchMode() != SimulationEngine.DispatchMode.COMPACT) {
+                    compactWeightText.set("Compact weights idle");
+                    return;
+                }
+
+                CompactEvidenceBundle evidence = simEngine.getLatestCompactEvidence();
+                if (evidence != null && !evidence.explanations().isEmpty()) {
+                    aiInsightTitle.set("COMPACT DECISION");
+                    aiInsightText.set(evidence.explanations().get(0).summary());
+                    if (evidence.latestResolution() != null) {
+                        aiInsightDelta.set(String.format(
+                                "reward %.2f | post-drop %s",
+                                evidence.latestResolution().outcomeVector().totalReward(),
+                                evidence.latestResolution().postDropHit() ? "hit" : "miss"));
+                    } else {
+                        aiInsightDelta.set("awaiting delivered/cancel + post-drop outcome");
+                    }
+                }
+
+                if (evidence != null && evidence.weightSnapshotAfter() != null) {
+                    double[] clearWeights = evidence.weightSnapshotAfter()
+                            .weights()
+                            .getOrDefault(com.routechain.core.RegimeKey.CLEAR_NORMAL, new double[0]);
+                    if (clearWeights.length >= 3) {
+                        compactWeightText.set(String.format(
+                                "w_clear: on-time %.2f | deadhead %.2f | bundle %.2f",
+                                clearWeights[0],
+                                clearWeights[1],
+                                clearWeights[2]));
+                    }
+                }
+            });
         });
 
         // Metrics snapshot → KPI UI
@@ -1026,6 +1087,9 @@ public class MainApp extends Application {
         // AI Insight
         eventBus.subscribe(Events.AiInsight.class, e -> {
             Platform.runLater(() -> {
+                if (simEngine.getDispatchMode() == SimulationEngine.DispatchMode.COMPACT) {
+                    return;
+                }
                 aiInsightTitle.set(e.title());
                 aiInsightText.set(e.description());
                 aiInsightDelta.set(e.recommendation());

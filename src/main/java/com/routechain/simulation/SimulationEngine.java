@@ -1,5 +1,6 @@
 package com.routechain.simulation;
 
+import com.routechain.baseline.NearestGreedyBaseline;
 import com.routechain.domain.*;
 import com.routechain.domain.Enums.*;
 import com.routechain.infra.EventBus;
@@ -7,6 +8,13 @@ import com.routechain.infra.Events.*;
 import com.routechain.infra.DatabaseStorageService;
 import com.routechain.infra.PlatformRuntimeBootstrap;
 import com.routechain.ai.OmegaDispatchAgent;
+import com.routechain.core.CompactCoreAdapter;
+import com.routechain.core.CompactDecisionLedger;
+import com.routechain.core.CompactDecisionResolution;
+import com.routechain.core.CompactDispatchDecision;
+import com.routechain.core.CompactEvidenceBundle;
+import com.routechain.core.CompactSelectedPlanEvidence;
+import com.routechain.core.WeightSnapshot;
 
 import java.time.Instant;
 import java.util.*;
@@ -18,7 +26,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * on a configurable tick loop. All events are published to EventBus.
  */
 public class SimulationEngine {
-    public enum DispatchMode { OMEGA, LEGACY }
+    public enum DispatchMode { OMEGA, LEGACY, COMPACT }
     public enum RouteLatencyMode { SIMULATED_ASYNC, IMMEDIATE }
 
     private final EventBus eventBus = EventBus.getInstance();
@@ -110,10 +118,14 @@ public class SimulationEngine {
     // AI dispatch agent (Omega — learned multi-agent brain)
     private final OmegaDispatchAgent omegaAgent;
     private final DispatchAgent legacyDispatchAgent;
+    private final NearestGreedyBaseline nearestGreedyBaseline = new NearestGreedyBaseline();
+    private final CompactCoreAdapter compactCoreAdapter;
+    private final CompactDecisionLedger compactDecisionLedger = new CompactDecisionLedger();
     private final ReDispatchEngine reDispatchEngine = new ReDispatchEngine();
     private final OsrmRoutingService routingService = new OsrmRoutingService();
     private final DatabaseStorageService dbService = new DatabaseStorageService();
     private volatile DispatchMode dispatchMode = DispatchMode.OMEGA;
+    private volatile boolean legacyNearestGreedyMode = false;
 
     // Enhancements
     private final DriverSupplyEngine driverSupplyEngine = new DriverSupplyEngine();
@@ -131,6 +143,7 @@ public class SimulationEngine {
     private volatile boolean miniDispatchRequested = false;
     private final Map<String, Integer> holdCyclesByDriver = new ConcurrentHashMap<>();
     private final Map<String, Long> postDropIdleTickByDriver = new ConcurrentHashMap<>();
+    private volatile CompactEvidenceBundle latestCompactEvidence = CompactEvidenceBundle.empty();
 
     public SimulationEngine() {
         this(42L);
@@ -159,6 +172,7 @@ public class SimulationEngine {
         
         this.omegaAgent = new OmegaDispatchAgent(regions);
         this.legacyDispatchAgent = new DispatchAgent(regions);
+        this.compactCoreAdapter = new CompactCoreAdapter();
     }
 
     // ── Lifecycle ───────────────────────────────────────────────────────
@@ -255,6 +269,8 @@ public class SimulationEngine {
         miniDispatchRequested = false;
         holdCyclesByDriver.clear();
         postDropIdleTickByDriver.clear();
+        compactDecisionLedger.reset();
+        latestCompactEvidence = CompactEvidenceBundle.empty();
         currentRunId = nextRunId();
         runWallClockStartedNanos = System.nanoTime();
         omegaAgent.setActiveRunId(currentRunId);
@@ -292,6 +308,14 @@ public class SimulationEngine {
     public DispatchMode getDispatchMode() { return dispatchMode; }
     public void setDispatchMode(DispatchMode dispatchMode) {
         this.dispatchMode = dispatchMode == null ? DispatchMode.OMEGA : dispatchMode;
+    }
+    public boolean isLegacyNearestGreedyMode() { return legacyNearestGreedyMode; }
+    public void setLegacyNearestGreedyMode(boolean legacyNearestGreedyMode) {
+        this.legacyNearestGreedyMode = legacyNearestGreedyMode;
+    }
+    public CompactEvidenceBundle getLatestCompactEvidence() { return latestCompactEvidence; }
+    public WeightSnapshot getCurrentCompactWeightSnapshot() {
+        return compactCoreAdapter.core().adaptiveWeightEngine().snapshot();
     }
     public void setOmegaAblationMode(OmegaDispatchAgent.AblationMode ablationMode) {
         omegaAgent.setAblationMode(ablationMode);
@@ -485,6 +509,7 @@ public class SimulationEngine {
                 }
                 moveDrivers();
                 processDeliveries();
+                resolveExpiredCompactDecisions(clock.currentInstant());
                 if (miniDispatchRequested && dispatchMode == DispatchMode.OMEGA) {
                     dispatchPendingOrders(true);
                 }
@@ -799,16 +824,41 @@ public class SimulationEngine {
         }
 
         List<DispatchPlan> selectedPlans;
+        CompactDispatchDecision compactDecision = null;
+        Map<String, CompactSelectedPlanEvidence> compactEvidenceByTrace = Map.of();
         if (dispatchMode == DispatchMode.LEGACY) {
             long dispatchStartedNanos = System.nanoTime();
-            DispatchAgent.DispatchResult result = legacyDispatchAgent.dispatch(
-                    new ArrayList<>(pending), new ArrayList<>(available),
-                    drivers, activeOrders, simulatedHour,
-                    trafficIntensity, weatherProfile);
+            if (legacyNearestGreedyMode) {
+                selectedPlans = nearestGreedyBaseline.dispatch(
+                        new ArrayList<>(pending),
+                        new ArrayList<>(available));
+            } else {
+                DispatchAgent.DispatchResult result = legacyDispatchAgent.dispatch(
+                        new ArrayList<>(pending), new ArrayList<>(available),
+                        drivers, activeOrders, simulatedHour,
+                        trafficIntensity, weatherProfile);
+                selectedPlans = result.plans();
+            }
             long dispatchLatencyMs = (System.nanoTime() - dispatchStartedNanos) / 1_000_000L;
             totalDispatchDecisionLatencyMs += dispatchLatencyMs;
             dispatchDecisionLatencySamples.add(dispatchLatencyMs);
-            selectedPlans = result.plans();
+        } else if (dispatchMode == DispatchMode.COMPACT) {
+            compactDecision = compactCoreAdapter.dispatch(
+                    new ArrayList<>(pending),
+                    new ArrayList<>(available),
+                    new ArrayList<>(regions),
+                    simulatedHour,
+                    trafficIntensity,
+                    weatherProfile,
+                    clock.currentInstant());
+            totalDispatchDecisionLatencyMs += compactDecision.dispatchDecisionLatencyMs();
+            dispatchDecisionLatencySamples.add(compactDecision.dispatchDecisionLatencyMs());
+            selectedPlans = compactDecision.plans();
+            Map<String, CompactSelectedPlanEvidence> evidenceByTrace = new LinkedHashMap<>();
+            for (CompactSelectedPlanEvidence evidence : compactDecision.selectedPlanEvidence()) {
+                evidenceByTrace.put(evidence.traceId(), evidence);
+            }
+            compactEvidenceByTrace = evidenceByTrace;
         } else {
             OmegaDispatchAgent.DispatchResult result = omegaAgent.dispatch(
                     new ArrayList<>(pending), new ArrayList<>(available),
@@ -829,6 +879,19 @@ public class SimulationEngine {
         }
 
         Instant decisionTime = clock.currentInstant();
+        if (dispatchMode == DispatchMode.COMPACT && compactDecision != null) {
+            latestCompactEvidence = new CompactEvidenceBundle(
+                    currentRunId,
+                    dispatchMode.name(),
+                    decisionTime,
+                    compactDecision.selectedPlanEvidence().stream()
+                            .map(CompactSelectedPlanEvidence::bundleId)
+                            .toList(),
+                    compactDecision.explanations(),
+                    compactDecision.weightSnapshotBefore(),
+                    compactDecision.weightSnapshotBefore(),
+                    latestCompactEvidence.latestResolution());
+        }
         // Execute selected plans
         for (DispatchPlan plan : selectedPlans) {
             Driver best = plan.getDriver();
@@ -864,11 +927,14 @@ public class SimulationEngine {
             }
             holdCyclesByDriver.remove(best.getId());
 
-            DispatchPlan executablePlan = maybeAugmentPrePickupPlan(plan);
-            if (executablePlan.getBundleSize() <= plan.getBundleSize()) {
-                DispatchPlan forcedAugmentedPlan = maybeForceMergePrePickupPlan(executablePlan);
-                if (forcedAugmentedPlan.getBundleSize() > executablePlan.getBundleSize()) {
-                    executablePlan = forcedAugmentedPlan;
+            DispatchPlan executablePlan = plan;
+            if (dispatchMode != DispatchMode.COMPACT) {
+                executablePlan = maybeAugmentPrePickupPlan(plan);
+                if (executablePlan.getBundleSize() <= plan.getBundleSize()) {
+                    DispatchPlan forcedAugmentedPlan = maybeForceMergePrePickupPlan(executablePlan);
+                    if (forcedAugmentedPlan.getBundleSize() > executablePlan.getBundleSize()) {
+                        executablePlan = forcedAugmentedPlan;
+                    }
                 }
             }
             if (executablePlan.getBundleSize() > plan.getBundleSize()) {
@@ -894,6 +960,13 @@ public class SimulationEngine {
             if (postDropIdleTick != null
                     && tickCounter.get() - postDropIdleTick <= POST_DROP_HIT_WINDOW_TICKS) {
                 postDropOrderHitCount++;
+                if (dispatchMode == DispatchMode.COMPACT) {
+                    CompactDecisionResolution resolution = compactDecisionLedger.recordPostDropHit(
+                            best.getId(),
+                            tickCounter.get(),
+                            decisionTime);
+                    applyCompactResolution(resolution, decisionTime);
+                }
             }
 
             List<Order> newlyAssignedOrders = new ArrayList<>();
@@ -976,6 +1049,24 @@ public class SimulationEngine {
             }
             if (executablePlan.getBundleSize() >= 3) {
                 visibleBundleThreePlusCount++;
+            }
+            if (dispatchMode == DispatchMode.COMPACT && compactDecision != null) {
+                CompactSelectedPlanEvidence evidence = compactEvidenceByTrace.get(executablePlan.getTraceId());
+                if (evidence != null) {
+                    compactDecisionLedger.recordDecision(
+                            executablePlan.getTraceId(),
+                            best.getId(),
+                            executablePlan.getBundle().bundleId(),
+                            executablePlan.getOrders().stream().map(Order::getId).toList(),
+                            evidence.featureVector(),
+                            evidence.scoreBreakdown(),
+                            compactDecision.weightSnapshotBefore(),
+                            decisionTime,
+                            executablePlan.getPredictedDeadheadKm(),
+                            executablePlan.getCustomerFee(),
+                            executablePlan.getLastDropLandingScore(),
+                            executablePlan.getExpectedPostCompletionEmptyKm());
+                }
             }
 
             if (newlyAssignedOrders.size() > 1) {
@@ -1580,6 +1671,14 @@ public class SimulationEngine {
                             activeOrders.remove(order);
                             eventBus.publish(new OrderDelivered(order.getId()));
                             dbService.saveOrder(order);
+                            if (dispatchMode == DispatchMode.COMPACT
+                                    && order.getDecisionTraceId() != null) {
+                                compactDecisionLedger.recordOrderDelivered(
+                                        order.getDecisionTraceId(),
+                                        order.getId(),
+                                        !order.isLate(),
+                                        order.getQuotedFee());
+                            }
 
                             double etaActual = 0;
                             if (order.getAssignedAt() != null && order.getDeliveredAt() != null) {
@@ -1638,6 +1737,9 @@ public class SimulationEngine {
                     clearLegacyGuardrailDriver(driver);
                     postDropIdleTickByDriver.put(driver.getId(), tickCounter.get());
                     postDropOpportunityCount++;
+                    if (dispatchMode == DispatchMode.COMPACT) {
+                        compactDecisionLedger.markDriverIdle(driver.getId(), tickCounter.get(), simulatedNow);
+                    }
                     miniDispatchRequested = true;
                     eventBus.publish(new DriverStateChanged(driver.getId(),
                                 oldState, DriverState.ONLINE_IDLE));
@@ -1673,12 +1775,24 @@ public class SimulationEngine {
                                     driver.clearRouteWaypoints();
                                     driver.clearPendingRoute();
                                     clearLegacyGuardrailDriver(driver);
+                                    if (dispatchMode == DispatchMode.COMPACT) {
+                                        compactDecisionLedger.markDriverIdle(
+                                                driver.getId(),
+                                                tickCounter.get(),
+                                                simulatedNow);
+                                    }
                                     miniDispatchRequested = true;
                                 }
                             }
                         }
                     eventBus.publish(new OrderCancelled(order.getId(), "customer_cancelled"));
                     dbService.saveOrder(order);
+                    if (dispatchMode == DispatchMode.COMPACT
+                            && order.getDecisionTraceId() != null) {
+                        compactDecisionLedger.recordOrderCancelled(
+                                order.getDecisionTraceId(),
+                                order.getId());
+                    }
 
                     // Omega learning callback
                     if (dispatchMode == DispatchMode.OMEGA) {
@@ -1693,6 +1807,32 @@ public class SimulationEngine {
         activeOrders.removeIf(o -> o.getStatus() == OrderStatus.DELIVERED
                 || o.getStatus() == OrderStatus.CANCELLED
                 || o.getStatus() == OrderStatus.FAILED);
+    }
+
+    private void resolveExpiredCompactDecisions(Instant now) {
+        if (dispatchMode != DispatchMode.COMPACT) {
+            return;
+        }
+        for (CompactDecisionResolution resolution : compactDecisionLedger.expirePostDrop(
+                tickCounter.get(),
+                now,
+                POST_DROP_HIT_WINDOW_TICKS)) {
+            applyCompactResolution(resolution, now);
+        }
+        compactDecisionLedger.clearResolved();
+    }
+
+    private void applyCompactResolution(CompactDecisionResolution resolution, Instant resolvedAt) {
+        if (resolution == null) {
+            return;
+        }
+        compactCoreAdapter.core().adaptiveWeightEngine().recordOutcome(
+                resolution.regimeKey(),
+                resolution.featureVector(),
+                resolution.outcomeVector());
+        WeightSnapshot snapshotAfter = compactCoreAdapter.core().adaptiveWeightEngine().snapshot();
+        CompactDecisionResolution finalized = resolution.withSnapshotAfter(snapshotAfter, resolvedAt);
+        latestCompactEvidence = latestCompactEvidence.withResolution(snapshotAfter, finalized);
     }
 
     private boolean isOmegaPrePickupAugmentableDriver(Driver driver) {
