@@ -3,146 +3,305 @@ doc_id: "working.nextstepplan"
 doc_kind: "temporary_plan"
 canonical: false
 priority: 95
-updated_at: "2026-04-10T18:32:00+07:00"
-git_sha: "53d7480"
-tags: ["next-step", "workstream", "route-core", "phase-plan"]
-depends_on: ["canonical.summarize", "canonical.result"]
+updated_at: "2026-04-11T00:00:00+07:00"
+git_sha: "e2f84a2"
+tags: ["next-step", "app-slice", "route-core", "phase-plan"]
+depends_on: ["canonical.architecture", "canonical.result"]
 bootstrap: true
 ---
 
-# Kế hoạch bước tiếp theo của core route AI
+# Kế hoạch bước tiếp theo: rider/driver map app bám route core hiện có
 
-- Thời gian chốt kế hoạch: `2026-04-09 23:58` (Asia/Saigon)
-- Base SHA: `1ddb17b`
-- Vai trò của file: snapshot hành động tạm thời cho phase kế tiếp, sau khi nhát cắt `OSM/OSRM + self-derived traffic surrogate` đã vào route core
+- Thời gian chốt kế hoạch: `2026-04-11` (Asia/Saigon)
+- Base SHA: `e2f84a2`
+- Vai trò của file: implementation brief tạm thời cho phase biến repo từ control-room + benchmark shell thành app rider/driver map-centric chạy trên runtime thật
 
 ## 1. Mục tiêu phase hiện tại
 
 Mục tiêu chính của phase này là:
 
-> biến nhát cắt `open-source-first road graph + traffic surrogate` thành một `bigdata-first feature backbone` thật sự, đủ mạnh để session AI tiếp theo tiếp tục route research mà không phải thiết kế lại từ đầu.
+> biến repo thành một app delivery demo có rider side, driver side và bản đồ là bề mặt chính, nhưng vẫn giữ route core/runtime hiện có là authority duy nhất cho dispatch và lifecycle.
 
-Điều này phải giữ đúng hai nguyên tắc đã khóa:
+Nguyên tắc bị khóa:
 
-- route core vẫn là nơi ra quyết định cuối
-- big data phải trở thành nơi sinh feature, evidence và model promotion, chứ không chỉ là nơi log để đọc lại sau
+- `RouteCoreRuntime.liveEngine()` là runtime authority cho app flow
+- route core vẫn là nơi ra quyết định dispatch cuối cùng
+- benchmark/evidence vẫn là truth layer
+- agent hoặc LLM chỉ là advisory lane, không phải live dispatch authority
+- `OMEGA` tiếp tục là default runtime reference cho tới khi compact có gate riêng đủ mạnh
+- không tạo dispatch engine thứ hai trong API hay UI
 
 ## 2. Hiện trạng ngắn gọn
 
-Trạng thái benchmark gần nhất đã verify:
+Theo canonical docs và repo hiện tại:
 
 - `AI Verdict = YES`
 - `Routing Verdict = PARTIAL`
-- `route-ai-certification-smoke = PASS`
+- `Claim Readiness = INTERNAL_ONLY`
 
-Nhát cắt vừa xong đã thêm:
+Repo đã có ba lớp tái dùng được:
 
-- `RoadGraphProvider`
-- `OsmOsrmGraphProvider`
-- `TrafficFeatureEstimator`
-- route features cho pickup friction, landing reachability, corridor congestion, drift và uncertainty
+- runtime/dispatch layer:
+  - `RouteCoreRuntime`
+  - `SimulationEngine`
+  - compact lane đang tồn tại và có evidence/benchmark lane riêng
+- app/backend layer:
+  - `UserOrderController`
+  - `DriverController`
+  - `UserOrderingService`
+  - `DriverOperationsService`
+  - `DispatchOrchestratorService`
+  - `RealtimeStreamService`
+- map/tooling layer:
+  - JavaFX `MainApp`
+  - native map stack trong desktop app
 
-Điểm còn thiếu:
+Điểm lệch chính hiện tại:
 
-- feature hiện mới ở mức surrogate từ graph + field state
-- chưa có full telemetry-driven streaming spine đi vào Redis/ClickHouse/Iceberg/MLflow
-- evidence rộng hơn vẫn còn blocker như `heavy-rain lunch`
+- desktop output vẫn thiên về control room, không phải product surface rider/driver
+- backend app flow hiện chưa bridge vào runtime authority thật
+- `DispatchOrchestratorService` vẫn đang làm screened offer heuristic, chưa nối vào compact/runtime dispatch path
+- realtime hiện đẩy event/order/offer tốt, nhưng chưa có read model map-centric đủ cho app surface
 
-Truth-layer note:
+## 3. Kiến trúc mục tiêu bị khóa
 
-- `openPickupDemand` và `committedPickupPressure` đã được tách
-- stale pickup hotspot phải tiếp tục được giữ như regression guard, không phải bug mở chắc chắn
+### 3.1 Product surfaces
 
-## 3. Workstreams theo thứ tự cứng
+Ba surface chính của phase này:
 
-### Workstream 1: Streaming traffic surrogate từ telemetry thật
+- `Rider Map Web`
+- `Driver Map Web`
+- `Ops / Control Room`
 
-Mục tiêu:
+Vai trò:
 
-- đưa `driver_progress_events`, actual trip duration, pickup arrival, offer delay và weather snapshots vào Kafka/Flink
-- biến traffic surrogate từ logic nội bộ thành feature sống theo zone và corridor
-- giữ route core chỉ đọc feature store nội bộ, không gọi external traffic API trực tiếp
+- `Rider Map Web` là output sản phẩm chính cho user đặt đơn và theo dõi đơn
+- `Driver Map Web` là output sản phẩm chính cho tài xế nhận đơn và chạy lifecycle
+- `Ops / Control Room` chỉ còn là tooling để đối chiếu runtime, benchmark và evidence
 
-Kết quả mong muốn:
+### 3.2 Authority split
 
-- có `corridor_live_stats` và `zone_feature_snapshots` sinh ra từ dữ liệu runtime thật
-- Redis có feature nóng cho route core
-- ClickHouse và Iceberg có lịch sử đủ để replay và train
+- compact core:
+  - compact hot path duy nhất cho lane compact
+  - soft scoring engine duy nhất là `AdaptiveWeightEngine`
+- simulation/runtime:
+  - authority cho movement, trip progression, state transitions và live dispatch coordination
+- API:
+  - orchestration và transport
+  - không tự chấm điểm hoặc chọn driver
+- web UI:
+  - presentation, user input và realtime rendering
+  - không được nhúng dispatch logic
 
-### Workstream 2: HCMC delivery digital twin
+### 3.3 Dispatch path cho app
 
-Mục tiêu:
+Luồng đúng cho app:
 
-- materialize zone, corridor, merchant cluster và landing zone theo hướng vận hành delivery
-- gắn các feature như open demand, active supply, pickup friction, slowdown và post-drop opportunity vào digital twin
-- làm cho route core nhìn được trạng thái thành phố, không chỉ nhìn từng order riêng lẻ
+1. rider tạo order qua Spring API
+2. API bridge order vào runtime authority
+3. runtime/route core quyết định assignment path
+4. driver nhận offer hoặc task từ cùng truth source đó
+5. driver accept/pickup/deliver cập nhật cùng trip state mà runtime, API và UI cùng đọc
 
-Kết quả mong muốn:
+Không được làm các hướng sau:
 
-- có map trạng thái zone/corridor đủ tốt để feed continuation và positioning
-- feature path giữa graph substrate và route scoring rõ ràng, không còn mơ hồ
+- controller tự chọn driver bằng heuristic riêng
+- tạo một dispatch service song song chỉ phục vụ web app
+- đẩy toàn bộ quyết định về offer broker
 
-### Workstream 3: Recalibrate route core trên feature bigdata-first
+## 4. Phased execution
 
-Mục tiêu:
+### Phase 0 — Audit và target lock
 
-- retrain hoặc recalibrate ETA, route value, batch value, continuation và positioning trên feature mới
-- giảm bias “quá dè chừng” trong `CLEAR` nhưng vẫn giữ được safety
-- làm cho pickup, drop và deadhead được cải thiện nhờ data-informed scoring chứ không chỉ heuristic
+Việc phải làm:
 
-Kết quả mong muốn:
+- đọc canonical docs và memory pack bắt buộc
+- audit runtime, API, realtime và map entrypoints hiện có
+- khóa lại implementation brief này
+- liệt kê rõ blockers từ trạng thái hiện tại tới app slice
 
-- route-ai-certification-smoke tiếp tục `PASS`
-- route core tận dụng được pickup friction, reachability, drift và slowdown để chọn plan tốt hơn
-- ablation của các lane chính tạo delta rõ hơn
+Definition of done:
 
-### Workstream 4: Evidence spine và warehouse KPI
+- plan này phản ánh đúng target app slice
+- xác định rõ thứ gì tái dùng, thứ gì cần bridge, thứ gì chỉ còn là secondary tooling
+- commit và push phase audit
 
-Mục tiêu:
+### Phase 1 — Compact/runtime stabilization
 
-- candidate-level facts đủ cho training, audit và report
-- ClickHouse query được KPI thật cho benchmark slices
-- MLflow join được model version, feature schema và benchmark result
+Việc phải làm:
 
-Kết quả mong muốn:
+- harden compact lane tới mức app-usable
+- giữ compact mini-dispatch, matcher no-conflict, plan type metadata, evidence và snapshot/rollback đúng
+- chạy targeted compact tests
+- chạy compact smoke verdict và giữ artifact
+- nếu verdict tổng vẫn fail thì phải ghi failure mode rõ, không được tô hồng
 
-- report không còn phụ thuộc vào prose thủ công làm nguồn thật duy nhất
-- có clean slice, traffic-heavy slice và weather-heavy slice đọc được từ warehouse
-- champion/challenger promotion có evidence rõ ràng
+Definition of done:
 
-### Workstream 5: Route-quality cleanup sau khi có feature backbone thật
+- compact lane chạy ổn định cho demo scope hẹp
+- targeted compact tests pass
+- smoke verdict chạy được và sinh artifact
 
-Mục tiêu:
+### Phase 2 — Runtime-backed app backend
 
-- dùng feature backbone mới để quay lại cleanup các bucket route-quality còn yếu
-- ưu tiên giảm cancellation, pickup deadhead và empty-after-drop trong môi trường thuận lợi trước
-- chỉ quay lại heavy-rain khi lane clean và bigdata spine đã ổn hơn
+Việc phải làm:
 
-Kết quả mong muốn:
+- refactor `DispatchOrchestratorService` để bridge vào runtime authority thay vì chỉ heuristic screening
+- tái dùng controllers/services hiện có, không dựng domain song song
+- hoàn thiện write flows:
+  - create order
+  - driver login, availability, location
+  - offer list, accept, decline
+  - pickup, delivery, cancel transitions
+- thêm app-facing read models tối thiểu:
+  - `TripTrackingView`
+  - `DriverActiveTaskView`
+  - `LiveMapSnapshot`
+  - `NearbyDriverView`
 
-- `Routing Verdict` tiến lên khỏi `PARTIAL`
-- clean-regime mạnh hơn một cách ổn định
-- sau đó mới quay lại các bucket khó như `heavy-rain lunch`, `night off-peak`, `shortage regime`
+Definition of done:
 
-## 4. Acceptance criteria
+- rider -> assignment -> driver accept -> delivery chạy được qua API
+- route runtime vẫn là authority duy nhất
+- integration tests pass cho flow chính
 
-Phase này chỉ được coi là đạt khi:
+### Phase 3 — Rider/driver web map UI
 
-- `AI Verdict = YES` vẫn giữ
-- `route-ai-certification-smoke` vẫn `PASS`
-- route core đọc được feature bigdata-first từ data spine nội bộ, không chỉ từ surrogate cục bộ
-- KPI benchmark và route evidence truy được từ ClickHouse hoặc Iceberg thật
-- session AI mới có thể đọc canonical docs + memory pack và tiếp tục đúng hướng mà không phải đoán lại kiến trúc
+Việc phải làm:
 
-## 5. Việc đang hoãn
+- xây `Rider Map Web` và `Driver Map Web`
+- dùng web surface map-centric thay vì vá control room làm output chính
+- rider flow:
+  - chọn pickup/dropoff
+  - tạo order
+  - theo dõi trip status
+- driver flow:
+  - vào phiên làm việc
+  - cập nhật vị trí
+  - thấy offer hoặc task
+  - accept và tiến hành lifecycle
 
-Các việc sau tiếp tục bị hoãn để không làm loãng effort:
+Definition of done:
 
-- agent plane mới
-- Android demo
-- multi-module split
+- app-like web UI tồn tại và dùng được
+- output chính là rider/driver map app, không còn là control room
 
-Lý do:
+### Phase 4 — Realtime lifecycle execution
 
-- feature backbone và route core vẫn là phần quyết định hệ thống có thật sự đủ thông minh hay không
-- nếu nền data + route chưa khóa, mở rộng lớp trình diễn sẽ không tạo ra giá trị nghiên cứu thật
+Việc phải làm:
+
+- tái dùng `RealtimeStreamService` làm realtime lane chính
+- mở rộng payload nếu cần để app đọc cùng truth sources
+- đồng bộ runtime, API và UI cho:
+  - driver/user locations
+  - assignment status
+  - pickup/dropoff progression
+  - completed trip state
+
+Definition of done:
+
+- rider và driver thấy cập nhật live đủ thuyết phục
+- happy path end-to-end chạy ổn định
+
+### Phase 5 — Demo polish
+
+Việc phải làm:
+
+- polish app để nhìn như một lát cắt BE/Grab:
+  - nearby drivers
+  - driver card
+  - ETA
+  - các trạng thái trip rõ ràng
+- chỉ thêm cancel hoặc reassign nếu không phá ổn định
+
+Definition of done:
+
+- UX đủ sạch để demo liên tục
+- compact/runtime vẫn là brain phía dưới, không bị thay bằng UI heuristic
+
+### Phase 6 — Verification và artifacts
+
+Việc phải làm:
+
+- script hóa flow demo/evidence:
+  - start API/runtime
+  - mở rider và driver app surfaces
+  - chạy happy path
+  - capture screenshots
+  - chạy compact smoke verdict
+  - ghi final summary
+
+Artifact tối thiểu:
+
+- rider before order
+- rider after order created
+- driver with offer
+- driver accepted / en route pickup
+- delivery in progress
+- completed trip
+- compact smoke summary + verdict
+
+Definition of done:
+
+- screenshot pack tồn tại
+- final verification summary tồn tại
+- compact evidence/verdict artifact tồn tại
+- dừng khi happy path và evidence đã đủ
+
+## 5. Tái dùng và ranh giới hiện tại
+
+### 5.1 Thành phần tái dùng
+
+- runtime:
+  - `RouteCoreRuntime`
+  - `SimulationEngine`
+  - compact lane/evidence hiện có
+- API:
+  - `UserOrderController`
+  - `DriverController`
+  - `UserOrderingService`
+  - `DriverOperationsService`
+  - `DispatchOrchestratorService`
+  - `RealtimeStreamService`
+- tooling:
+  - `MainApp`
+  - native map stack cho control room
+
+### 5.2 Thành phần cần bridge
+
+- order creation vào runtime authority
+- assignment/orchestration vào compact/runtime dispatch path
+- driver accept/pickup/delivery cập nhật cùng truth source
+- realtime map payload cho rider/driver app surfaces
+
+### 5.3 Thành phần chỉ giữ vai trò phụ
+
+- JavaFX control room
+- legacy research shell
+- benchmark/evidence shell ngoài hot path
+
+## 6. Blockers hiện tại
+
+Blockers để đi từ repo hiện tại sang app slice:
+
+1. `DispatchOrchestratorService` chưa bridge vào runtime authority, nên backend app flow chưa dùng chung dispatch brain với desktop/runtime
+2. read models cho rider/driver map app còn thiếu hoặc còn quá event-oriented
+3. control room đang có map insight nhưng chưa có product surface web tương ứng
+4. compact verdict vẫn mới ở mức internal-only, nên phase app phải trung thực về claim và failure modes
+
+## 7. Acceptance và nguyên tắc trung thực
+
+Acceptance cho nhánh app slice này:
+
+- rider và driver flow phải chạy end-to-end trên cùng truth sources
+- route core/runtime phải là authority thật, không phải mock dispatcher khác
+- compact smoke lane phải chạy được và xuất artifact
+- nếu compact chưa qua gate riêng thì vẫn giữ `OMEGA` là default reference
+- claim của app demo không được vượt quá canonical result hiện tại
+
+Những thứ tiếp tục ngoài scope của phase này:
+
+- Android app riêng
+- public business-grade hardening ngoài slice demo
+- heavy-rain cutover claim
+- biến benchmark control room thành product surface chính
