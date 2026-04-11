@@ -32,6 +32,7 @@ public class DriverOperationsService {
     private final DriverPresenceStore driverPresenceStore;
     private final OrderRepository orderRepository;
     private final OfferBrokerService offerBrokerService;
+    private final RuntimeBridge runtimeBridge;
     private final OpsArtifactService opsArtifactService;
     private final IdempotencyService idempotencyService;
     private final OperationalEventPublisher eventPublisher;
@@ -41,6 +42,7 @@ public class DriverOperationsService {
                                    DriverPresenceStore driverPresenceStore,
                                    OrderRepository orderRepository,
                                    OfferBrokerService offerBrokerService,
+                                   RuntimeBridge runtimeBridge,
                                    OpsArtifactService opsArtifactService,
                                    IdempotencyService idempotencyService,
                                    OperationalEventPublisher eventPublisher,
@@ -49,6 +51,7 @@ public class DriverOperationsService {
         this.driverPresenceStore = driverPresenceStore;
         this.orderRepository = orderRepository;
         this.offerBrokerService = offerBrokerService;
+        this.runtimeBridge = runtimeBridge;
         this.opsArtifactService = opsArtifactService;
         this.idempotencyService = idempotencyService;
         this.eventPublisher = eventPublisher;
@@ -103,7 +106,15 @@ public class DriverOperationsService {
     }
 
     public List<OfferBrokerService.OfferView> offers(String driverId) {
-        return offerBrokerService.offersForDriver(driverId);
+        return runtimeBridge.driverOffers(driverId);
+    }
+
+    public Optional<com.routechain.api.dto.DriverActiveTaskView> activeTask(String driverId) {
+        return runtimeBridge.activeTask(driverId);
+    }
+
+    public com.routechain.api.dto.LiveMapSnapshot liveMap(String driverId) {
+        return runtimeBridge.driverMapSnapshot(driverId);
     }
 
     @Transactional
@@ -139,16 +150,22 @@ public class DriverOperationsService {
     public Optional<Order> updateTaskStatus(String driverId, String taskId, DriverTaskStatusUpdate request) {
         String orderId = taskId.startsWith("task-") ? taskId.substring("task-".length()) : taskId;
         return orderRepository.findOrder(orderId).map(order -> {
-            if (driverId != null && !driverId.isBlank()
-                    && order.getAssignedDriverId() != null
-                    && !driverId.equals(order.getAssignedDriverId())) {
-                throw new org.springframework.security.access.AccessDeniedException("Driver does not own this task");
+            if (driverId != null && !driverId.isBlank()) {
+                if (order.getAssignedDriverId() == null || order.getAssignedDriverId().isBlank()) {
+                    throw new org.springframework.security.access.AccessDeniedException("Task is not assigned to a driver");
+                }
+                if (!driverId.equals(order.getAssignedDriverId())) {
+                    throw new org.springframework.security.access.AccessDeniedException("Driver does not own this task");
+                }
             }
             Instant now = Instant.now();
             String status = request.status().trim().toUpperCase();
             switch (status) {
                 case "PICKUP_EN_ROUTE" -> order.markPickupStarted(now);
-                case "PICKED_UP" -> order.markPickedUp(now);
+                case "PICKED_UP" -> {
+                    order.markPickedUp(now);
+                    eventPublisher.publish("task.status_changed.v1", "ORDER", order.getId(), new Events.OrderPickedUp(order.getId()));
+                }
                 case "DROPOFF_EN_ROUTE" -> order.markDropoffStarted(now);
                 case "DELIVERED" -> {
                     order.markDelivered(now);

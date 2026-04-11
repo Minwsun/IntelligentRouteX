@@ -5,8 +5,12 @@ import com.routechain.api.dto.UserOrderRequest;
 import com.routechain.api.dto.UserOrderResponse;
 import com.routechain.api.dto.UserQuoteRequest;
 import com.routechain.api.dto.UserQuoteResponse;
+import com.routechain.api.dto.LiveMapSnapshot;
+import com.routechain.api.dto.NearbyDriverView;
+import com.routechain.api.dto.TripTrackingView;
 import com.routechain.api.dto.WalletBalanceView;
 import com.routechain.api.dto.WalletTransactionView;
+import com.routechain.api.service.RuntimeBridge;
 import com.routechain.api.service.UserOrderingService;
 import com.routechain.data.service.WalletQueryService;
 import jakarta.validation.Valid;
@@ -21,13 +25,16 @@ import java.util.Map;
 @RequestMapping("/v1/user")
 public class UserOrderController {
     private final UserOrderingService userOrderingService;
+    private final RuntimeBridge runtimeBridge;
     private final WalletQueryService walletQueryService;
     private final ActorAccessGuard actorAccessGuard;
 
     public UserOrderController(UserOrderingService userOrderingService,
+                               RuntimeBridge runtimeBridge,
                                WalletQueryService walletQueryService,
                                ActorAccessGuard actorAccessGuard) {
         this.userOrderingService = userOrderingService;
+        this.runtimeBridge = runtimeBridge;
         this.walletQueryService = walletQueryService;
         this.actorAccessGuard = actorAccessGuard;
     }
@@ -65,8 +72,25 @@ public class UserOrderController {
     }
 
     @GetMapping("/orders/{orderId}/tracking")
-    public UserOrderResponse tracking(@PathVariable String orderId) {
-        return getOrder(orderId);
+    public TripTrackingView tracking(@PathVariable String orderId) {
+        TripTrackingView response = runtimeBridge.tripTracking(orderId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+        actorAccessGuard.requireCustomer(response.customerId());
+        return response;
+    }
+
+    @GetMapping("/map-snapshot")
+    public LiveMapSnapshot mapSnapshot(@RequestParam String customerId,
+                                       @RequestParam(required = false) String orderId) {
+        actorAccessGuard.requireCustomer(customerId);
+        return runtimeBridge.userMapSnapshot(customerId, orderId);
+    }
+
+    @GetMapping("/nearby-drivers")
+    public List<NearbyDriverView> nearbyDrivers(@RequestParam double lat,
+                                                @RequestParam double lng,
+                                                @RequestParam(defaultValue = "6") int limit) {
+        return runtimeBridge.nearbyDrivers(lat, lng, limit);
     }
 
     @GetMapping("/wallet")

@@ -57,4 +57,34 @@ class DispatchOrchestratorServiceTest {
         assertEquals("drv-near", batch.candidates().get(0).driverId());
         assertTrue(batch.candidates().get(0).rationale().contains("compact_runtime_candidate"));
     }
+
+    @Test
+    void shouldStillPublishRuntimeWinnerWhenHeuristicScreenFindsNoCandidate() {
+        InMemoryOperationalStore store = new InMemoryOperationalStore();
+        InMemoryOfferStateStore offerStateStore = new InMemoryOfferStateStore();
+        OperationalEventPublisher eventPublisher = new OperationalEventPublisher(store);
+        OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, eventPublisher);
+        DispatchOrchestratorService orchestratorService = new DispatchOrchestratorService(store, offerBrokerService);
+
+        store.saveDriverSession(new DriverSessionState(
+                "drv-runtime-only", "device-runtime-only", true, 10.7769, 106.7009, Instant.now(), ""));
+
+        Order order = new Order(
+                "ord-runtime-fallback",
+                "cust-runtime",
+                "pickup-r1",
+                new GeoPoint(10.7763, 106.6706),
+                new GeoPoint(10.7594, 106.6963),
+                "drop-r9",
+                48000.0,
+                30,
+                Instant.now());
+        order.setServiceType("instant");
+
+        DriverOfferBatch batch = orchestratorService.publishOffersForOrder(order);
+
+        assertFalse(batch.candidates().isEmpty());
+        assertEquals("drv-runtime-only", batch.candidates().get(0).driverId());
+        assertTrue(batch.candidates().get(0).rationale().contains("compact_runtime_candidate"));
+    }
 }

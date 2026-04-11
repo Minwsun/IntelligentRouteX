@@ -103,7 +103,7 @@ public class DispatchOrchestratorService {
     private void promoteRuntimeWinner(Order order,
                                       List<DriverSessionState> availableSessions,
                                       List<DriverOfferCandidate> candidates) {
-        if (availableSessions.isEmpty() || candidates.isEmpty()) {
+        if (availableSessions.isEmpty()) {
             return;
         }
         CompactDispatchDecision runtimeDecision = previewRuntimeDecision(order, availableSessions);

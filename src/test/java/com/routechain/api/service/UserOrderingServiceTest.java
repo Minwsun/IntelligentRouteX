@@ -3,17 +3,27 @@ package com.routechain.api.service;
 import com.routechain.config.RouteChainRuntimeProperties;
 import com.routechain.api.dto.UserOrderRequest;
 import com.routechain.api.store.InMemoryOperationalStore;
-import com.routechain.backend.offer.DriverSessionState;
-import com.routechain.backend.offer.OfferBrokerService;
+import com.routechain.backend.offer.DriverOfferBatch;
+import com.routechain.backend.offer.DriverOfferCandidate;
 import com.routechain.data.memory.InMemoryOfferStateStore;
 import com.routechain.data.service.IdempotencyService;
 import com.routechain.data.service.OperationalEventPublisher;
+import com.routechain.domain.Order;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class UserOrderingServiceTest {
 
@@ -23,18 +33,26 @@ class UserOrderingServiceTest {
     }
 
     @Test
-    void createOrderPublishesScreenedOfferBatchWhenDriverIsAvailable() {
+    void createOrderPersistsOrderAndDispatchesThroughRuntimeBridge() {
         InMemoryOperationalStore store = new InMemoryOperationalStore();
         InMemoryOfferStateStore offerStateStore = new InMemoryOfferStateStore();
-        store.saveDriverSession(new DriverSessionState("drv-100", "device-1", true, 10.775, 106.701, Instant.now(), ""));
+        RuntimeBridge runtimeBridge = mock(RuntimeBridge.class);
+        when(runtimeBridge.dispatchOrder(any())).thenReturn(new DriverOfferBatch(
+                "offer-batch-123",
+                "ord-any",
+                "instant",
+                1,
+                Instant.now(),
+                Instant.now().plusSeconds(30),
+                List.of("offer-1"),
+                List.of(new DriverOfferCandidate("ord-any", "drv-100", "instant", 0.9, 0.7, 1.2, false, "compact winner"))
+        ));
         OperationalEventPublisher eventPublisher = new OperationalEventPublisher(store);
-        OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, eventPublisher);
-        DispatchOrchestratorService orchestratorService = new DispatchOrchestratorService(store, offerBrokerService);
         UserOrderingService userOrderingService = new UserOrderingService(
                 store,
                 store,
                 offerStateStore,
-                orchestratorService,
+                runtimeBridge,
                 new IdempotencyService(store, new RouteChainRuntimeProperties()),
                 eventPublisher
         );
@@ -55,7 +73,6 @@ class UserOrderingServiceTest {
         assertNotNull(response.orderId());
         assertFalse(response.offerBatchId().isBlank());
         assertTrue(store.findOrder(response.orderId()).isPresent());
-        assertEquals(1, offerBrokerService.offersForDriver("drv-100").size());
         assertEquals(response, userOrderingService.createOrder(new UserOrderRequest(
                 "cust-1",
                 "pickup-r1",
@@ -68,21 +85,30 @@ class UserOrderingServiceTest {
                 25,
                 "merchant-1"
         ), "idem-1"));
+        verify(runtimeBridge, times(1)).dispatchOrder(any(Order.class));
     }
 
     @Test
     void cancelOrderWithSameIdempotencyKeyReplaysSingleCancellation() {
         InMemoryOperationalStore store = new InMemoryOperationalStore();
         InMemoryOfferStateStore offerStateStore = new InMemoryOfferStateStore();
-        store.saveDriverSession(new DriverSessionState("drv-200", "device-2", true, 10.775, 106.701, Instant.now(), ""));
+        RuntimeBridge runtimeBridge = mock(RuntimeBridge.class);
+        when(runtimeBridge.dispatchOrder(any())).thenReturn(new DriverOfferBatch(
+                "offer-batch-456",
+                "ord-any",
+                "instant",
+                0,
+                Instant.now(),
+                Instant.now().plusSeconds(30),
+                List.of(),
+                List.of()
+        ));
         OperationalEventPublisher eventPublisher = new OperationalEventPublisher(store);
-        OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, eventPublisher);
-        DispatchOrchestratorService orchestratorService = new DispatchOrchestratorService(store, offerBrokerService);
         UserOrderingService userOrderingService = new UserOrderingService(
                 store,
                 store,
                 offerStateStore,
-                orchestratorService,
+                runtimeBridge,
                 new IdempotencyService(store, new RouteChainRuntimeProperties()),
                 eventPublisher
         );

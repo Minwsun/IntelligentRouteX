@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Driver Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="/app/map-app.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/app/map-common.js"></script>
+</head>
+<body>
+<main class="map-app">
+    <aside class="map-sidebar">
+        <section class="map-panel">
+            <p class="eyebrow">Driver Map</p>
+            <h2>Driver session</h2>
+            <div class="field-grid">
+                <label>Driver ID <input id="driverId" value="drv-demo"></label>
+                <label>Device ID <input id="deviceId" value="device-demo"></label>
+            </div>
+            <p class="muted">Click the map to set the current driver location before login or updates.</p>
+            <div class="button-row">
+                <button id="loginButton">Login Session</button>
+                <button class="secondary" id="locationButton">Push Location</button>
+                <button class="ghost" id="availabilityButton">Toggle Availability</button>
+            </div>
+        </section>
+
+        <section class="map-panel">
+            <h3>Offers</h3>
+            <div id="offers" class="list"></div>
+        </section>
+
+        <section class="map-panel">
+            <h3>Active Task</h3>
+            <p id="taskStatus" class="status-chip">ONLINE_IDLE</p>
+            <p id="taskMeta" class="muted">No active task.</p>
+            <div class="button-row">
+                <button class="secondary" data-status="PICKUP_EN_ROUTE">Pickup En Route</button>
+                <button class="secondary" data-status="PICKED_UP">Picked Up</button>
+                <button class="secondary" data-status="DROPOFF_EN_ROUTE">Dropoff En Route</button>
+                <button class="secondary" data-status="DELIVERED">Delivered</button>
+            </div>
+        </section>
+    </aside>
+
+    <section class="map-surface">
+        <div id="map"></div>
+        <div class="map-overlay">
+            <div class="map-badge" id="driverLocationBadge">Driver location: not set</div>
+            <div class="map-badge"><a href="/app/rider.html">Switch to Rider</a></div>
+        </div>
+    </section>
+</main>
+
+<script>
+    const state = RouteChainMapApp.createMap("map");
+    let driverLocation = { lat: 10.7769, lng: 106.7009 };
+    let availability = true;
+    let activeTask = null;
+    let socket = null;
+
+    function driverId() {
+        return document.getElementById("driverId").value.trim();
+    }
+
+    function renderOffers(offers) {
+        const root = document.getElementById("offers");
+        root.innerHTML = "";
+        (offers || []).forEach(offer => {
+            const item = document.createElement("div");
+            item.className = "list-item";
+            item.innerHTML = `<strong>${offer.orderId}</strong><br>${offer.status}<br>${offer.deadheadKm.toFixed(2)} km<br><button data-offer-id="${offer.offerId}">Accept</button>`;
+            root.appendChild(item);
+        });
+    }
+
+    function renderTask(task) {
+        activeTask = task;
+        document.getElementById("taskStatus").textContent = task ? task.status : "ONLINE_IDLE";
+        document.getElementById("taskMeta").innerHTML = task
+            ? `${task.orderId} &middot; ${task.serviceTier} &middot; ETA ${task.etaMinutes || 0}m`
+            : "No active task.";
+    }
+
+    async function loginSession() {
+        await RouteChainMapApp.fetchJson("/v1/driver/session/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                driverId: driverId(),
+                deviceId: document.getElementById("deviceId").value.trim(),
+                lat: driverLocation.lat,
+                lng: driverLocation.lng
+            })
+        });
+        connectDriverStream();
+        await refreshDriverState();
+    }
+
+    async function pushLocation() {
+        await RouteChainMapApp.fetchJson(`/v1/driver/location?driverId=${encodeURIComponent(driverId())}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lat: driverLocation.lat, lng: driverLocation.lng, speedKmh: 22 })
+        });
+        await refreshDriverState();
+    }
+
+    async function toggleAvailability() {
+        availability = !availability;
+        await RouteChainMapApp.fetchJson(`/v1/driver/availability?driverId=${encodeURIComponent(driverId())}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ available: availability })
+        });
+        await refreshDriverState();
+    }
+
+    async function refreshDriverState() {
+        const id = driverId();
+        const [offers, snapshot] = await Promise.all([
+            RouteChainMapApp.fetchJson(`/v1/driver/offers?driverId=${encodeURIComponent(id)}`),
+            RouteChainMapApp.fetchJson(`/v1/driver/map-snapshot?driverId=${encodeURIComponent(id)}`)
+        ]);
+        renderOffers(offers);
+        RouteChainMapApp.drawSnapshot(state, snapshot);
+        try {
+            const task = await RouteChainMapApp.fetchJson(`/v1/driver/tasks/active?driverId=${encodeURIComponent(id)}`);
+            renderTask(task);
+        } catch (error) {
+            renderTask(null);
+        }
+    }
+
+    async function acceptOffer(offerId) {
+        await RouteChainMapApp.fetchJson(`/v1/driver/offers/${encodeURIComponent(offerId)}/accept?driverId=${encodeURIComponent(driverId())}`, {
+            method: "POST"
+        });
+        await refreshDriverState();
+    }
+
+    async function updateTaskStatus(status) {
+        if (!activeTask) {
+            return;
+        }
+        await RouteChainMapApp.fetchJson(`/v1/driver/tasks/${encodeURIComponent(activeTask.taskId)}/status?driverId=${encodeURIComponent(driverId())}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status })
+        });
+        await refreshDriverState();
+    }
+
+    function connectDriverStream() {
+        if (socket) {
+            socket.close();
+        }
+        socket = RouteChainMapApp.connectSocket(`/v1/driver/stream?driverId=${encodeURIComponent(driverId())}`, async () => {
+            await refreshDriverState();
+        });
+    }
+
+    state.map.on("click", event => {
+        driverLocation = event.latlng;
+        document.getElementById("driverLocationBadge").textContent =
+            `Driver location: ${driverLocation.lat.toFixed(4)}, ${driverLocation.lng.toFixed(4)}`;
+    });
+
+    document.getElementById("loginButton").addEventListener("click", () => loginSession().catch(error => alert(error.message)));
+    document.getElementById("locationButton").addEventListener("click", () => pushLocation().catch(error => alert(error.message)));
+    document.getElementById("availabilityButton").addEventListener("click", () => toggleAvailability().catch(error => alert(error.message)));
+    document.getElementById("offers").addEventListener("click", event => {
+        const offerId = event.target.getAttribute("data-offer-id");
+        if (offerId) {
+            acceptOffer(offerId).catch(error => alert(error.message));
+        }
+    });
+    document.querySelectorAll("[data-status]").forEach(button => {
+        button.addEventListener("click", () => updateTaskStatus(button.getAttribute("data-status")).catch(error => alert(error.message)));
+    });
+
+    document.getElementById("driverLocationBadge").textContent =
+        `Driver location: ${driverLocation.lat.toFixed(4)}, ${driverLocation.lng.toFixed(4)}`;
+    refreshDriverState().catch(console.error);
+</script>
+</body>
+</html>

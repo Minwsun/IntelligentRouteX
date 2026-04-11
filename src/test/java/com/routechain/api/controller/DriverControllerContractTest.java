@@ -17,7 +17,6 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Optional;
 
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -69,6 +68,19 @@ class DriverControllerContractTest {
                 .thenReturn(Optional.empty());
 
         mockMvc.perform(post("/v1/driver/tasks/task-missing/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                { "status": "DELIVERED" }
+                                """))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void updateTaskStatusSupportsDriverIdFallbackForDemoMode() throws Exception {
+        when(driverOperationsService.updateTaskStatus("drv-demo", "task-missing", new DriverTaskStatusUpdate("DELIVERED")))
+                .thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/v1/driver/tasks/task-missing/status?driverId=drv-demo")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 { "status": "DELIVERED" }

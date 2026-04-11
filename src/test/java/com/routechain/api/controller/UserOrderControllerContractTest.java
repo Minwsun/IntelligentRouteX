@@ -1,6 +1,7 @@
 package com.routechain.api.controller;
 
 import com.routechain.api.security.ActorAccessGuard;
+import com.routechain.api.service.RuntimeBridge;
 import com.routechain.api.dto.UserOrderResponse;
 import com.routechain.api.service.UserOrderingService;
 import com.routechain.backend.offer.OfferBrokerService;
@@ -32,6 +33,9 @@ class UserOrderControllerContractTest {
 
     @MockBean
     private UserOrderingService userOrderingService;
+
+    @MockBean
+    private RuntimeBridge runtimeBridge;
 
     @MockBean
     private WalletQueryService walletQueryService;

@@ -27,20 +27,20 @@ public class UserOrderingService {
     private final OrderRepository orderRepository;
     private final QuoteRepository quoteRepository;
     private final OfferStateStore offerStateStore;
-    private final DispatchOrchestratorService dispatchOrchestratorService;
+    private final RuntimeBridge runtimeBridge;
     private final IdempotencyService idempotencyService;
     private final OperationalEventPublisher eventPublisher;
 
     public UserOrderingService(OrderRepository orderRepository,
                                QuoteRepository quoteRepository,
                                OfferStateStore offerStateStore,
-                               DispatchOrchestratorService dispatchOrchestratorService,
+                               RuntimeBridge runtimeBridge,
                                IdempotencyService idempotencyService,
                                OperationalEventPublisher eventPublisher) {
         this.orderRepository = orderRepository;
         this.quoteRepository = quoteRepository;
         this.offerStateStore = offerStateStore;
-        this.dispatchOrchestratorService = dispatchOrchestratorService;
+        this.runtimeBridge = runtimeBridge;
         this.idempotencyService = idempotencyService;
         this.eventPublisher = eventPublisher;
     }
@@ -101,7 +101,7 @@ public class UserOrderingService {
                     orderRepository.appendStatusHistory(statusHistory(order.getId(), order.getStatus().name(), "order_created", now));
                     eventPublisher.publish("order.created.v1", "ORDER", order.getId(), new Events.OrderCreated(order));
 
-                    DriverOfferBatch batch = dispatchOrchestratorService.publishOffersForOrder(order);
+                    DriverOfferBatch batch = runtimeBridge.dispatchOrder(order);
                     return toResponse(order, batch == null ? "" : batch.offerBatchId());
                 }
         );

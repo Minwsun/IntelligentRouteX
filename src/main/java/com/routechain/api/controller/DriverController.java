@@ -65,6 +65,19 @@ public class DriverController {
         return driverOperationsService.offers(driverId);
     }
 
+    @GetMapping("/tasks/active")
+    public DriverActiveTaskView activeTask(@RequestParam String driverId) {
+        actorAccessGuard.requireDriver(driverId);
+        return driverOperationsService.activeTask(driverId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Active task not found"));
+    }
+
+    @GetMapping("/map-snapshot")
+    public LiveMapSnapshot mapSnapshot(@RequestParam String driverId) {
+        actorAccessGuard.requireDriver(driverId);
+        return driverOperationsService.liveMap(driverId);
+    }
+
     @PostMapping("/offers/{offerId}/accept")
     public OfferDecision accept(@RequestParam String driverId,
                                 @PathVariable String offerId,
@@ -83,9 +96,13 @@ public class DriverController {
 
     @PostMapping("/tasks/{taskId}/status")
     public Order updateTaskStatus(@PathVariable String taskId,
+                                  @RequestParam(required = false) String driverId,
                                   @Valid @RequestBody DriverTaskStatusUpdate request) {
-        String driverId = actorAccessGuard.currentSubject();
-        return driverOperationsService.updateTaskStatus(driverId, taskId, request)
+        String resolvedDriverId = (driverId != null && !driverId.isBlank())
+                ? driverId
+                : actorAccessGuard.currentSubject();
+        actorAccessGuard.requireDriver(resolvedDriverId);
+        return driverOperationsService.updateTaskStatus(resolvedDriverId, taskId, request)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Task not found"));
     }
 
