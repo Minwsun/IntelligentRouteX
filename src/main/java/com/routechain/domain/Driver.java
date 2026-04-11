@@ -11,6 +11,10 @@ import java.util.List;
  * Full productivity and economics tracking for KPI computation.
  */
 public class Driver {
+    public enum RouteGeometrySource {
+        OSRM,
+        FALLBACK
+    }
 
     // ── Enums for motion state machine ───────────────────────────────────
     public enum MovementMode {
@@ -62,6 +66,8 @@ public class Driver {
     private volatile DriverState pendingRouteState;
     private volatile int pendingSequenceIndex = -1;
     private volatile int activeRouteSequenceIndex = -1;
+    private volatile RouteGeometrySource routeGeometrySource = RouteGeometrySource.FALLBACK;
+    private volatile Instant routeGeneratedAt;
     private volatile boolean firstPickupCompleted = false;
     private volatile boolean routeLockedAfterFirstPickup = false;
 
@@ -133,6 +139,8 @@ public class Driver {
     public DriverState getPendingRouteState() { return pendingRouteState; }
     public int getPendingSequenceIndex() { return pendingSequenceIndex; }
     public int getActiveRouteSequenceIndex() { return activeRouteSequenceIndex; }
+    public RouteGeometrySource getRouteGeometrySource() { return routeGeometrySource; }
+    public Instant getRouteGeneratedAt() { return routeGeneratedAt; }
     public boolean hasCompletedFirstPickup() { return firstPickupCompleted; }
 
     // ── Productivity getters ────────────────────────────────────────────
@@ -257,6 +265,12 @@ public class Driver {
      * Coordinates are [lng, lat] pairs — converted to GeoPoint.
      */
     public void setRouteWaypoints(List<double[]> coordinates) {
+        setRouteWaypoints(coordinates, RouteGeometrySource.OSRM, Instant.now());
+    }
+
+    public void setRouteWaypoints(List<double[]> coordinates,
+                                  RouteGeometrySource source,
+                                  Instant generatedAt) {
         synchronized (routeWaypoints) {
             routeWaypoints.clear();
             if (coordinates != null) {
@@ -266,6 +280,8 @@ public class Driver {
             }
             currentWaypointIndex = 0;
         }
+        this.routeGeometrySource = source == null ? RouteGeometrySource.FALLBACK : source;
+        this.routeGeneratedAt = generatedAt == null ? Instant.now() : generatedAt;
     }
 
     public GeoPoint getCurrentWaypoint() {
@@ -296,6 +312,8 @@ public class Driver {
             routeWaypoints.clear();
             currentWaypointIndex = 0;
         }
+        routeGeometrySource = RouteGeometrySource.FALLBACK;
+        routeGeneratedAt = null;
     }
 
     public List<double[]> getRemainingRoutePoints() {

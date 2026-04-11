@@ -41,7 +41,7 @@ public class RealtimeStreamService {
     public void registerDriver(String driverId, WebSocketSession session) {
         driverSessions.computeIfAbsent(driverId, ignored -> new CopyOnWriteArraySet<>()).add(session);
         sendSingle(session, envelope("driver_stream_ready", Map.of("driverId", driverId)));
-        sendSingle(session, envelope("driver_bootstrap", Map.of(
+        sendSingle(session, envelope("driver_bootstrap", payloadMap(
                 "offers", runtimeBridge.driverOffers(driverId),
                 "activeTask", runtimeBridge.activeTask(driverId).orElse(null),
                 "mapSnapshot", runtimeBridge.driverMapSnapshot(driverId))));
@@ -50,7 +50,7 @@ public class RealtimeStreamService {
     public void registerUser(String customerId, WebSocketSession session) {
         userSessions.computeIfAbsent(customerId, ignored -> new CopyOnWriteArraySet<>()).add(session);
         sendSingle(session, envelope("user_stream_ready", Map.of("customerId", customerId)));
-        sendSingle(session, envelope("user_bootstrap", Map.of(
+        sendSingle(session, envelope("user_bootstrap", payloadMap(
                 "activeTrip", runtimeBridge.activeTripForCustomer(customerId).orElse(null),
                 "mapSnapshot", runtimeBridge.userMapSnapshot(customerId, null))));
     }
@@ -190,6 +190,20 @@ public class RealtimeStreamService {
         envelope.put("sentAt", Instant.now().toString());
         envelope.put("payload", payload);
         return gson.toJson(envelope);
+    }
+
+    private Map<String, Object> payloadMap(Object... pairs) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        if (pairs == null) {
+            return payload;
+        }
+        for (int index = 0; index + 1 < pairs.length; index += 2) {
+            Object key = pairs[index];
+            if (key instanceof String stringKey) {
+                payload.put(stringKey, pairs[index + 1]);
+            }
+        }
+        return payload;
     }
 
     private boolean isTerminal(String status) {

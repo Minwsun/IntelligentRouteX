@@ -224,7 +224,10 @@ public class OsrmRoutingService {
             }
 
             if (coordinates.size() >= 2 && isCurrentRequest(driver, requestId)) {
-                driver.setRouteWaypoints(coordinates);
+                driver.setRouteWaypoints(
+                        coordinates,
+                        Driver.RouteGeometrySource.OSRM,
+                        java.time.Instant.now());
                 return true;
             }
         } catch (Exception ignored) {
@@ -252,7 +255,10 @@ public class OsrmRoutingService {
         coordinates.add(new double[]{midLng + jitterLng, midLat + jitterLat});
         coordinates.add(new double[]{to.lng(), to.lat()});
 
-        driver.setRouteWaypoints(coordinates);
+        driver.setRouteWaypoints(
+                coordinates,
+                Driver.RouteGeometrySource.FALLBACK,
+                java.time.Instant.now());
     }
 
     private boolean isCurrentRequest(Driver driver, String requestId) {

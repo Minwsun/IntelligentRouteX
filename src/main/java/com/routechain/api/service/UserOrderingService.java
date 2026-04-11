@@ -124,6 +124,7 @@ public class UserOrderingService {
                     () -> {
                         Instant now = Instant.now();
                         order.markCancelled(resolvedReason, now);
+                        runtimeBridge.cancelOrder(order, resolvedReason, now);
                         orderRepository.saveOrder(order);
                         orderRepository.appendStatusHistory(statusHistory(order.getId(), order.getStatus().name(), resolvedReason, now));
                         eventPublisher.publish("order.status_changed.v1", "ORDER", order.getId(),

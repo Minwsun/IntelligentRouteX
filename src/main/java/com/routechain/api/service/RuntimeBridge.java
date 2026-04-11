@@ -14,10 +14,12 @@ import com.routechain.data.port.OfferStateStore;
 import com.routechain.data.port.OrderRepository;
 import com.routechain.domain.Driver;
 import com.routechain.domain.Enums;
+import com.routechain.domain.Enums.OrderStatus;
 import com.routechain.domain.GeoPoint;
 import com.routechain.domain.Order;
 import com.routechain.infra.RouteCoreRuntime;
 import com.routechain.simulation.SimulationEngine;
+import com.routechain.simulation.DispatchPlan;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -48,7 +50,66 @@ public class RuntimeBridge {
 
     public DriverOfferBatch dispatchOrder(Order order) {
         ensureCompactRuntimeMode();
+        syncRuntimeOrder(order);
         return dispatchOrchestratorService.publishOffersForOrder(order);
+    }
+
+    public void syncDriverSession(DriverSessionState session) {
+        if (session == null) {
+            return;
+        }
+        ensureCompactRuntimeMode();
+        RouteCoreRuntime.liveEngine().upsertExternalDriverSession(
+                session.driverId(),
+                new GeoPoint(session.lastLat(), session.lastLng()),
+                session.available());
+    }
+
+    public void syncDriverLocation(String driverId, GeoPoint location, boolean available) {
+        if (driverId == null || driverId.isBlank() || location == null) {
+            return;
+        }
+        ensureCompactRuntimeMode();
+        RouteCoreRuntime.liveEngine().upsertExternalDriverSession(driverId, location, available);
+    }
+
+    public void materializeAcceptedAssignment(Order order, String driverId) {
+        if (order == null || driverId == null || driverId.isBlank()) {
+            return;
+        }
+        ensureCompactRuntimeMode();
+        syncRuntimeOrder(order);
+        DispatchPlan plan = dispatchOrchestratorService.pendingRuntimePlan(order.getId(), driverId).orElse(null);
+        if (plan != null) {
+            RouteCoreRuntime.liveEngine().materializeExternalAssignment(order, plan, Instant.now());
+            dispatchOrchestratorService.clearPendingRuntimePlan(order.getId());
+            return;
+        }
+
+        DriverSessionState session = driverFleetRepository.findDriverSession(driverId).orElse(null);
+        GeoPoint driverPoint = session == null
+                ? order.getPickupPoint()
+                : new GeoPoint(session.lastLat(), session.lastLng());
+        Driver fallbackDriver = RouteCoreRuntime.liveEngine().upsertExternalDriverSession(driverId, driverPoint, false);
+        DispatchPlan fallbackPlan = fallbackPlan(order, fallbackDriver);
+        RouteCoreRuntime.liveEngine().materializeExternalAssignment(order, fallbackPlan, Instant.now());
+    }
+
+    public void syncTaskStatus(String orderId, String driverId, OrderStatus status, Instant updatedAt) {
+        if (orderId == null || orderId.isBlank() || status == null) {
+            return;
+        }
+        ensureCompactRuntimeMode();
+        RouteCoreRuntime.liveEngine().advanceExternalTask(orderId, driverId, status, updatedAt);
+    }
+
+    public void cancelOrder(Order order, String reason, Instant cancelledAt) {
+        if (order == null) {
+            return;
+        }
+        ensureCompactRuntimeMode();
+        RouteCoreRuntime.liveEngine().cancelExternalOrder(order.getId(), reason, cancelledAt);
+        dispatchOrchestratorService.clearPendingRuntimePlan(order.getId());
     }
 
     public Optional<TripTrackingView> tripTracking(String orderId) {
@@ -203,9 +264,12 @@ public class RuntimeBridge {
         if (runtimeDriver != null) {
             List<MapPointView> runtimePolyline = runtimePolyline(runtimeDriver);
             if (runtimePolyline.size() >= 2) {
+                RouteSourceView runtimeSource = runtimeDriver.getRouteGeometrySource() == Driver.RouteGeometrySource.OSRM
+                        ? RouteSourceView.RUNTIME_OSRM
+                        : RouteSourceView.RUNTIME_FALLBACK;
                 return new RoutePayload(
                         runtimePolyline,
-                        RouteSourceView.RUNTIME_OSRM,
+                        runtimeSource,
                         routeGeneratedAt(runtimeDriver, driverSession, order));
             }
         }
@@ -252,7 +316,9 @@ public class RuntimeBridge {
 
     private String routeGeneratedAt(Driver runtimeDriver, DriverSessionState driverSession, Order order) {
         Instant generatedAt = null;
-        if (driverSession != null) {
+        if (runtimeDriver != null && runtimeDriver.getRouteGeneratedAt() != null) {
+            generatedAt = runtimeDriver.getRouteGeneratedAt();
+        } else if (driverSession != null) {
             generatedAt = driverSession.lastSeenAt();
         } else if (runtimeDriver != null) {
             generatedAt = runtimeDriver.getLastSeenAt();
@@ -315,6 +381,41 @@ public class RuntimeBridge {
         if (engine.getDispatchMode() != SimulationEngine.DispatchMode.COMPACT) {
             engine.setDispatchMode(SimulationEngine.DispatchMode.COMPACT);
         }
+    }
+
+    private void syncRuntimeOrder(Order order) {
+        if (order != null) {
+            RouteCoreRuntime.liveEngine().attachExternalOrder(order);
+        }
+    }
+
+    private DispatchPlan fallbackPlan(Order order, Driver driver) {
+        DispatchPlan.Stop pickupStop = new DispatchPlan.Stop(
+                order.getId(),
+                order.getPickupPoint(),
+                DispatchPlan.Stop.StopType.PICKUP,
+                0.0);
+        DispatchPlan.Stop dropoffStop = new DispatchPlan.Stop(
+                order.getId(),
+                order.getDropoffPoint(),
+                DispatchPlan.Stop.StopType.DROPOFF,
+                Math.max(3.0, order.getPromisedEtaMinutes()));
+        DispatchPlan plan = new DispatchPlan(
+                driver,
+                new DispatchPlan.Bundle(
+                        "app-fallback-" + order.getId(),
+                        List.of(order),
+                        0.0,
+                        1),
+                List.of(pickupStop, dropoffStop));
+        plan.setTraceId("app-fallback-" + order.getId());
+        plan.setCompactPlanType(com.routechain.core.CompactPlanType.FALLBACK_LOCAL);
+        plan.setConfidence(0.35);
+        plan.setPredictedDeadheadKm(0.0);
+        plan.setPredictedTotalMinutes(Math.max(3.0, order.getPromisedEtaMinutes()));
+        plan.setLateRisk(0.5);
+        plan.setBundleEfficiency(0.0);
+        return plan;
     }
 
     private record RoutePayload(

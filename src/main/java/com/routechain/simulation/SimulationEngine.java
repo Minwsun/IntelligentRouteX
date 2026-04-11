@@ -337,6 +337,175 @@ public class SimulationEngine {
                 weatherProfile,
                 clock.currentInstant());
     }
+    public synchronized Driver upsertExternalDriverSession(String driverId,
+                                                           GeoPoint location,
+                                                           boolean available) {
+        if (driverId == null || driverId.isBlank() || location == null) {
+            return null;
+        }
+        Driver driver = drivers.stream()
+                .filter(candidate -> driverId.equals(candidate.getId()))
+                .findFirst()
+                .orElseGet(() -> {
+                    Driver created = new Driver(
+                            driverId,
+                            driverId,
+                            location,
+                            findNearestRegionId(location),
+                            VehicleType.MOTORBIKE);
+                    drivers.add(created);
+                    return created;
+                });
+        driver.setCurrentLocation(location);
+        if (available && driver.getActiveOrderIds().isEmpty() && driver.getState() == DriverState.OFFLINE) {
+            driver.setState(DriverState.ONLINE_IDLE);
+        } else if (available && driver.getActiveOrderIds().isEmpty() && driver.getState() == DriverState.ROUTE_PENDING) {
+            // Preserve in-flight route state instead of forcing idle while a live route request is active.
+        } else if (available && driver.getActiveOrderIds().isEmpty() && driver.getState() == DriverState.ONLINE_IDLE) {
+            driver.setState(DriverState.ONLINE_IDLE);
+        }
+        return driver;
+    }
+
+    public synchronized void attachExternalOrder(Order order) {
+        if (order == null) {
+            return;
+        }
+        completedOrders.removeIf(existing -> existing.getId().equals(order.getId()));
+        cancelledOrders.removeIf(existing -> existing.getId().equals(order.getId()));
+        boolean exists = activeOrders.stream().anyMatch(existing -> existing.getId().equals(order.getId()));
+        if (!exists && order.getStatus() != OrderStatus.DELIVERED
+                && order.getStatus() != OrderStatus.CANCELLED
+                && order.getStatus() != OrderStatus.FAILED
+                && order.getStatus() != OrderStatus.EXPIRED) {
+            activeOrders.add(order);
+        }
+    }
+
+    public synchronized void materializeExternalAssignment(Order order,
+                                                           DispatchPlan plan,
+                                                           Instant decisionTime) {
+        if (order == null || plan == null || plan.getDriver() == null || plan.getSequence().isEmpty()) {
+            return;
+        }
+        attachExternalOrder(order);
+        Driver runtimeDriver = upsertExternalDriverSession(
+                plan.getDriver().getId(),
+                plan.getDriver().getCurrentLocation(),
+                false);
+        if (runtimeDriver == null) {
+            return;
+        }
+        Instant resolvedDecisionTime = decisionTime == null ? Instant.now() : decisionTime;
+        order.assignDriver(runtimeDriver.getId(), resolvedDecisionTime);
+        order.setDecisionTraceId(plan.getTraceId());
+        order.setBundle(plan.getBundle().bundleId());
+        order.setPredictedLateRisk(plan.getLateRisk());
+        order.setPredictedBundleFit(plan.getBundleEfficiency());
+        order.setPredictedTravelTime(plan.getPredictedTotalMinutes());
+        order.setPredictedAssignmentConfidence(plan.getConfidence());
+
+        runtimeDriver.addOrder(order.getId());
+        runtimeDriver.clearPendingRoute();
+        runtimeDriver.clearRouteWaypoints();
+        runtimeDriver.setAssignedSequence(plan.getSequence());
+        runtimeDriver.setTargetLocation(null);
+        runtimeDriver.setActiveBundleId(plan.getBundle().bundleId());
+        queueDriverRoute(runtimeDriver, plan.getSequence().get(0).location(), DriverState.PICKUP_EN_ROUTE, 0);
+    }
+
+    public synchronized void advanceExternalTask(String orderId,
+                                                 String driverId,
+                                                 OrderStatus targetStatus,
+                                                 Instant updatedAt) {
+        if (orderId == null || orderId.isBlank() || targetStatus == null) {
+            return;
+        }
+        Order order = activeOrders.stream()
+                .filter(candidate -> orderId.equals(candidate.getId()))
+                .findFirst()
+                .orElse(null);
+        if (order == null) {
+            return;
+        }
+        Driver driver = driverId == null || driverId.isBlank()
+                ? null
+                : drivers.stream().filter(candidate -> driverId.equals(candidate.getId())).findFirst().orElse(null);
+        Instant now = updatedAt == null ? Instant.now() : updatedAt;
+
+        switch (targetStatus) {
+            case PICKUP_EN_ROUTE -> {
+                order.markPickupStarted(now);
+                queueExternalRouteForOrder(driver, order, DispatchPlan.Stop.StopType.PICKUP, DriverState.PICKUP_EN_ROUTE);
+            }
+            case PICKED_UP -> {
+                order.markPickedUp(now);
+                if (driver != null) {
+                    driver.markFirstPickupCompleted();
+                    driver.advanceSequenceIndex();
+                }
+                queueExternalRouteForOrder(driver, order, DispatchPlan.Stop.StopType.DROPOFF, DriverState.DELIVERING);
+            }
+            case DROPOFF_EN_ROUTE -> {
+                order.markDropoffStarted(now);
+                queueExternalRouteForOrder(driver, order, DispatchPlan.Stop.StopType.DROPOFF, DriverState.DELIVERING);
+            }
+            case DELIVERED -> {
+                order.markDelivered(now);
+                activeOrders.removeIf(candidate -> candidate.getId().equals(orderId));
+                if (completedOrders.stream().noneMatch(candidate -> candidate.getId().equals(orderId))) {
+                    completedOrders.add(order);
+                }
+                clearExternalDriverState(driver, orderId);
+            }
+            case FAILED -> {
+                order.markFailed("driver_reported_failure", now);
+                activeOrders.removeIf(candidate -> candidate.getId().equals(orderId));
+                if (cancelledOrders.stream().noneMatch(candidate -> candidate.getId().equals(orderId))) {
+                    cancelledOrders.add(order);
+                }
+                clearExternalDriverState(driver, orderId);
+            }
+            case CANCELLED -> {
+                order.markCancelled("cancelled", now);
+                activeOrders.removeIf(candidate -> candidate.getId().equals(orderId));
+                if (cancelledOrders.stream().noneMatch(candidate -> candidate.getId().equals(orderId))) {
+                    cancelledOrders.add(order);
+                }
+                clearExternalDriverState(driver, orderId);
+            }
+            default -> {
+            }
+        }
+    }
+
+    public synchronized void cancelExternalOrder(String orderId,
+                                                 String reason,
+                                                 Instant cancelledAt) {
+        if (orderId == null || orderId.isBlank()) {
+            return;
+        }
+        Order order = activeOrders.stream()
+                .filter(candidate -> orderId.equals(candidate.getId()))
+                .findFirst()
+                .orElse(null);
+        if (order == null) {
+            return;
+        }
+        order.markCancelled(reason == null || reason.isBlank() ? "cancelled" : reason,
+                cancelledAt == null ? Instant.now() : cancelledAt);
+        activeOrders.removeIf(candidate -> candidate.getId().equals(orderId));
+        if (cancelledOrders.stream().noneMatch(candidate -> candidate.getId().equals(orderId))) {
+            cancelledOrders.add(order);
+        }
+        if (order.getAssignedDriverId() != null) {
+            Driver driver = drivers.stream()
+                    .filter(candidate -> order.getAssignedDriverId().equals(candidate.getId()))
+                    .findFirst()
+                    .orElse(null);
+            clearExternalDriverState(driver, orderId);
+        }
+    }
     public void setOmegaAblationMode(OmegaDispatchAgent.AblationMode ablationMode) {
         omegaAgent.setAblationMode(ablationMode);
     }
@@ -2201,5 +2370,43 @@ public class SimulationEngine {
         long globalSequence = GLOBAL_RUN_SEQUENCE.incrementAndGet();
         return "RUN-s" + randomSeed + "-" + String.format("%06d", sequence)
                 + "-g" + String.format("%06d", globalSequence);
+    }
+
+    private void queueExternalRouteForOrder(Driver driver,
+                                            Order order,
+                                            DispatchPlan.Stop.StopType stopType,
+                                            DriverState driverState) {
+        if (driver == null || order == null || stopType == null || driverState == null) {
+            return;
+        }
+        DispatchPlan.Stop targetStop = driver.getAssignedSequence() == null
+                ? null
+                : driver.getAssignedSequence().stream()
+                .filter(stop -> order.getId().equals(stop.orderId()) && stop.type() == stopType)
+                .findFirst()
+                .orElse(null);
+        if (targetStop == null) {
+            return;
+        }
+        int sequenceIndex = driver.getAssignedSequence().indexOf(targetStop);
+        driver.clearPendingRoute();
+        driver.clearRouteWaypoints();
+        driver.setTargetLocation(null);
+        queueDriverRoute(driver, targetStop.location(), driverState, sequenceIndex);
+    }
+
+    private void clearExternalDriverState(Driver driver, String orderId) {
+        if (driver == null) {
+            return;
+        }
+        driver.removeOrder(orderId);
+        driver.clearPendingRoute();
+        driver.clearRouteWaypoints();
+        driver.setAssignedSequence(null);
+        driver.setTargetLocation(null);
+        driver.setActiveBundleId(null);
+        if (driver.getActiveOrderIds().isEmpty()) {
+            driver.setState(DriverState.ONLINE_IDLE);
+        }
     }
 }

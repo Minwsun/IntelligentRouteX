@@ -70,6 +70,7 @@ public class DriverOperationsService {
         );
         driverFleetRepository.saveDriverSession(state);
         refreshPresence(state);
+        runtimeBridge.syncDriverSession(state);
         eventPublisher.publish("driver.session_started.v1", "DRIVER", request.driverId(), new Events.DriverOnline(request.driverId()));
         return state;
     }
@@ -79,6 +80,7 @@ public class DriverOperationsService {
             DriverSessionState updated = existing.withHeartbeat();
             driverFleetRepository.saveDriverSession(updated);
             refreshPresence(updated);
+            runtimeBridge.syncDriverSession(updated);
             return updated;
         });
     }
@@ -88,6 +90,7 @@ public class DriverOperationsService {
             DriverSessionState updated = existing.withAvailability(request.available());
             driverFleetRepository.saveDriverSession(updated);
             refreshPresence(updated);
+            runtimeBridge.syncDriverSession(updated);
             return updated;
         });
     }
@@ -99,6 +102,7 @@ public class DriverOperationsService {
             driverFleetRepository.saveDriverSession(updated);
             driverFleetRepository.recordDriverLocation(driverId, new GeoPoint(request.lat(), request.lng()), now);
             refreshPresence(updated);
+            runtimeBridge.syncDriverLocation(driverId, new GeoPoint(request.lat(), request.lng()), updated.available());
             eventPublisher.publish("driver.location_updated.v1", "DRIVER", driverId,
                     new Events.DriverLocationUpdated(driverId, new GeoPoint(request.lat(), request.lng()), request.speedKmh()));
             return updated;
@@ -130,12 +134,16 @@ public class DriverOperationsService {
                         Instant now = Instant.now();
                         orderRepository.findOrder(decision.orderId()).ifPresent(order -> {
                             order.assignDriver(driverId, now);
+                            runtimeBridge.materializeAcceptedAssignment(order, driverId);
                             orderRepository.saveOrder(order);
                             orderRepository.appendStatusHistory(statusHistory(order.getId(), order.getStatus().name(), "offer_accepted", now));
                             eventPublisher.publish("assignment.created.v1", "ORDER", order.getId(), new Events.OrderAssigned(order.getId(), driverId));
                         });
-                        driverFleetRepository.findDriverSession(driverId).ifPresent(existing ->
-                                driverFleetRepository.saveDriverSession(existing.withActiveOffer(offerId)));
+                        driverFleetRepository.findDriverSession(driverId).ifPresent(existing -> {
+                            DriverSessionState reserved = existing.withAvailability(false).withActiveOffer(offerId);
+                            driverFleetRepository.saveDriverSession(reserved);
+                            runtimeBridge.syncDriverSession(reserved);
+                        });
                     }
                     return decision;
                 }
@@ -170,14 +178,25 @@ public class DriverOperationsService {
                 case "DELIVERED" -> {
                     order.markDelivered(now);
                     eventPublisher.publish("task.status_changed.v1", "ORDER", order.getId(), new Events.OrderDelivered(order.getId()));
+                    driverFleetRepository.findDriverSession(driverId).ifPresent(existing -> {
+                        DriverSessionState released = existing.withAvailability(true).withActiveOffer("");
+                        driverFleetRepository.saveDriverSession(released);
+                        runtimeBridge.syncDriverSession(released);
+                    });
                 }
                 case "FAILED" -> {
                     order.markFailed("driver_reported_failure", now);
                     eventPublisher.publish("task.status_changed.v1", "ORDER", order.getId(), new Events.OrderFailed(order.getId(), order.getFailureReason()));
+                    driverFleetRepository.findDriverSession(driverId).ifPresent(existing -> {
+                        DriverSessionState released = existing.withAvailability(true).withActiveOffer("");
+                        driverFleetRepository.saveDriverSession(released);
+                        runtimeBridge.syncDriverSession(released);
+                    });
                 }
                 default -> {
                 }
             }
+            runtimeBridge.syncTaskStatus(order.getId(), driverId, order.getStatus(), now);
             orderRepository.saveOrder(order);
             orderRepository.appendStatusHistory(statusHistory(order.getId(), order.getStatus().name(), status.toLowerCase(), now));
             return order;

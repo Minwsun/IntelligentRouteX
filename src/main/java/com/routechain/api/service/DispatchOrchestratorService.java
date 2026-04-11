@@ -18,9 +18,11 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.time.Instant;
 
 /**
  * Lightweight dispatch entry for mobile-facing order creation.
@@ -30,6 +32,7 @@ import java.util.Map;
 public class DispatchOrchestratorService {
     private final DriverFleetRepository driverFleetRepository;
     private final OfferBrokerService offerBrokerService;
+    private final Map<String, PendingRuntimePlan> pendingRuntimePlans = new ConcurrentHashMap<>();
 
     public DispatchOrchestratorService(DriverFleetRepository driverFleetRepository,
                                        OfferBrokerService offerBrokerService) {
@@ -41,11 +44,25 @@ public class DispatchOrchestratorService {
         if (order == null) {
             return null;
         }
+        syncRuntimeDrivers();
         List<DriverSessionState> availableSessions = driverFleetRepository.allDriverSessions().stream()
                 .filter(DriverSessionState::available)
                 .toList();
+        RuntimePreview runtimePreview = runtimePreview(order, availableSessions);
+        if (runtimePreview != null) {
+            pendingRuntimePlans.put(order.getId(), new PendingRuntimePlan(
+                    order.getId(),
+                    runtimePreview.plan().getDriver().getId(),
+                    runtimePreview.plan(),
+                    Instant.now()));
+            return offerBrokerService.publishOffers(
+                    order.getId(),
+                    order.getServiceType(),
+                    List.of(runtimePreview.candidate()),
+                    1);
+        }
+        pendingRuntimePlans.remove(order.getId());
         List<DriverOfferCandidate> candidates = screenedCandidates(order, availableSessions);
-        promoteRuntimeWinner(order, availableSessions, candidates);
         ContextualPolicyDecision decision = decidePolicy(order.getServiceType(), candidates);
         return offerBrokerService.publishOffers(
                 order.getId(),
@@ -53,6 +70,20 @@ public class DispatchOrchestratorService {
                 candidates,
                 decision.offerFanout()
         );
+    }
+
+    public Optional<DispatchPlan> pendingRuntimePlan(String orderId, String driverId) {
+        PendingRuntimePlan pending = pendingRuntimePlans.get(orderId);
+        if (pending == null || driverId == null || !driverId.equals(pending.driverId())) {
+            return Optional.empty();
+        }
+        return Optional.of(pending.plan());
+    }
+
+    public void clearPendingRuntimePlan(String orderId) {
+        if (orderId != null) {
+            pendingRuntimePlans.remove(orderId);
+        }
     }
 
     private ContextualPolicyDecision decidePolicy(String serviceTier, List<DriverOfferCandidate> candidates) {
@@ -100,15 +131,13 @@ public class DispatchOrchestratorService {
         return candidates;
     }
 
-    private void promoteRuntimeWinner(Order order,
-                                      List<DriverSessionState> availableSessions,
-                                      List<DriverOfferCandidate> candidates) {
+    private RuntimePreview runtimePreview(Order order, List<DriverSessionState> availableSessions) {
         if (availableSessions.isEmpty()) {
-            return;
+            return null;
         }
         CompactDispatchDecision runtimeDecision = previewRuntimeDecision(order, availableSessions);
         if (runtimeDecision == null || runtimeDecision.plans().isEmpty()) {
-            return;
+            return null;
         }
         DispatchPlan winner = runtimeDecision.plans().get(0);
         CompactSelectedPlanEvidence evidence = runtimeDecision.selectedPlanEvidence().stream()
@@ -129,14 +158,7 @@ public class DispatchOrchestratorService {
                         winner.getTotalScore())
                         : "compact_runtime_candidate type=" + evidence.planType().name()
                         + " " + evidence.explanationSummary());
-        Map<String, DriverOfferCandidate> byDriver = new LinkedHashMap<>();
-        byDriver.put(runtimeCandidate.driverId(), runtimeCandidate);
-        for (DriverOfferCandidate candidate : candidates) {
-            byDriver.putIfAbsent(candidate.driverId(), candidate);
-        }
-        candidates.clear();
-        candidates.addAll(byDriver.values());
-        candidates.sort(Comparator.comparingDouble(DriverOfferCandidate::score).reversed());
+        return new RuntimePreview(winner, runtimeCandidate);
     }
 
     private CompactDispatchDecision previewRuntimeDecision(Order order, List<DriverSessionState> availableSessions) {
@@ -151,10 +173,30 @@ public class DispatchOrchestratorService {
         return RouteCoreRuntime.liveEngine().previewCompactDispatch(List.of(order), drivers);
     }
 
+    private void syncRuntimeDrivers() {
+        driverFleetRepository.allDriverSessions().forEach(session ->
+                RouteCoreRuntime.liveEngine().upsertExternalDriverSession(
+                        session.driverId(),
+                        new GeoPoint(session.lastLat(), session.lastLng()),
+                        session.available()));
+    }
+
     private double runtimeAcceptanceProbability(DispatchPlan plan) {
         double confidence = (plan.getOnTimeProbability() * 0.45)
                 + ((1.0 - plan.getCancellationRisk()) * 0.30)
                 + (Math.max(0.0, 1.0 - Math.min(1.0, plan.getPredictedDeadheadKm() / 4.0)) * 0.25);
         return Math.max(0.30, Math.min(0.98, confidence));
+    }
+
+    private record PendingRuntimePlan(
+            String orderId,
+            String driverId,
+            DispatchPlan plan,
+            Instant createdAt) {
+    }
+
+    private record RuntimePreview(
+            DispatchPlan plan,
+            DriverOfferCandidate candidate) {
     }
 }
