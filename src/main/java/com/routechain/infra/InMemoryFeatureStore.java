@@ -20,4 +20,19 @@ public final class InMemoryFeatureStore implements FeatureStore {
     public Optional<Map<String, Object>> get(String namespace, String key) {
         return Optional.ofNullable(namespaces.getOrDefault(namespace, Map.of()).get(key));
     }
+
+    @Override
+    public Map<String, Map<String, Object>> scan(String namespace, String keyPrefix) {
+        Map<String, Map<String, Object>> entries = namespaces.getOrDefault(namespace, Map.of());
+        if (keyPrefix == null || keyPrefix.isBlank()) {
+            return Map.copyOf(entries);
+        }
+        Map<String, Map<String, Object>> filtered = new ConcurrentHashMap<>();
+        entries.forEach((key, value) -> {
+            if (key.startsWith(keyPrefix)) {
+                filtered.put(key, value);
+            }
+        });
+        return Map.copyOf(filtered);
+    }
 }

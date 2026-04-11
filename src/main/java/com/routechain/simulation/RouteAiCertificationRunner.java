@@ -1,6 +1,7 @@
 package com.routechain.simulation;
 
 import com.google.gson.Gson;
+import com.routechain.infra.ArtifactPaths;
 import com.routechain.infra.GsonSupport;
 
 import java.io.IOException;
@@ -18,7 +19,7 @@ import java.util.stream.Collectors;
  */
 public final class RouteAiCertificationRunner {
     private static final Gson GSON = GsonSupport.pretty();
-    private static final Path ROOT = Path.of("build", "routechain-apex", "benchmarks");
+    private static final Path ROOT = ArtifactPaths.benchmarksRoot();
     private static final Path RUNTIME_SLO_JSON = ROOT.resolve("runtime_slo_summary.json");
     private static final Path COMPARES_DIR = ROOT.resolve("compares");
     private static final Path RUNS_DIR = ROOT.resolve("runs");
@@ -380,3 +381,4 @@ public final class RouteAiCertificationRunner {
         }
     }
 }
+

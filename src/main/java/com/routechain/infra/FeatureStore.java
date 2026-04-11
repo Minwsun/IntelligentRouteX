@@ -9,4 +9,5 @@ import java.util.Optional;
 public interface FeatureStore {
     void put(String namespace, String key, Map<String, Object> value);
     Optional<Map<String, Object>> get(String namespace, String key);
+    Map<String, Map<String, Object>> scan(String namespace, String keyPrefix);
 }

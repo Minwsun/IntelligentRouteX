@@ -313,6 +313,14 @@ val routeIntelligenceVerdictSmokeSummary by tasks.registering(JavaExec::class) {
     args("smoke")
 }
 
+val routeIntelligenceDemoProofSummary by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Runs the curated lecturer-facing demo proof for adaptive route intelligence."
+    mainClass.set("com.routechain.simulation.RouteIntelligenceDemoProofRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("demo")
+}
+
 val routeIntelligenceVerdictCertificationSummary by tasks.registering(JavaExec::class) {
     group = "verification"
     description = "Writes a certification-lane verdict for AI presence and route intelligence."
@@ -401,6 +409,11 @@ routeIntelligenceVerdictSmokeSummary.configure {
     mustRunAfter("performanceBenchmarkSmoke")
 }
 
+routeIntelligenceDemoProofSummary.configure {
+    dependsOn("routeIntelligenceVerdictSmoke")
+    mustRunAfter("routeIntelligenceVerdictSmoke")
+}
+
 routeIntelligenceVerdictCertificationSummary.configure {
     mustRunAfter("test")
     mustRunAfter(aiInfluenceAblationCertification)
@@ -480,6 +493,15 @@ tasks.register("routeIntelligenceVerdictCertification") {
     dependsOn(batchIntelligenceCertificationSummary)
     dependsOn(aiInfluenceAblationCertification)
     dependsOn(routeIntelligenceVerdictCertificationSummary)
+}
+
+tasks.register("routeIntelligenceDemoProof") {
+    group = "verification"
+    description = "Runs the curated demo pack and emits a lecturer-facing route intelligence proof."
+    dependsOn(cleanBenchmarkArtifacts)
+    dependsOn("test")
+    dependsOn("routeIntelligenceVerdictSmoke")
+    dependsOn(routeIntelligenceDemoProofSummary)
 }
 
 tasks.register<JavaExec>("soakBenchmark") {

@@ -25,6 +25,7 @@ public final class DefaultModelArtifactProvider implements ModelArtifactProvider
     private final Map<String, Object> artifacts = new ConcurrentHashMap<>();
     private final Map<String, ModelBundleManifest> activeBundles = new ConcurrentHashMap<>();
     private final Map<String, List<ModelBundleManifest>> challengerBundles = new ConcurrentHashMap<>();
+    private final Map<String, BanditPosteriorSnapshot> banditPosteriors = new ConcurrentHashMap<>();
 
     public DefaultModelArtifactProvider() {
         this(DEFAULT_REGISTRY_PATH);
@@ -108,6 +109,19 @@ public final class DefaultModelArtifactProvider implements ModelArtifactProvider
             }
         }
         return false;
+    }
+
+    @Override
+    public BanditPosteriorSnapshot banditPosteriorSnapshot(String artifactKey) {
+        return banditPosteriors.get(normalizeKey(artifactKey));
+    }
+
+    @Override
+    public void registerBanditPosterior(String artifactKey, BanditPosteriorSnapshot snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        banditPosteriors.put(normalizeKey(artifactKey), snapshot);
     }
 
     private String normalizeKey(String artifactKey) {

@@ -1,6 +1,7 @@
 package com.routechain.infra;
 
 import com.routechain.ai.DispatchBrainAgent;
+import com.routechain.ai.BanditPosteriorSnapshot;
 import com.routechain.ai.DefaultLLMEscalationGate;
 import com.routechain.ai.DefaultModelArtifactProvider;
 import com.routechain.ai.GroqLLMAdvisorClient;
@@ -22,13 +23,14 @@ import com.routechain.simulation.DispatchOptimizer;
 import com.routechain.simulation.TimefoldOnlineOptimizer;
 
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Central bootstrap for the local-first RouteChain Apex platform runtime.
  */
 public final class PlatformRuntimeBootstrap {
-    private static final Path ROOT = Path.of("build", "routechain-apex");
+    private static final Path ROOT = ArtifactPaths.root();
     private static final AtomicBoolean INITIALIZED = new AtomicBoolean(false);
 
     private static final LocalAdminQueryService ADMIN_QUERY_SERVICE = new LocalAdminQueryService();
@@ -40,9 +42,9 @@ public final class PlatformRuntimeBootstrap {
             new TrafficFeatureEstimator(FEATURE_STORE);
     private static final DispatchOptimizer DISPATCH_OPTIMIZER = new TimefoldOnlineOptimizer();
     private static final JsonlDispatchFactSink DISPATCH_FACT_SINK =
-            new JsonlDispatchFactSink(ROOT.resolve("facts"));
+            new JsonlDispatchFactSink(ArtifactPaths.factsRoot());
     private static final JsonlCanonicalEventPublisher CANONICAL_EVENT_PUBLISHER =
-            new JsonlCanonicalEventPublisher(ROOT.resolve("event-tape"));
+            new JsonlCanonicalEventPublisher(ArtifactPaths.eventTapeRoot());
     private static final DefaultModelArtifactProvider MODEL_ARTIFACT_PROVIDER =
             new DefaultModelArtifactProvider();
     private static final OfflineFallbackLLMAdvisorClient OFFLINE_LLM_ADVISOR_CLIENT =
@@ -79,6 +81,10 @@ public final class PlatformRuntimeBootstrap {
 
     public static FeatureStore getFeatureStore() {
         return FEATURE_STORE;
+    }
+
+    public static Map<String, Map<String, Object>> scanFeatureStore(String namespace, String keyPrefix) {
+        return FEATURE_STORE.scan(namespace, keyPrefix);
     }
 
     public static GraphShadowProjector getGraphShadowProjector() {
@@ -211,6 +217,26 @@ public final class PlatformRuntimeBootstrap {
                 30000,
                 "deterministic-no-prior",
                 false
+        ));
+        MODEL_ARTIFACT_PROVIDER.registerBanditPosterior("route-utility-bandit", new BanditPosteriorSnapshot(
+                -0.28,
+                0.22,
+                0.18,
+                -0.26,
+                -0.30,
+                0.30,
+                0.22,
+                -0.14,
+                0.72,
+                0.62,
+                0.60,
+                0.76,
+                0.74,
+                0.72,
+                0.62,
+                0.56,
+                0L,
+                0L
         ));
     }
 

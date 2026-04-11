@@ -34,4 +34,12 @@ public interface ModelArtifactProvider {
     default boolean promoteBundle(String artifactKey, String modelVersion) {
         return false;
     }
+
+    default BanditPosteriorSnapshot banditPosteriorSnapshot(String artifactKey) {
+        return null;
+    }
+
+    default void registerBanditPosterior(String artifactKey, BanditPosteriorSnapshot snapshot) {
+        // optional extension point
+    }
 }

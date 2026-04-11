@@ -10,6 +10,9 @@ public final class EventContractCatalog {
     public static final String DISPATCH_DECISION_V2 = "dispatch.decision.v2";
     public static final String DISPATCH_OUTCOME_V2 = "dispatch.outcome.v2";
     public static final String FEATURE_SNAPSHOT_V2 = "feature.snapshot.v2";
+    public static final String ZONE_LIVE_STATE_V1 = "zone.live_state.v1";
+    public static final String CORRIDOR_LIVE_STATE_V1 = "corridor.live_state.v1";
+    public static final String OPPORTUNITY_MAP_V1 = "opportunity.map.v1";
     public static final String MODEL_INFERENCE_V1 = "model.inference.v1";
     public static final String BENCHMARK_MANIFEST_V2 = "benchmark.manifest.v2";
 
@@ -18,6 +21,9 @@ public final class EventContractCatalog {
             DISPATCH_DECISION_V2, "v2",
             DISPATCH_OUTCOME_V2, "v2",
             FEATURE_SNAPSHOT_V2, "v2",
+            ZONE_LIVE_STATE_V1, "v1",
+            CORRIDOR_LIVE_STATE_V1, "v1",
+            OPPORTUNITY_MAP_V1, "v1",
             MODEL_INFERENCE_V1, "v1",
             BENCHMARK_MANIFEST_V2, "v2"
     );

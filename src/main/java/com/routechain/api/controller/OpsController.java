@@ -2,9 +2,13 @@ package com.routechain.api.controller;
 
 import com.routechain.api.security.ActorAccessGuard;
 import com.routechain.api.service.OpsArtifactService;
+import com.routechain.api.service.RouteIntelligenceLiveCaseService;
+import com.routechain.api.service.RouteIntelligenceProofService;
 import com.routechain.infra.AdminQueryService;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -16,11 +20,17 @@ import java.util.Map;
 @RequestMapping("/v1/ops")
 public class OpsController {
     private final OpsArtifactService opsArtifactService;
+    private final RouteIntelligenceLiveCaseService routeIntelligenceLiveCaseService;
+    private final RouteIntelligenceProofService routeIntelligenceProofService;
     private final ActorAccessGuard actorAccessGuard;
 
     public OpsController(OpsArtifactService opsArtifactService,
+                         RouteIntelligenceLiveCaseService routeIntelligenceLiveCaseService,
+                         RouteIntelligenceProofService routeIntelligenceProofService,
                          ActorAccessGuard actorAccessGuard) {
         this.opsArtifactService = opsArtifactService;
+        this.routeIntelligenceLiveCaseService = routeIntelligenceLiveCaseService;
+        this.routeIntelligenceProofService = routeIntelligenceProofService;
         this.actorAccessGuard = actorAccessGuard;
     }
 
@@ -70,5 +80,46 @@ public class OpsController {
                 "adminSnapshot", opsArtifactService.adminSnapshot(),
                 "marketplaceEdges", opsArtifactService.marketplaceEdges(8)
         );
+    }
+
+    @GetMapping("/proof/cases")
+    public List<?> proofCases() {
+        actorAccessGuard.requireOps();
+        return routeIntelligenceProofService.listProofCases();
+    }
+
+    @PostMapping("/proof/cases/{caseId}/run")
+    public Object runProofCase(@PathVariable String caseId,
+                               @RequestParam(defaultValue = "shadow") String mode) {
+        actorAccessGuard.requireOps();
+        return routeIntelligenceProofService.runProofCase(caseId, mode);
+    }
+
+    @GetMapping("/proof/cases/{caseId}/compare")
+    public Map<String, Object> compareProofCase(@PathVariable String caseId,
+                                                @RequestParam(defaultValue = "shadow") String mode,
+                                                @RequestParam(required = false) List<String> policies) {
+        actorAccessGuard.requireOps();
+        return routeIntelligenceProofService.comparePolicies(caseId, mode, policies);
+    }
+
+    @GetMapping("/proof/control-surface")
+    public Map<String, Object> proofControlSurface() {
+        actorAccessGuard.requireOps();
+        return routeIntelligenceProofService.controlSurface();
+    }
+
+    @GetMapping("/proof/live-case")
+    public Object buildSelectedLiveCase(@RequestParam(required = false) String pickupCellId,
+                                        @RequestParam(required = false) String driverId,
+                                        @RequestParam(defaultValue = "shadow") String mode) {
+        actorAccessGuard.requireOps();
+        return routeIntelligenceLiveCaseService.buildSelectedLiveCase(pickupCellId, driverId, mode);
+    }
+
+    @GetMapping(value = "/proof/shell", produces = MediaType.TEXT_HTML_VALUE)
+    public String proofShell() {
+        actorAccessGuard.requireOps();
+        return routeIntelligenceProofService.proofShellHtml();
     }
 }

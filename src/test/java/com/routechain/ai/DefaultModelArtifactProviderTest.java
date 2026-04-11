@@ -44,4 +44,17 @@ class DefaultModelArtifactProviderTest {
         assertTrue(active.champion());
         assertEquals("plan-ranker-model-online-fallback-v1", active.modelVersion());
     }
+
+    @Test
+    void shouldStoreBanditPosteriorSnapshot() {
+        DefaultModelArtifactProvider provider = new DefaultModelArtifactProvider();
+        BanditPosteriorSnapshot snapshot = new BanditPosteriorSnapshot(
+                -0.2, 0.18, 0.12, -0.18, -0.16, 0.15, 0.11, -0.08,
+                0.55, 0.54, 0.50, 0.60, 0.58, 0.49, 0.45, 0.44,
+                12L, 2L);
+
+        provider.registerBanditPosterior("route-utility-bandit", snapshot);
+
+        assertEquals(snapshot, provider.banditPosteriorSnapshot("route-utility-bandit"));
+    }
 }
