@@ -1,7 +1,11 @@
 package com.routechain.api.service;
 
+import com.routechain.core.CompactEvidenceBundle;
+import com.routechain.infra.RouteCoreRuntime;
 import com.routechain.infra.AdminQueryService;
 import com.routechain.infra.PlatformRuntimeBootstrap;
+import com.routechain.simulation.CompactRuntimeStatusView;
+import com.routechain.simulation.SimulationEngine;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -47,6 +51,18 @@ public class OpsArtifactService {
                         row.getOrDefault("recommendation", "")
                 ))
                 .toList();
+    }
+
+    public SimulationEngine.DispatchMode liveDispatchMode() {
+        return RouteCoreRuntime.liveEngine().getDispatchMode();
+    }
+
+    public CompactRuntimeStatusView compactRuntimeStatus() {
+        return RouteCoreRuntime.liveEngine().getCurrentCompactStatus();
+    }
+
+    public CompactEvidenceBundle compactEvidence() {
+        return RouteCoreRuntime.liveEngine().getLatestCompactEvidence();
     }
 
     private String readText(Path path) {

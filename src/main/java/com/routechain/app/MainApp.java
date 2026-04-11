@@ -8,6 +8,7 @@ import com.routechain.infra.Events;
 import com.routechain.infra.MapBridge;
 import com.routechain.infra.RouteCoreRuntime;
 import com.routechain.core.CompactEvidenceBundle;
+import com.routechain.simulation.CompactRuntimeStatusView;
 import com.routechain.simulation.JavaFxDemoScenarioSpec;
 import com.routechain.simulation.SimulationEngine;
 import com.routechain.simulation.SmartDemo3x10Scenario;
@@ -1044,6 +1045,7 @@ public class MainApp extends Application {
                 }
 
                 CompactEvidenceBundle evidence = simEngine.getLatestCompactEvidence();
+                CompactRuntimeStatusView status = simEngine.getCurrentCompactStatus();
                 if (evidence != null && !evidence.explanations().isEmpty()) {
                     aiInsightTitle.set("COMPACT DECISION");
                     aiInsightText.set(evidence.explanations().get(0).summary());
@@ -1057,17 +1059,27 @@ public class MainApp extends Application {
                     }
                 }
 
-                if (evidence != null && evidence.weightSnapshotAfter() != null) {
-                    double[] clearWeights = evidence.weightSnapshotAfter()
-                            .weights()
-                            .getOrDefault(com.routechain.core.RegimeKey.CLEAR_NORMAL, new double[0]);
-                    if (clearWeights.length >= 3) {
-                        compactWeightText.set(String.format(
-                                "w_clear: on-time %.2f | deadhead %.2f | bundle %.2f",
-                                clearWeights[0],
-                                clearWeights[1],
-                                clearWeights[2]));
-                    }
+                if (status != null) {
+                    String topContributors = status.topFeatureContributors().isEmpty()
+                            ? "n/a"
+                            : String.join(", ", status.topFeatureContributors());
+                    String penalties = status.dualPenalties().isEmpty()
+                            ? "n/a"
+                            : status.dualPenalties().entrySet().stream()
+                                    .map(entry -> entry.getKey() + "=" + String.format("%.2f", entry.getValue()))
+                                    .toList()
+                                    .toString();
+                    compactWeightText.set(String.format(
+                            "regime %s | top %s%npenalties %s%nsnapshot %s | rollback %s | frozen %s%nmae %.2f | reward %.2f | pass %.2f",
+                            status.regime(),
+                            topContributors,
+                            penalties,
+                            status.snapshotTag(),
+                            status.rollbackAvailable() ? "ready" : "none",
+                            status.learningFrozen(),
+                            status.rollingMae(),
+                            status.rollingRewardMean(),
+                            status.verdictPassRate()));
                 }
             });
         });

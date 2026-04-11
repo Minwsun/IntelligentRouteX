@@ -9,7 +9,15 @@ import java.time.Instant;
 import java.util.List;
 
 public class CompactCoreAdapter {
-    private final CompactDispatchCore compactDispatchCore = new CompactDispatchCore();
+    private final CompactDispatchCore compactDispatchCore;
+
+    public CompactCoreAdapter() {
+        this(CompactPolicyConfig.defaults());
+    }
+
+    public CompactCoreAdapter(CompactPolicyConfig policyConfig) {
+        this.compactDispatchCore = new CompactDispatchCore(policyConfig);
+    }
 
     public CompactDispatchDecision dispatch(List<Order> openOrders,
                                             List<Driver> availableDrivers,

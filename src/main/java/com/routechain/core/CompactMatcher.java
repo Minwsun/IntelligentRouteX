@@ -12,43 +12,42 @@ import java.util.Set;
 
 public class CompactMatcher {
 
-    public List<DispatchPlan> match(List<DispatchPlan> candidates) {
-        List<DispatchPlan> ranked = new ArrayList<>(candidates);
+    public List<CompactCandidateEvaluation> match(List<CompactCandidateEvaluation> candidates) {
+        List<CompactCandidateEvaluation> ranked = new ArrayList<>(candidates);
         ranked.sort(Comparator
-                .comparingDouble(DispatchPlan::getTotalScore).reversed()
-                .thenComparingDouble(DispatchPlan::getConfidence).reversed()
-                .thenComparingInt(DispatchPlan::getBundleSize).reversed());
+                .comparingDouble((CompactCandidateEvaluation evaluation) -> evaluation.plan().getTotalScore()).reversed()
+                .thenComparingDouble(CompactCandidateEvaluation::baseConfidence).reversed()
+                .thenComparingInt(evaluation -> evaluation.plan().getBundleSize()).reversed());
 
         Set<String> usedDrivers = new HashSet<>();
         Set<String> usedOrders = new HashSet<>();
-        List<DispatchPlan> selected = new ArrayList<>();
-        for (DispatchPlan plan : ranked) {
-            if (!usedDrivers.add(plan.getDriver().getId())) {
+        List<CompactCandidateEvaluation> selected = new ArrayList<>();
+        for (CompactCandidateEvaluation evaluation : ranked) {
+            DispatchPlan plan = evaluation.plan();
+            String driverId = plan.getDriver().getId();
+            if (usedDrivers.contains(driverId)) {
                 continue;
             }
-            boolean conflict = false;
-            for (Order order : plan.getOrders()) {
-                if (!usedOrders.add(order.getId())) {
-                    conflict = true;
-                    break;
-                }
-            }
+            List<String> orderIds = plan.getOrders().stream().map(Order::getId).toList();
+            boolean conflict = orderIds.stream().anyMatch(usedOrders::contains);
             if (conflict) {
-                usedDrivers.remove(plan.getDriver().getId());
-                for (Order order : plan.getOrders()) {
-                    if (!selected.stream().anyMatch(existing -> existing.getOrders().contains(order))) {
-                        usedOrders.remove(order.getId());
-                    }
-                }
                 continue;
             }
-            if (plan.getBundleSize() >= 3) {
-                plan.setSelectionBucket(SelectionBucket.WAVE_LOCAL);
-            } else {
-                plan.setSelectionBucket(SelectionBucket.SINGLE_LOCAL);
-            }
-            selected.add(plan);
+            usedDrivers.add(driverId);
+            usedOrders.addAll(orderIds);
+            plan.setConfidence(evaluation.baseConfidence());
+            plan.setSelectionBucket(mapBucket(plan.getCompactPlanType()));
+            selected.add(evaluation);
         }
         return selected;
+    }
+
+    private SelectionBucket mapBucket(CompactPlanType planType) {
+        return switch (planType) {
+            case SINGLE_LOCAL -> SelectionBucket.SINGLE_LOCAL;
+            case BATCH_2_COMPACT -> SelectionBucket.EXTENSION_LOCAL;
+            case WAVE_3_CLEAN -> SelectionBucket.WAVE_LOCAL;
+            case FALLBACK_LOCAL -> SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD;
+        };
     }
 }

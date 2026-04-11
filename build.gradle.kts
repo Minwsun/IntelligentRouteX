@@ -201,16 +201,42 @@ tasks.register<JavaExec>("performanceBenchmarkSmoke") {
 
 tasks.register<JavaExec>("compactBenchmark") {
     group = "application"
-    description = "Runs the compact core benchmark lane against the nearest-greedy baseline."
+    description = "Runs the compact core smoke benchmark lane against the nearest-greedy baseline."
     mainClass.set("com.routechain.simulation.CompactBenchmarkRunner")
     classpath = sourceSets["main"].runtimeClasspath
+    args("smoke")
+}
+
+tasks.register<JavaExec>("compactSmoke") {
+    group = "verification"
+    description = "Runs the compact smoke lane with 3 seeds across the v1 regimes."
+    mainClass.set("com.routechain.simulation.CompactBenchmarkRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("smoke")
+}
+
+tasks.register<JavaExec>("compactCertification") {
+    group = "verification"
+    description = "Runs the compact certification lane with 20 seeds across the v1 regimes."
+    mainClass.set("com.routechain.simulation.CompactVerdictRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("certification")
+}
+
+tasks.register<JavaExec>("compactNightly") {
+    group = "verification"
+    description = "Runs the compact nightly lane with 60 seeds across the v1 regimes."
+    mainClass.set("com.routechain.simulation.CompactVerdictRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("nightly")
 }
 
 tasks.register<JavaExec>("compactVerdict") {
     group = "verification"
-    description = "Runs the compact verdict lane and writes JSON/MD artifacts."
+    description = "Runs the compact smoke verdict lane and writes JSON/MD artifacts."
     mainClass.set("com.routechain.simulation.CompactVerdictRunner")
     classpath = sourceSets["main"].runtimeClasspath
+    args("smoke")
 }
 
 val routeAiRegressionSmoke by tasks.registering(Test::class) {

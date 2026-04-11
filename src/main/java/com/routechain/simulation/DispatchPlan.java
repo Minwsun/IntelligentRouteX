@@ -1,6 +1,7 @@
 package com.routechain.simulation;
 
 import com.routechain.ai.StressRegime;
+import com.routechain.core.CompactPlanType;
 import com.routechain.domain.*;
 import com.routechain.graph.GraphExplanationTrace;
 
@@ -95,6 +96,7 @@ public class DispatchPlan {
     private double confidence;
     private String traceId;
     private boolean legacyGuardrailPlan;
+    private CompactPlanType compactPlanType = CompactPlanType.SINGLE_LOCAL;
 
     public DispatchPlan(Driver driver, Bundle bundle, List<Stop> sequence) {
         this.driver = driver;
@@ -197,6 +199,7 @@ public class DispatchPlan {
     public double getConfidence() { return confidence; }
     public String getTraceId() { return traceId; }
     public boolean isLegacyGuardrailPlan() { return legacyGuardrailPlan; }
+    public CompactPlanType getCompactPlanType() { return compactPlanType; }
 
     /** Get the last dropoff point (end zone). */
     public GeoPoint getEndZonePoint() {
@@ -359,6 +362,9 @@ public class DispatchPlan {
     public void setTraceId(String v) { this.traceId = v; }
     public void setLegacyGuardrailPlan(boolean legacyGuardrailPlan) {
         this.legacyGuardrailPlan = legacyGuardrailPlan;
+    }
+    public void setCompactPlanType(CompactPlanType compactPlanType) {
+        this.compactPlanType = compactPlanType == null ? CompactPlanType.SINGLE_LOCAL : compactPlanType;
     }
 
     private double clamp01(double value) {

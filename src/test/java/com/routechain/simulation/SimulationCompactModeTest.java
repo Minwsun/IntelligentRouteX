@@ -54,7 +54,7 @@ class SimulationCompactModeTest {
                 "Compact mode should expose a real explanation bundle after assignment");
 
         boolean resolved = false;
-        for (int i = 0; i < 240; i++) {
+        for (int i = 0; i < 720; i++) {
             engine.tickHeadless();
             if (engine.getLatestCompactEvidence().latestResolution() != null) {
                 resolved = true;

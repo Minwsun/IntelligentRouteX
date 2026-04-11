@@ -28,6 +28,7 @@ public class DecisionExplainer {
         return new CompactDecisionExplanation(
                 winner.getBundle().bundleId(),
                 winner.getDriver().getId(),
+                winner.getCompactPlanType(),
                 summary,
                 breakdown);
     }

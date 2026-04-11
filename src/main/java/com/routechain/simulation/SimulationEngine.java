@@ -9,8 +9,6 @@ import com.routechain.infra.DatabaseStorageService;
 import com.routechain.infra.PlatformRuntimeBootstrap;
 import com.routechain.ai.OmegaDispatchAgent;
 import com.routechain.core.CompactCoreAdapter;
-import com.routechain.core.CompactDecisionLedger;
-import com.routechain.core.CompactDecisionResolution;
 import com.routechain.core.CompactDispatchDecision;
 import com.routechain.core.CompactEvidenceBundle;
 import com.routechain.core.CompactSelectedPlanEvidence;
@@ -119,8 +117,7 @@ public class SimulationEngine {
     private final OmegaDispatchAgent omegaAgent;
     private final DispatchAgent legacyDispatchAgent;
     private final NearestGreedyBaseline nearestGreedyBaseline = new NearestGreedyBaseline();
-    private final CompactCoreAdapter compactCoreAdapter;
-    private final CompactDecisionLedger compactDecisionLedger = new CompactDecisionLedger();
+    private final CompactRuntimeCoordinator compactRuntimeCoordinator;
     private final ReDispatchEngine reDispatchEngine = new ReDispatchEngine();
     private final OsrmRoutingService routingService = new OsrmRoutingService();
     private final DatabaseStorageService dbService = new DatabaseStorageService();
@@ -139,11 +136,9 @@ public class SimulationEngine {
     private static final int LOCAL_MINI_DISPATCH_MAX_CANDIDATES = 10;
     private static final double LOCAL_MINI_DISPATCH_MAX_DETOUR_KM = 1.1;
     private static final double LOCAL_MINI_DISPATCH_MAX_FIRST_PICKUP_DELAY_MIN = 4.0;
-    private static final long POST_DROP_HIT_WINDOW_TICKS = 10L;
     private volatile boolean miniDispatchRequested = false;
     private final Map<String, Integer> holdCyclesByDriver = new ConcurrentHashMap<>();
     private final Map<String, Long> postDropIdleTickByDriver = new ConcurrentHashMap<>();
-    private volatile CompactEvidenceBundle latestCompactEvidence = CompactEvidenceBundle.empty();
 
     public SimulationEngine() {
         this(42L);
@@ -172,7 +167,7 @@ public class SimulationEngine {
         
         this.omegaAgent = new OmegaDispatchAgent(regions);
         this.legacyDispatchAgent = new DispatchAgent(regions);
-        this.compactCoreAdapter = new CompactCoreAdapter();
+        this.compactRuntimeCoordinator = new CompactRuntimeCoordinator();
     }
 
     // ── Lifecycle ───────────────────────────────────────────────────────
@@ -269,8 +264,7 @@ public class SimulationEngine {
         miniDispatchRequested = false;
         holdCyclesByDriver.clear();
         postDropIdleTickByDriver.clear();
-        compactDecisionLedger.reset();
-        latestCompactEvidence = CompactEvidenceBundle.empty();
+        compactRuntimeCoordinator.reset();
         currentRunId = nextRunId();
         runWallClockStartedNanos = System.nanoTime();
         omegaAgent.setActiveRunId(currentRunId);
@@ -313,10 +307,11 @@ public class SimulationEngine {
     public void setLegacyNearestGreedyMode(boolean legacyNearestGreedyMode) {
         this.legacyNearestGreedyMode = legacyNearestGreedyMode;
     }
-    public CompactEvidenceBundle getLatestCompactEvidence() { return latestCompactEvidence; }
+    public CompactEvidenceBundle getLatestCompactEvidence() { return compactRuntimeCoordinator.latestEvidence(); }
     public WeightSnapshot getCurrentCompactWeightSnapshot() {
-        return compactCoreAdapter.core().adaptiveWeightEngine().snapshot();
+        return compactRuntimeCoordinator.currentWeightSnapshot();
     }
+    public CompactRuntimeStatusView getCurrentCompactStatus() { return compactRuntimeCoordinator.latestStatus(); }
     public void setOmegaAblationMode(OmegaDispatchAgent.AblationMode ablationMode) {
         omegaAgent.setAblationMode(ablationMode);
     }
@@ -506,11 +501,15 @@ public class SimulationEngine {
                         && dispatchMode == DispatchMode.OMEGA
                         && hasPrePickupAugmentableDrivers()) {
                     dispatchPendingOrders(true);
+                } else if (miniDispatchRequested && dispatchMode == DispatchMode.COMPACT) {
+                    dispatchPendingOrders(true);
                 }
                 moveDrivers();
                 processDeliveries();
                 resolveExpiredCompactDecisions(clock.currentInstant());
                 if (miniDispatchRequested && dispatchMode == DispatchMode.OMEGA) {
+                    dispatchPendingOrders(true);
+                } else if (miniDispatchRequested && dispatchMode == DispatchMode.COMPACT) {
                     dispatchPendingOrders(true);
                 }
                 
@@ -843,7 +842,7 @@ public class SimulationEngine {
             totalDispatchDecisionLatencyMs += dispatchLatencyMs;
             dispatchDecisionLatencySamples.add(dispatchLatencyMs);
         } else if (dispatchMode == DispatchMode.COMPACT) {
-            compactDecision = compactCoreAdapter.dispatch(
+            compactDecision = compactRuntimeCoordinator.dispatch(
                     new ArrayList<>(pending),
                     new ArrayList<>(available),
                     new ArrayList<>(regions),
@@ -880,17 +879,11 @@ public class SimulationEngine {
 
         Instant decisionTime = clock.currentInstant();
         if (dispatchMode == DispatchMode.COMPACT && compactDecision != null) {
-            latestCompactEvidence = new CompactEvidenceBundle(
+            compactRuntimeCoordinator.beginDecision(
                     currentRunId,
                     dispatchMode.name(),
                     decisionTime,
-                    compactDecision.selectedPlanEvidence().stream()
-                            .map(CompactSelectedPlanEvidence::bundleId)
-                            .toList(),
-                    compactDecision.explanations(),
-                    compactDecision.weightSnapshotBefore(),
-                    compactDecision.weightSnapshotBefore(),
-                    latestCompactEvidence.latestResolution());
+                    compactDecision);
         }
         // Execute selected plans
         for (DispatchPlan plan : selectedPlans) {
@@ -958,14 +951,13 @@ public class SimulationEngine {
 
             Long postDropIdleTick = postDropIdleTickByDriver.remove(best.getId());
             if (postDropIdleTick != null
-                    && tickCounter.get() - postDropIdleTick <= POST_DROP_HIT_WINDOW_TICKS) {
+                    && tickCounter.get() - postDropIdleTick <= compactRuntimeCoordinator.policyConfig().postDropWindowTicks()) {
                 postDropOrderHitCount++;
                 if (dispatchMode == DispatchMode.COMPACT) {
-                    CompactDecisionResolution resolution = compactDecisionLedger.recordPostDropHit(
+                    compactRuntimeCoordinator.recordPostDropHit(
                             best.getId(),
                             tickCounter.get(),
                             decisionTime);
-                    applyCompactResolution(resolution, decisionTime);
                 }
             }
 
@@ -1053,19 +1045,11 @@ public class SimulationEngine {
             if (dispatchMode == DispatchMode.COMPACT && compactDecision != null) {
                 CompactSelectedPlanEvidence evidence = compactEvidenceByTrace.get(executablePlan.getTraceId());
                 if (evidence != null) {
-                    compactDecisionLedger.recordDecision(
-                            executablePlan.getTraceId(),
-                            best.getId(),
-                            executablePlan.getBundle().bundleId(),
-                            executablePlan.getOrders().stream().map(Order::getId).toList(),
-                            evidence.featureVector(),
-                            evidence.scoreBreakdown(),
+                    compactRuntimeCoordinator.recordSelectedPlan(
+                            executablePlan,
+                            evidence,
                             compactDecision.weightSnapshotBefore(),
-                            decisionTime,
-                            executablePlan.getPredictedDeadheadKm(),
-                            executablePlan.getCustomerFee(),
-                            executablePlan.getLastDropLandingScore(),
-                            executablePlan.getExpectedPostCompletionEmptyKm());
+                            decisionTime);
                 }
             }
 
@@ -1673,7 +1657,7 @@ public class SimulationEngine {
                             dbService.saveOrder(order);
                             if (dispatchMode == DispatchMode.COMPACT
                                     && order.getDecisionTraceId() != null) {
-                                compactDecisionLedger.recordOrderDelivered(
+                                compactRuntimeCoordinator.recordOrderDelivered(
                                         order.getDecisionTraceId(),
                                         order.getId(),
                                         !order.isLate(),
@@ -1738,7 +1722,7 @@ public class SimulationEngine {
                     postDropIdleTickByDriver.put(driver.getId(), tickCounter.get());
                     postDropOpportunityCount++;
                     if (dispatchMode == DispatchMode.COMPACT) {
-                        compactDecisionLedger.markDriverIdle(driver.getId(), tickCounter.get(), simulatedNow);
+                        compactRuntimeCoordinator.markDriverIdle(driver.getId(), tickCounter.get(), simulatedNow);
                     }
                     miniDispatchRequested = true;
                     eventBus.publish(new DriverStateChanged(driver.getId(),
@@ -1776,7 +1760,7 @@ public class SimulationEngine {
                                     driver.clearPendingRoute();
                                     clearLegacyGuardrailDriver(driver);
                                     if (dispatchMode == DispatchMode.COMPACT) {
-                                        compactDecisionLedger.markDriverIdle(
+                                        compactRuntimeCoordinator.markDriverIdle(
                                                 driver.getId(),
                                                 tickCounter.get(),
                                                 simulatedNow);
@@ -1789,7 +1773,7 @@ public class SimulationEngine {
                     dbService.saveOrder(order);
                     if (dispatchMode == DispatchMode.COMPACT
                             && order.getDecisionTraceId() != null) {
-                        compactDecisionLedger.recordOrderCancelled(
+                        compactRuntimeCoordinator.recordOrderCancelled(
                                 order.getDecisionTraceId(),
                                 order.getId());
                     }
@@ -1813,26 +1797,7 @@ public class SimulationEngine {
         if (dispatchMode != DispatchMode.COMPACT) {
             return;
         }
-        for (CompactDecisionResolution resolution : compactDecisionLedger.expirePostDrop(
-                tickCounter.get(),
-                now,
-                POST_DROP_HIT_WINDOW_TICKS)) {
-            applyCompactResolution(resolution, now);
-        }
-        compactDecisionLedger.clearResolved();
-    }
-
-    private void applyCompactResolution(CompactDecisionResolution resolution, Instant resolvedAt) {
-        if (resolution == null) {
-            return;
-        }
-        compactCoreAdapter.core().adaptiveWeightEngine().recordOutcome(
-                resolution.regimeKey(),
-                resolution.featureVector(),
-                resolution.outcomeVector());
-        WeightSnapshot snapshotAfter = compactCoreAdapter.core().adaptiveWeightEngine().snapshot();
-        CompactDecisionResolution finalized = resolution.withSnapshotAfter(snapshotAfter, resolvedAt);
-        latestCompactEvidence = latestCompactEvidence.withResolution(snapshotAfter, finalized);
+        compactRuntimeCoordinator.expire(tickCounter.get(), now);
     }
 
     private boolean isOmegaPrePickupAugmentableDriver(Driver driver) {

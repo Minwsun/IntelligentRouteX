@@ -71,4 +71,14 @@ public class OpsController {
                 "marketplaceEdges", opsArtifactService.marketplaceEdges(8)
         );
     }
+
+    @GetMapping("/compact/runtime")
+    public Map<String, Object> compactRuntime() {
+        actorAccessGuard.requireOps();
+        return Map.of(
+                "mode", opsArtifactService.liveDispatchMode().name(),
+                "compactStatus", opsArtifactService.compactRuntimeStatus(),
+                "compactEvidence", opsArtifactService.compactEvidence()
+        );
+    }
 }

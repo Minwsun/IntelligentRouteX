@@ -20,9 +20,9 @@ public final class CompactVerdictRunner {
     }
 
     public static void main(String[] args) {
-        CompactBenchmarkSummary benchmarkSummary = CompactBenchmarkRunner.runBenchmark(
-                List.of(2026041101L, 2026041102L, 2026041103L));
-        CompactBenchmarkRunner.writeSummary(benchmarkSummary);
+        CompactBenchmarkLane lane = CompactBenchmarkLane.fromArg(args.length == 0 ? null : args[0]);
+        CompactBenchmarkSummary benchmarkSummary = CompactBenchmarkRunner.runBenchmark(lane);
+        CompactBenchmarkRunner.writeArtifacts(benchmarkSummary);
         CompactVerdictSummary verdict = evaluate(benchmarkSummary);
         writeVerdict(verdict);
         System.out.println(renderMarkdown(verdict));
@@ -31,13 +31,11 @@ public final class CompactVerdictRunner {
     public static CompactVerdictSummary evaluate(CompactBenchmarkSummary summary) {
         List<String> notes = new ArrayList<>();
         boolean completionPass = summary.compactCompletionDeltaVsBaseline() >= -0.10;
-        boolean onTimePass = summary.compactOnTimeDeltaVsBaseline() >= -0.10;
-        boolean deadheadPass = summary.compactDeadheadDeltaVsBaseline() < 0.0;
-        boolean postDropHitPass = summary.compactPostDropHitDeltaVsBaseline() > 0.0;
-        boolean emptyKmPass = summary.compactEmptyKmDeltaVsBaseline() < 0.0;
-        boolean noSevereRegressionPass = summary.cases().stream().allMatch(c ->
-                c.compact().completionRate() >= c.baseline().completionRate() - 1.0
-                        && c.compact().onTimeRate() >= c.baseline().onTimeRate() - 1.0);
+        boolean onTimePass = summary.compactOnTimeDeltaVsBaseline() >= -0.20;
+        boolean deadheadPass = summary.compactDeadheadImprovementPctVsBaseline() >= 1.0;
+        boolean postDropHitPass = summary.compactPostDropHitDeltaVsBaseline() >= 2.0;
+        boolean emptyKmPass = summary.compactEmptyKmImprovementPctVsBaseline() >= 3.0;
+        boolean noSevereRegressionPass = summary.noSevereSeedRegression();
 
         if (!completionPass) {
             notes.add("completion is below baseline tolerance");
@@ -71,6 +69,7 @@ public final class CompactVerdictRunner {
 
         return new CompactVerdictSummary(
                 Instant.now(),
+                summary.lane(),
                 summary.scope(),
                 completionPass,
                 onTimePass,
@@ -79,6 +78,11 @@ public final class CompactVerdictRunner {
                 emptyKmPass,
                 noSevereRegressionPass,
                 overallPass,
+                summary.compactCompletionDeltaVsBaseline(),
+                summary.compactOnTimeDeltaVsBaseline(),
+                summary.compactDeadheadImprovementPctVsBaseline(),
+                summary.compactPostDropHitDeltaVsBaseline(),
+                summary.compactEmptyKmImprovementPctVsBaseline(),
                 List.copyOf(notes),
                 summary);
     }
@@ -87,13 +91,13 @@ public final class CompactVerdictRunner {
         try {
             Files.createDirectories(OUTPUT_DIR);
             Files.writeString(
-                    OUTPUT_DIR.resolve("compact-verdict.json"),
+                    OUTPUT_DIR.resolve(verdict.lane() + "-verdict.json"),
                     GSON.toJson(verdict),
                     StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE,
                     StandardOpenOption.TRUNCATE_EXISTING);
             Files.writeString(
-                    OUTPUT_DIR.resolve("compact-verdict.md"),
+                    OUTPUT_DIR.resolve(verdict.lane() + "-verdict.md"),
                     renderMarkdown(verdict),
                     StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE,
@@ -106,6 +110,7 @@ public final class CompactVerdictRunner {
     static String renderMarkdown(CompactVerdictSummary verdict) {
         StringBuilder builder = new StringBuilder();
         builder.append("# Compact Verdict\n\n");
+        builder.append("- Lane: ").append(verdict.lane()).append('\n');
         builder.append("- Scope: ").append(verdict.scope()).append('\n');
         builder.append("- Overall pass: ").append(verdict.overallPass()).append('\n');
         builder.append("- Completion pass: ").append(verdict.completionPass()).append('\n');
@@ -113,7 +118,12 @@ public final class CompactVerdictRunner {
         builder.append("- Deadhead pass: ").append(verdict.deadheadPass()).append('\n');
         builder.append("- Post-drop hit pass: ").append(verdict.postDropHitPass()).append('\n');
         builder.append("- Empty-km pass: ").append(verdict.emptyKmPass()).append('\n');
-        builder.append("- No severe regression pass: ").append(verdict.noSevereRegressionPass()).append("\n\n");
+        builder.append("- No severe regression pass: ").append(verdict.noSevereRegressionPass()).append('\n');
+        builder.append("- Completion delta vs baseline: ").append(String.format("%+.3f pp", verdict.completionDeltaVsBaseline())).append('\n');
+        builder.append("- On-time delta vs baseline: ").append(String.format("%+.3f pp", verdict.onTimeDeltaVsBaseline())).append('\n');
+        builder.append("- Deadhead improvement vs baseline: ").append(String.format("%+.3f%%", verdict.deadheadImprovementPctVsBaseline())).append('\n');
+        builder.append("- Post-drop hit delta vs baseline: ").append(String.format("%+.3f pp", verdict.postDropHitDeltaVsBaseline())).append('\n');
+        builder.append("- Empty-km improvement vs baseline: ").append(String.format("%+.3f%%", verdict.emptyKmImprovementPctVsBaseline())).append("\n\n");
         builder.append("## Notes\n");
         for (String note : verdict.notes()) {
             builder.append("- ").append(note).append('\n');

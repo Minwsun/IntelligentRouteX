@@ -14,8 +14,15 @@ import java.util.List;
 import java.util.Set;
 
 public class CompactCandidateGenerator {
-    private static final int DEFAULT_CAP = 6;
-    private static final int STRESS_CAP = 8;
+    private final CompactPolicyConfig policyConfig;
+
+    public CompactCandidateGenerator() {
+        this(CompactPolicyConfig.defaults());
+    }
+
+    public CompactCandidateGenerator(CompactPolicyConfig policyConfig) {
+        this.policyConfig = policyConfig == null ? CompactPolicyConfig.defaults() : policyConfig;
+    }
 
     public List<DispatchPlan> generate(List<Order> openOrders,
                                        List<Driver> availableDrivers,
@@ -41,6 +48,7 @@ public class CompactCandidateGenerator {
         for (Order order : nearbyOrders.stream().limit(2).toList()) {
             DispatchPlan plan = buildPlan(driver, List.of(order), optimizer, context, "CMP-S");
             if (plan != null && seen.add(planKey(plan))) {
+                plan.setCompactPlanType(CompactPlanType.SINGLE_LOCAL);
                 plan.setSelectionBucket(SelectionBucket.SINGLE_LOCAL);
                 plans.add(plan);
             }
@@ -49,7 +57,8 @@ public class CompactCandidateGenerator {
         for (List<Order> pair : compactPairs(nearbyOrders)) {
             DispatchPlan plan = buildPlan(driver, pair, optimizer, context, "CMP-B2");
             if (plan != null && seen.add(planKey(plan))) {
-                plan.setSelectionBucket(SelectionBucket.SINGLE_LOCAL);
+                plan.setCompactPlanType(CompactPlanType.BATCH_2_COMPACT);
+                plan.setSelectionBucket(SelectionBucket.EXTENSION_LOCAL);
                 plans.add(plan);
             }
             if (plans.size() >= cap) {
@@ -61,6 +70,7 @@ public class CompactCandidateGenerator {
         if (waveOrders.size() == 3) {
             DispatchPlan wave = buildPlan(driver, waveOrders, optimizer, context, "CMP-W3");
             if (wave != null && seen.add(planKey(wave))) {
+                wave.setCompactPlanType(CompactPlanType.WAVE_3_CLEAN);
                 wave.setSelectionBucket(SelectionBucket.WAVE_LOCAL);
                 plans.add(wave);
             }
@@ -69,6 +79,7 @@ public class CompactCandidateGenerator {
         if (plans.isEmpty() && !nearbyOrders.isEmpty()) {
             DispatchPlan fallback = buildPlan(driver, List.of(nearbyOrders.get(0)), optimizer, context, "CMP-F");
             if (fallback != null) {
+                fallback.setCompactPlanType(CompactPlanType.FALLBACK_LOCAL);
                 fallback.setSelectionBucket(SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD);
                 plans.add(fallback);
             }
@@ -83,7 +94,7 @@ public class CompactCandidateGenerator {
                 || context.trafficIntensity() >= 0.70
                 || context.weatherProfile() == WeatherProfile.HEAVY_RAIN
                 || context.weatherProfile() == WeatherProfile.STORM;
-        return stress ? STRESS_CAP : DEFAULT_CAP;
+        return stress ? policyConfig.stressCandidateCap() : policyConfig.defaultCandidateCap();
     }
 
     private List<Order> nearestOrders(Driver driver, List<Order> openOrders, int limit) {
