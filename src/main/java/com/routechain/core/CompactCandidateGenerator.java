@@ -48,8 +48,7 @@ public class CompactCandidateGenerator {
         for (Order order : nearbyOrders.stream().limit(2).toList()) {
             DispatchPlan plan = buildPlan(driver, List.of(order), optimizer, context, "CMP-S");
             if (plan != null && seen.add(planKey(plan))) {
-                plan.setCompactPlanType(CompactPlanType.SINGLE_LOCAL);
-                plan.setSelectionBucket(SelectionBucket.SINGLE_LOCAL);
+                applyCompactMetadata(plan, CompactPlanType.SINGLE_LOCAL);
                 plans.add(plan);
             }
         }
@@ -57,8 +56,7 @@ public class CompactCandidateGenerator {
         for (List<Order> pair : compactPairs(nearbyOrders)) {
             DispatchPlan plan = buildPlan(driver, pair, optimizer, context, "CMP-B2");
             if (plan != null && seen.add(planKey(plan))) {
-                plan.setCompactPlanType(CompactPlanType.BATCH_2_COMPACT);
-                plan.setSelectionBucket(SelectionBucket.EXTENSION_LOCAL);
+                applyCompactMetadata(plan, CompactPlanType.BATCH_2_COMPACT);
                 plans.add(plan);
             }
             if (plans.size() >= cap) {
@@ -70,8 +68,7 @@ public class CompactCandidateGenerator {
         if (waveOrders.size() == 3) {
             DispatchPlan wave = buildPlan(driver, waveOrders, optimizer, context, "CMP-W3");
             if (wave != null && seen.add(planKey(wave))) {
-                wave.setCompactPlanType(CompactPlanType.WAVE_3_CLEAN);
-                wave.setSelectionBucket(SelectionBucket.WAVE_LOCAL);
+                applyCompactMetadata(wave, CompactPlanType.WAVE_3_CLEAN);
                 plans.add(wave);
             }
         }
@@ -79,8 +76,7 @@ public class CompactCandidateGenerator {
         if (plans.isEmpty() && !nearbyOrders.isEmpty()) {
             DispatchPlan fallback = buildPlan(driver, List.of(nearbyOrders.get(0)), optimizer, context, "CMP-F");
             if (fallback != null) {
-                fallback.setCompactPlanType(CompactPlanType.FALLBACK_LOCAL);
-                fallback.setSelectionBucket(SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD);
+                applyCompactMetadata(fallback, CompactPlanType.FALLBACK_LOCAL);
                 plans.add(fallback);
             }
         }
@@ -230,5 +226,15 @@ public class CompactCandidateGenerator {
                 .sorted()
                 .reduce((left, right) -> left + "|" + right)
                 .orElse("__empty__");
+    }
+
+    private void applyCompactMetadata(DispatchPlan plan, CompactPlanType planType) {
+        plan.setCompactPlanType(planType);
+        plan.setSelectionBucket(switch (planType) {
+            case SINGLE_LOCAL -> SelectionBucket.SINGLE_LOCAL;
+            case BATCH_2_COMPACT -> SelectionBucket.EXTENSION_LOCAL;
+            case WAVE_3_CLEAN -> SelectionBucket.WAVE_LOCAL;
+            case FALLBACK_LOCAL -> SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD;
+        });
     }
 }

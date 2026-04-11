@@ -9,7 +9,9 @@ import com.routechain.simulation.DispatchPlan;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public class CompactDispatchCore {
@@ -64,21 +66,22 @@ public class CompactDispatchCore {
         }
 
         List<CompactCandidateEvaluation> selected = matcher.match(viable);
+        Map<String, List<CompactCandidateEvaluation>> viableByDriver = indexViableByDriver(viable);
         List<CompactDecisionExplanation> explanations = new ArrayList<>();
         List<CompactSelectedPlanEvidence> selectedEvidence = new ArrayList<>();
         List<DispatchPlan> selectedPlans = new ArrayList<>();
         for (CompactCandidateEvaluation winnerEvaluation : selected) {
             DispatchPlan winner = winnerEvaluation.plan();
-            DispatchPlan comparator = viable.stream()
-                    .map(CompactCandidateEvaluation::plan)
-                    .filter(plan -> plan != winner)
-                    .filter(plan -> plan.getDriver().getId().equals(winner.getDriver().getId()))
-                    .max(Comparator.comparingDouble(DispatchPlan::getTotalScore))
+            CompactCandidateEvaluation comparatorEvaluation = viableByDriver
+                    .getOrDefault(winner.getDriver().getId(), List.of())
+                    .stream()
+                    .filter(candidate -> !candidate.plan().getTraceId().equals(winner.getTraceId()))
+                    .findFirst()
                     .orElse(null);
             CompactDecisionExplanation explanation = explainer.explain(
                     winner,
                     winnerEvaluation.scoreBreakdown(),
-                    comparator);
+                    comparatorEvaluation == null ? null : comparatorEvaluation.plan());
             explanations.add(explanation);
             selectedEvidence.add(new CompactSelectedPlanEvidence(
                     winner.getTraceId(),
@@ -107,5 +110,17 @@ public class CompactDispatchCore {
 
     public CompactPolicyConfig policyConfig() {
         return policyConfig;
+    }
+
+    private Map<String, List<CompactCandidateEvaluation>> indexViableByDriver(List<CompactCandidateEvaluation> viable) {
+        Map<String, List<CompactCandidateEvaluation>> byDriver = new LinkedHashMap<>();
+        for (CompactCandidateEvaluation candidate : viable) {
+            byDriver.computeIfAbsent(candidate.plan().getDriver().getId(), ignored -> new ArrayList<>())
+                    .add(candidate);
+        }
+        byDriver.values().forEach(candidates -> candidates.sort(
+                Comparator.comparingDouble((CompactCandidateEvaluation evaluation) ->
+                        evaluation.plan().getTotalScore()).reversed()));
+        return byDriver;
     }
 }

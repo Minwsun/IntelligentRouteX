@@ -16,8 +16,11 @@ public class CompactMatcher {
         List<CompactCandidateEvaluation> ranked = new ArrayList<>(candidates);
         ranked.sort(Comparator
                 .comparingDouble((CompactCandidateEvaluation evaluation) -> evaluation.plan().getTotalScore()).reversed()
-                .thenComparingDouble(CompactCandidateEvaluation::baseConfidence).reversed()
-                .thenComparingInt(evaluation -> evaluation.plan().getBundleSize()).reversed());
+                .thenComparing(Comparator.comparingDouble(CompactCandidateEvaluation::baseConfidence).reversed())
+                .thenComparing(Comparator.comparingInt(
+                        (CompactCandidateEvaluation evaluation) -> evaluation.plan().getBundleSize()).reversed())
+                .thenComparing(evaluation -> evaluation.plan().getDriver().getId())
+                .thenComparing(evaluation -> evaluation.plan().getTraceId(), Comparator.nullsLast(String::compareTo)));
 
         Set<String> usedDrivers = new HashSet<>();
         Set<String> usedOrders = new HashSet<>();

@@ -66,4 +66,34 @@ class SimulationCompactModeTest {
         assertNotNull(engine.getCurrentCompactWeightSnapshot(),
                 "Compact mode should keep a readable runtime weight snapshot");
     }
+
+    @Test
+    void compactModeShouldMiniDispatchImmediatelyAfterLiveOrderInjection() {
+        SimulationEngine engine = new SimulationEngine(20260412L);
+        engine.setDispatchMode(SimulationEngine.DispatchMode.COMPACT);
+        engine.setInitialDriverCount(0);
+        engine.setDemandMultiplier(0.0);
+        engine.setTrafficIntensity(0.20);
+        engine.setWeatherProfile(WeatherProfile.CLEAR);
+
+        engine.tickHeadless();
+        engine.injectDriver(new GeoPoint(10.7765, 106.7009));
+        engine.injectOrder(
+                new GeoPoint(10.7770, 106.7012),
+                new GeoPoint(10.7825, 106.7078),
+                52000,
+                70);
+
+        Driver driver = engine.getDrivers().stream()
+                .filter(candidate -> candidate.getId().startsWith("DMANUAL-"))
+                .findFirst()
+                .orElseThrow();
+
+        engine.tickHeadless();
+
+        assertTrue(driver.getCurrentOrderCount() > 0,
+                "Compact mode should react through mini-dispatch as soon as a live order appears");
+        assertTrue(engine.getTickCount() < SimulationClock.SUB_TICKS_PER_DECISION,
+                "The live assignment should happen before the next regular decision boundary");
+    }
 }

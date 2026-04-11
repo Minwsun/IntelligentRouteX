@@ -312,6 +312,24 @@ public class SimulationEngine {
         return compactRuntimeCoordinator.currentWeightSnapshot();
     }
     public CompactRuntimeStatusView getCurrentCompactStatus() { return compactRuntimeCoordinator.latestStatus(); }
+    public CompactDispatchDecision previewCompactDispatch(List<Order> openOrders, List<Driver> availableDrivers) {
+        if (openOrders == null || openOrders.isEmpty() || availableDrivers == null || availableDrivers.isEmpty()) {
+            return new CompactDispatchDecision(
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    compactRuntimeCoordinator.currentWeightSnapshot(),
+                    0L);
+        }
+        return compactRuntimeCoordinator.dispatch(
+                new ArrayList<>(openOrders),
+                new ArrayList<>(availableDrivers),
+                new ArrayList<>(regions),
+                simulatedHour,
+                trafficIntensity,
+                weatherProfile,
+                clock.currentInstant());
+    }
     public void setOmegaAblationMode(OmegaDispatchAgent.AblationMode ablationMode) {
         omegaAgent.setAblationMode(ablationMode);
     }
@@ -396,9 +414,7 @@ public class SimulationEngine {
         eventBus.publish(new OrderCreated(order));
         dbService.saveOrder(order);
         tryImmediatePrePickupAugmentForInjectedOrder(order);
-        if (dispatchMode == DispatchMode.OMEGA && hasPrePickupAugmentableDrivers()) {
-            miniDispatchRequested = true;
-        }
+        requestMiniDispatchForLiveChange();
         System.out.println("[Editor] Injected order " + id + " at " +
                 String.format("(%.5f, %.5f)", pickup.lat(), pickup.lng()));
     }
@@ -415,6 +431,7 @@ public class SimulationEngine {
 
         Driver driver = new Driver(id, name, location, regionId, vehicle);
         drivers.add(driver);
+        requestMiniDispatchForLiveChange();
         System.out.println("[Editor] Injected driver " + id + " at " +
                 String.format("(%.5f, %.5f)", location.lat(), location.lng()));
     }
@@ -434,6 +451,26 @@ public class SimulationEngine {
 
     private boolean hasPrePickupAugmentableDrivers() {
         return drivers.stream().anyMatch(this::isOmegaPrePickupAugmentableDriver);
+    }
+
+    private void requestMiniDispatchForLiveChange() {
+        if (dispatchMode == DispatchMode.OMEGA) {
+            if (hasPrePickupAugmentableDrivers()) {
+                miniDispatchRequested = true;
+            }
+            return;
+        }
+        if (dispatchMode == DispatchMode.COMPACT
+                && hasPendingOrdersForDispatch()
+                && drivers.stream().anyMatch(Driver::isAvailable)) {
+            miniDispatchRequested = true;
+        }
+    }
+
+    private boolean hasPendingOrdersForDispatch() {
+        return activeOrders.stream().anyMatch(order ->
+                order.getStatus() == OrderStatus.CONFIRMED
+                        || order.getStatus() == OrderStatus.PENDING_ASSIGNMENT);
     }
 
     private void tryImmediatePrePickupAugmentForInjectedOrder(Order order) {
