@@ -3,6 +3,7 @@ package com.routechain.app;
 import com.routechain.domain.Enums.SimulationLifecycle;
 import com.routechain.domain.Enums.WeatherProfile;
 import com.routechain.infra.RouteCoreRuntime;
+import com.routechain.simulation.SmartDemo3x10Scenario;
 import com.routechain.simulation.SimulationEngine;
 import javafx.application.Platform;
 import javafx.scene.Node;
@@ -67,6 +68,7 @@ class MainAppSmartDemoPresetTest {
     void smartDemoPresetShouldBootThreeDriversAndTenOrdersOnLiveCore() throws Exception {
         MainApp app = new MainApp();
         SimulationEngine engine = RouteCoreRuntime.liveEngine();
+        var scenario = SmartDemo3x10Scenario.spec();
 
         runOnFxThread(() -> {
             invoke(app, "createScenarioCard");
@@ -75,10 +77,10 @@ class MainAppSmartDemoPresetTest {
         });
 
         assertEquals(SimulationLifecycle.RUNNING, engine.getLifecycle(), "Preset should start the live simulation");
-        assertEquals(0, engine.getInitialDriverCount(), "Smart demo should rely only on injected drivers");
-        assertEquals(3, engine.getDrivers().size(), "Smart demo should inject exactly three drivers");
-        assertEquals(10, engine.getActiveOrders().size(), "Smart demo should inject exactly ten orders");
-        assertEquals(0.0, engine.getDemandMultiplier(), 1e-9, "Smart demo should disable background random demand");
+        assertEquals(scenario.initialDriverCount(), engine.getInitialDriverCount(), "Smart demo should rely only on injected drivers");
+        assertEquals(scenario.driverCount(), engine.getDrivers().size(), "Smart demo should inject the shared curated driver count");
+        assertEquals(scenario.orderCount(), engine.getActiveOrders().size(), "Smart demo should inject the shared curated order count");
+        assertEquals(scenario.demandMultiplier(), engine.getDemandMultiplier(), 1e-9, "Smart demo should disable background random demand");
         assertEquals(WeatherProfile.CLEAR, engine.getWeatherProfile(), "Smart demo should stay in clear conditions");
         assertEquals("18:15", engine.getSimulatedTimeFormatted(), "Smart demo should start at the curated dinner-prep window");
     }

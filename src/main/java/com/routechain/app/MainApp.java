@@ -7,7 +7,9 @@ import com.routechain.infra.EventBus;
 import com.routechain.infra.Events;
 import com.routechain.infra.MapBridge;
 import com.routechain.infra.RouteCoreRuntime;
+import com.routechain.simulation.JavaFxDemoScenarioSpec;
 import com.routechain.simulation.SimulationEngine;
+import com.routechain.simulation.SmartDemo3x10Scenario;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
@@ -723,30 +725,13 @@ public class MainApp extends Application {
     }
 
     private void applySmartDemoPreset() {
-        simEngine.setSimulationStartTime(18, 15);
-        simEngine.setInitialDriverCount(0);
-        trafficSlider.setValue(0.45);
+        JavaFxDemoScenarioSpec scenario = SmartDemo3x10Scenario.spec();
+        trafficSlider.setValue(scenario.trafficIntensity());
         demandSlider.setValue(0.2);
-        simEngine.setDemandMultiplier(0.0);
-        demandValueLabel.setText("Fixed 10 orders");
-        updateWeatherUI(WeatherProfile.CLEAR);
-
-        addDemoDriver(10.77685, 106.69982);
-        addDemoDriver(10.78192, 106.68854);
-        addDemoDriver(10.76894, 106.71382);
-
-        addDemoOrder(10.77610, 106.69935, 10.78120, 106.68890, 32000, 24);
-        addDemoOrder(10.77642, 106.70012, 10.78205, 106.68970, 30000, 24);
-        addDemoOrder(10.77574, 106.69864, 10.78042, 106.68780, 31000, 23);
-        addDemoOrder(10.77730, 106.70110, 10.78310, 106.69120, 34000, 26);
-
-        addDemoOrder(10.77390, 106.70460, 10.75480, 106.72690, 29000, 28);
-        addDemoOrder(10.77425, 106.70518, 10.75390, 106.72785, 29500, 29);
-        addDemoOrder(10.77280, 106.70355, 10.75560, 106.72495, 28500, 28);
-
-        addDemoOrder(10.76955, 106.71320, 10.78490, 106.71040, 33500, 25);
-        addDemoOrder(10.76820, 106.71255, 10.78610, 106.70910, 34500, 25);
-        addDemoOrder(10.77005, 106.71425, 10.78535, 106.71155, 33800, 25);
+        simEngine.setDemandMultiplier(scenario.demandMultiplier());
+        demandValueLabel.setText("Fixed " + scenario.orderCount() + " orders");
+        updateWeatherUI(scenario.weatherProfile());
+        scenario.applyTo(simEngine);
     }
 
     private void applyDinnerPeakScenarioPreset() {
@@ -755,24 +740,6 @@ public class MainApp extends Application {
         trafficSlider.setValue(0.72);
         demandSlider.setValue(2.6);
         updateWeatherUI(WeatherProfile.LIGHT_RAIN);
-    }
-
-    private void addDemoDriver(double lat, double lng) {
-        simEngine.injectDriver(new GeoPoint(lat, lng));
-    }
-
-    private void addDemoOrder(double pickupLat,
-                              double pickupLng,
-                              double dropLat,
-                              double dropLng,
-                              double fee,
-                              int promisedEtaMin) {
-        simEngine.injectOrder(
-                new GeoPoint(pickupLat, pickupLng),
-                new GeoPoint(dropLat, dropLng),
-                fee,
-                promisedEtaMin
-        );
     }
 
     private VBox createKpiBar() {

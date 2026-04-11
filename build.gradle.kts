@@ -521,6 +521,13 @@ tasks.register<JavaExec>("controlRoomConsole") {
     classpath = sourceSets["main"].runtimeClasspath
 }
 
+tasks.register<JavaExec>("javafxSmartDemo3x10Validation") {
+    group = "verification"
+    description = "Validates the shared JavaFX SMART_DEMO_3x10 scenario against legacy, static, and oracle references."
+    mainClass.set("com.routechain.simulation.JavaFxSmartDemo3x10ValidationRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+}
+
 tasks.register<JavaExec>("apiRun") {
     group = "application"
     mainClass.set("com.routechain.api.RouteChainApiApplication")
