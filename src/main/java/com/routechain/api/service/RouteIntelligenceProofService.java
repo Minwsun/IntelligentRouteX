@@ -6,7 +6,6 @@ import com.routechain.ai.BanditPosteriorSnapshot;
 import com.routechain.infra.GsonSupport;
 import com.routechain.infra.PlatformRuntimeBootstrap;
 import com.routechain.simulation.RouteIntelligenceDemoProofRunner;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -68,15 +67,6 @@ public class RouteIntelligenceProofService {
         response.put("adaptiveWeightSnapshot", currentBanditSnapshot());
         response.put("currentLearningDelta", latestLearningDelta());
         return response;
-    }
-
-    public String proofShellHtml() {
-        try {
-            ClassPathResource resource = new ClassPathResource("proof/route-intelligence-proof-shell.html");
-            return new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new IllegalStateException("Unable to load route intelligence proof shell", e);
-        }
     }
 
     private Map<String, Object> readJsonMap(Path path) {

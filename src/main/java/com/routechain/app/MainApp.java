@@ -6,6 +6,7 @@ import com.routechain.domain.Enums.*;
 import com.routechain.infra.EventBus;
 import com.routechain.infra.Events;
 import com.routechain.infra.MapBridge;
+import com.routechain.infra.RouteCoreRuntime;
 import com.routechain.simulation.SimulationEngine;
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -35,7 +36,7 @@ import java.util.List;
  */
 public class MainApp extends Application {
 
-    private final SimulationEngine simEngine = new SimulationEngine();
+    private final SimulationEngine simEngine = RouteCoreRuntime.liveEngine();
     private final EventBus eventBus = EventBus.getInstance();
     private MapBridge mapBridge;
     private ScheduledExecutorService uiUpdater;
@@ -212,7 +213,7 @@ public class MainApp extends Application {
         stage.setMinWidth(1100);
         stage.setMinHeight(700);
         stage.setOnCloseRequest(e -> {
-            simEngine.stop();
+            RouteCoreRuntime.stopLiveEngine();
             if (uiUpdater != null) uiUpdater.shutdownNow();
             Platform.exit();
             System.exit(0);

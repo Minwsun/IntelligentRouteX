@@ -14,7 +14,11 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
- * Mobile/backend API entry point. Runs independently from the JavaFX control-room.
+ * Mobile/backend transport entry point.
+ *
+ * This process exposes API surfaces for mobile clients and operational access,
+ * but it must not become a second visual runtime or a second live dispatch
+ * core. The authoritative live control-room remains the JavaFX desktop app.
  */
 @EnableScheduling
 @ConfigurationPropertiesScan(basePackages = "com.routechain")
