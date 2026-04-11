@@ -13,5 +13,7 @@ public record DriverActiveTaskView(
         MapPointView currentLocation,
         MapPointView pickup,
         MapPointView dropoff,
-        List<MapPointView> routePolyline
+        List<MapPointView> routePolyline,
+        RouteSourceView routeSource,
+        String routeGeneratedAt
 ) {}

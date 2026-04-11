@@ -51,6 +51,7 @@
         <div id="map"></div>
         <div class="map-overlay">
             <div class="map-badge" id="selectedPins">Pickup: not set, Dropoff: not set</div>
+            <div class="map-badge map-badge-muted" id="routeBadge">route unavailable</div>
             <div class="map-badge"><a href="/app/driver.html">Switch to Driver</a></div>
         </div>
     </section>
@@ -88,6 +89,7 @@
         if (!trip) {
             status.textContent = "idle";
             meta.textContent = "No active trip yet.";
+            RouteChainMapApp.renderRouteBadge(document.getElementById("routeBadge"), null, null);
             return;
         }
         status.textContent = trip.stage;
@@ -97,6 +99,11 @@
             row.textContent = step;
             timeline.appendChild(row);
         });
+        RouteChainMapApp.renderRouteBadge(
+            document.getElementById("routeBadge"),
+            trip.routeSource,
+            trip.routeGeneratedAt
+        );
     }
 
     async function refreshSnapshot() {
@@ -106,10 +113,17 @@
         }
         const snapshot = await RouteChainMapApp.fetchJson(`/v1/user/map-snapshot?customerId=${encodeURIComponent(customerId)}&orderId=${encodeURIComponent(activeOrderId)}`);
         RouteChainMapApp.drawSnapshot(state, snapshot);
+        RouteChainMapApp.renderRouteBadge(
+            document.getElementById("routeBadge"),
+            snapshot.routeSource,
+            snapshot.routeGeneratedAt
+        );
         renderNearby(snapshot.nearbyDrivers);
         if (activeOrderId) {
             const trip = await RouteChainMapApp.fetchJson(`/v1/user/orders/${encodeURIComponent(activeOrderId)}/tracking`);
             renderTrip(trip);
+        } else {
+            renderTrip(null);
         }
     }
 
@@ -178,6 +192,7 @@
         updatePinText();
         renderTrip(null);
         RouteChainMapApp.drawSnapshot(state, { nearbyDrivers: [], routePolyline: [] });
+        RouteChainMapApp.renderRouteBadge(document.getElementById("routeBadge"), null, null);
     });
 
     connectUserStream();

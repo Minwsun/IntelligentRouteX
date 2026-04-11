@@ -62,12 +62,39 @@
             const polyline = snapshot.routePolyline || [];
             if (polyline.length >= 2) {
                 L.polyline(polyline.map(point => [point.lat, point.lng]), {
-                    color: "#164e3c",
+                    color: snapshot.routeSource === "RUNTIME_FALLBACK" ? "#8a5c2a" : "#164e3c",
                     weight: 4,
-                    opacity: 0.82
+                    opacity: 0.82,
+                    dashArray: snapshot.routeSource === "RUNTIME_FALLBACK" ? "10 8" : null
                 }).addTo(state.layers.trip);
                 state.map.fitBounds(polyline.map(point => [point.lat, point.lng]), { padding: [30, 30] });
             }
+        },
+
+        renderRouteBadge(element, routeSource, routeGeneratedAt) {
+            if (!element) {
+                return;
+            }
+            if (!routeSource) {
+                element.textContent = "route unavailable";
+                element.classList.remove("map-badge-ok", "map-badge-warn");
+                element.classList.add("map-badge-muted");
+                return;
+            }
+            const generatedAtLabel = routeGeneratedAt
+                ? new Date(routeGeneratedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+                : "n/a";
+            if (routeSource === "RUNTIME_FALLBACK") {
+                element.textContent = `approximate route · ${generatedAtLabel}`;
+                element.classList.remove("map-badge-muted");
+                element.classList.remove("map-badge-ok");
+                element.classList.add("map-badge-warn");
+                return;
+            }
+            element.textContent = `runtime route · ${generatedAtLabel}`;
+            element.classList.remove("map-badge-muted");
+            element.classList.remove("map-badge-warn");
+            element.classList.add("map-badge-ok");
         },
 
         connectSocket(path, onMessage) {

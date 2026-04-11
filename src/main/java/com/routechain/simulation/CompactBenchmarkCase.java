@@ -8,5 +8,10 @@ public record CompactBenchmarkCase(
         RunReport omegaReference,
         String compactSnapshotTag,
         boolean compactRollbackAvailable,
-        java.util.List<String> compactTopExplanations) {
+        java.util.List<String> compactTopExplanations,
+        java.util.Map<String, Integer> compactPlanTypeCounts,
+        java.util.Map<String, Integer> routeSourceCounts,
+        double bundleSuccessRate,
+        double avgObservedBundleSize,
+        double bundleThreePlusRate) {
 }

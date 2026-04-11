@@ -2,6 +2,7 @@ package com.routechain.simulation;
 
 import com.google.gson.Gson;
 import com.routechain.core.CompactDecisionExplanation;
+import com.routechain.core.CompactPlanType;
 import com.routechain.core.WeightSnapshot;
 import com.routechain.domain.Enums.WeatherProfile;
 import com.routechain.infra.GsonSupport;
@@ -13,7 +14,9 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.ToDoubleFunction;
 
 public final class CompactBenchmarkRunner {
@@ -57,7 +60,12 @@ public final class CompactBenchmarkRunner {
                         omega.report(),
                         compact.snapshotTag(),
                         compact.rollbackAvailable(),
-                        compact.topExplanations()));
+                        compact.topExplanations(),
+                        compact.planTypeCounts(),
+                        compact.routeSourceCounts(),
+                        compact.report().bundleSuccessRate(),
+                        compact.report().avgObservedBundleSize(),
+                        compact.report().bundleThreePlusRate()));
             }
         }
 
@@ -74,6 +82,11 @@ public final class CompactBenchmarkRunner {
                 c.compact().expectedPostCompletionEmptyKm()));
         double compactCompletionVsOmega = mean(cases, c -> c.compact().completionRate() - c.omegaReference().completionRate());
         double compactDeadheadVsOmega = mean(cases, c -> c.compact().deadheadPerCompletedOrderKm() - c.omegaReference().deadheadPerCompletedOrderKm());
+        Map<String, Integer> planTypeCounts = sumCounts(cases, CompactBenchmarkCase::compactPlanTypeCounts);
+        Map<String, Integer> routeSourceCounts = sumCounts(cases, CompactBenchmarkCase::routeSourceCounts);
+        double compactBundleSuccessRate = mean(cases, CompactBenchmarkCase::bundleSuccessRate);
+        double compactAvgObservedBundleSize = mean(cases, CompactBenchmarkCase::avgObservedBundleSize);
+        double compactBundleThreePlusRate = mean(cases, CompactBenchmarkCase::bundleThreePlusRate);
         boolean noSevereSeedRegression = cases.stream().allMatch(c ->
                 c.compact().completionRate() >= c.baseline().completionRate() - 1.0
                         && c.compact().onTimeRate() >= c.baseline().onTimeRate() - 1.0);
@@ -92,6 +105,11 @@ public final class CompactBenchmarkRunner {
                 compactEmptyKmDelta,
                 compactDeadheadImprovementPct,
                 compactEmptyKmImprovementPct,
+                planTypeCounts,
+                routeSourceCounts,
+                compactBundleSuccessRate,
+                compactAvgObservedBundleSize,
+                compactBundleThreePlusRate,
                 noSevereSeedRegression,
                 latestSnapshotPath,
                 compactCompletionVsOmega,
@@ -121,6 +139,8 @@ public final class CompactBenchmarkRunner {
                 engine.getCurrentCompactWeightSnapshot(),
                 engine.getCurrentCompactStatus().snapshotTag(),
                 engine.getCurrentCompactStatus().rollbackAvailable(),
+                planTypeCounts(engine),
+                routeSourceCounts(engine),
                 engine.getLatestCompactEvidence().explanations().stream()
                         .map(CompactDecisionExplanation::summary)
                         .limit(3)
@@ -169,6 +189,11 @@ public final class CompactBenchmarkRunner {
         builder.append("- Post-drop hit vs baseline: ").append(format(summary.compactPostDropHitDeltaVsBaseline())).append(" pp\n");
         builder.append("- Empty-km vs baseline: ").append(format(summary.compactEmptyKmDeltaVsBaseline())).append('\n');
         builder.append("- Empty-km improvement vs baseline: ").append(format(summary.compactEmptyKmImprovementPctVsBaseline())).append("%\n");
+        builder.append("- Compact plan-type coverage: ").append(summary.compactPlanTypeCounts()).append('\n');
+        builder.append("- Compact route-source coverage: ").append(summary.routeSourceCounts()).append('\n');
+        builder.append("- Compact bundle success rate: ").append(format(summary.compactBundleSuccessRate())).append("%\n");
+        builder.append("- Compact avg observed bundle size: ").append(format(summary.compactAvgObservedBundleSize())).append('\n');
+        builder.append("- Compact 3+ bundle rate: ").append(format(summary.compactBundleThreePlusRate())).append("%\n");
         builder.append("- No severe seed regression: ").append(summary.noSevereSeedRegression()).append('\n');
         builder.append("- Completion vs omega: ").append(format(summary.compactCompletionDeltaVsOmega())).append('\n');
         builder.append("- Deadhead/order vs omega: ").append(format(summary.compactDeadheadDeltaVsOmega())).append("\n\n");
@@ -184,6 +209,10 @@ public final class CompactBenchmarkRunner {
                     .append(String.format("%.3f", benchmarkCase.compact().deadheadPerCompletedOrderKm()))
                     .append("km, snapshot ")
                     .append(benchmarkCase.compactSnapshotTag())
+                    .append('\n');
+            builder.append("  coverage: planTypes=").append(benchmarkCase.compactPlanTypeCounts())
+                    .append(" routeSources=").append(benchmarkCase.routeSourceCounts())
+                    .append(" avgBundle=").append(String.format("%.2f", benchmarkCase.avgObservedBundleSize()))
                     .append('\n');
             for (String explanation : benchmarkCase.compactTopExplanations()) {
                 builder.append("  top: ").append(explanation).append('\n');
@@ -218,7 +247,12 @@ public final class CompactBenchmarkRunner {
                     .append('\n');
             builder.append("- Empty-km compact/baseline: ")
                     .append(String.format("%.3f / %.3f", benchmarkCase.compact().expectedPostCompletionEmptyKm(), benchmarkCase.baseline().expectedPostCompletionEmptyKm()))
-                    .append("\n\n");
+                    .append('\n');
+            builder.append("- Compact plan types: ").append(benchmarkCase.compactPlanTypeCounts()).append('\n');
+            builder.append("- Route sources: ").append(benchmarkCase.routeSourceCounts()).append('\n');
+            builder.append("- Bundle success rate: ").append(String.format("%.2f", benchmarkCase.bundleSuccessRate())).append("%\n");
+            builder.append("- Avg observed bundle size: ").append(String.format("%.2f", benchmarkCase.avgObservedBundleSize())).append('\n');
+            builder.append("- 3+ bundle rate: ").append(String.format("%.2f", benchmarkCase.bundleThreePlusRate())).append("%\n\n");
             builder.append("## Top Explanations\n");
             for (String explanation : benchmarkCase.compactTopExplanations()) {
                 builder.append("- ").append(explanation).append('\n');
@@ -270,11 +304,42 @@ public final class CompactBenchmarkRunner {
         return String.format("%+.3f", value);
     }
 
+    private static Map<String, Integer> planTypeCounts(SimulationEngine engine) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (CompactPlanType type : CompactPlanType.values()) {
+            counts.put(type.name(), engine.getCompactSelectedPlanTypeCounts().getOrDefault(type, 0));
+        }
+        return Map.copyOf(counts);
+    }
+
+    private static Map<String, Integer> routeSourceCounts(SimulationEngine engine) {
+        int selectedPlans = engine.getCompactSelectedPlanTypeCounts().values().stream()
+                .mapToInt(Integer::intValue)
+                .sum();
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        counts.put("RUNTIME_OSRM", 0);
+        counts.put("RUNTIME_FALLBACK", selectedPlans);
+        return Map.copyOf(counts);
+    }
+
+    private static Map<String, Integer> sumCounts(List<CompactBenchmarkCase> cases,
+                                                  java.util.function.Function<CompactBenchmarkCase, Map<String, Integer>> extractor) {
+        Map<String, Integer> total = new LinkedHashMap<>();
+        for (CompactBenchmarkCase benchmarkCase : cases) {
+            for (Map.Entry<String, Integer> entry : extractor.apply(benchmarkCase).entrySet()) {
+                total.merge(entry.getKey(), entry.getValue(), Integer::sum);
+            }
+        }
+        return Map.copyOf(total);
+    }
+
     record RunCaseResult(
             RunReport report,
             WeightSnapshot weightSnapshot,
             String snapshotTag,
             boolean rollbackAvailable,
+            Map<String, Integer> planTypeCounts,
+            Map<String, Integer> routeSourceCounts,
             List<String> topExplanations) {
     }
 }

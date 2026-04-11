@@ -12,5 +12,7 @@ public record LiveMapSnapshot(
         MapPointView pickup,
         MapPointView dropoff,
         NearbyDriverView assignedDriver,
-        List<MapPointView> routePolyline
+        List<MapPointView> routePolyline,
+        RouteSourceView routeSource,
+        String routeGeneratedAt
 ) {}

@@ -49,6 +49,7 @@
         <div id="map"></div>
         <div class="map-overlay">
             <div class="map-badge" id="driverLocationBadge">Driver location: not set</div>
+            <div class="map-badge map-badge-muted" id="routeBadge">route unavailable</div>
             <div class="map-badge"><a href="/app/rider.html">Switch to Rider</a></div>
         </div>
     </section>
@@ -82,6 +83,11 @@
         document.getElementById("taskMeta").innerHTML = task
             ? `${task.orderId} &middot; ${task.serviceTier} &middot; ETA ${task.etaMinutes || 0}m`
             : "No active task.";
+        RouteChainMapApp.renderRouteBadge(
+            document.getElementById("routeBadge"),
+            task ? task.routeSource : null,
+            task ? task.routeGeneratedAt : null
+        );
     }
 
     async function loginSession() {
@@ -126,6 +132,11 @@
         ]);
         renderOffers(offers);
         RouteChainMapApp.drawSnapshot(state, snapshot);
+        RouteChainMapApp.renderRouteBadge(
+            document.getElementById("routeBadge"),
+            snapshot.routeSource,
+            snapshot.routeGeneratedAt
+        );
         try {
             const task = await RouteChainMapApp.fetchJson(`/v1/driver/tasks/active?driverId=${encodeURIComponent(id)}`);
             renderTask(task);

@@ -4,6 +4,7 @@ import com.routechain.api.dto.DriverActiveTaskView;
 import com.routechain.api.dto.LiveMapSnapshot;
 import com.routechain.api.dto.MapPointView;
 import com.routechain.api.dto.NearbyDriverView;
+import com.routechain.api.dto.RouteSourceView;
 import com.routechain.api.dto.TripTrackingView;
 import com.routechain.backend.offer.OfferBrokerService;
 import com.routechain.backend.offer.DriverOfferBatch;
@@ -11,6 +12,7 @@ import com.routechain.backend.offer.DriverSessionState;
 import com.routechain.data.port.DriverFleetRepository;
 import com.routechain.data.port.OfferStateStore;
 import com.routechain.data.port.OrderRepository;
+import com.routechain.domain.Driver;
 import com.routechain.domain.Enums;
 import com.routechain.domain.GeoPoint;
 import com.routechain.domain.Order;
@@ -18,6 +20,7 @@ import com.routechain.infra.RouteCoreRuntime;
 import com.routechain.simulation.SimulationEngine;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -105,7 +108,9 @@ public class RuntimeBridge {
                 trip == null ? null : trip.pickup(),
                 trip == null ? null : trip.dropoff(),
                 trip == null ? null : trip.assignedDriver(),
-                trip == null ? List.of() : trip.routePolyline()
+                trip == null ? List.of() : trip.routePolyline(),
+                trip == null ? null : trip.routeSource(),
+                trip == null ? null : trip.routeGeneratedAt()
         );
     }
 
@@ -125,7 +130,9 @@ public class RuntimeBridge {
                 activeTask == null ? null : activeTask.pickup(),
                 activeTask == null ? null : activeTask.dropoff(),
                 session == null ? null : toNearbyDriverView(session, anchor),
-                activeTask == null ? List.of() : activeTask.routePolyline()
+                activeTask == null ? List.of() : activeTask.routePolyline(),
+                activeTask == null ? null : activeTask.routeSource(),
+                activeTask == null ? null : activeTask.routeGeneratedAt()
         );
     }
 
@@ -133,7 +140,7 @@ public class RuntimeBridge {
         DriverSessionState assignedSession = order.getAssignedDriverId() == null
                 ? null
                 : driverFleetRepository.findDriverSession(order.getAssignedDriverId()).orElse(null);
-        List<MapPointView> routePolyline = routePolyline(order, assignedSession);
+        RoutePayload routePayload = routePayload(order, assignedSession);
         DriverOfferBatch batch = offerStateStore.latestBatchForOrder(order.getId()).orElse(null);
         NearbyDriverView assignedDriver = assignedSession == null ? null : toNearbyDriverView(
                 assignedSession,
@@ -151,12 +158,15 @@ public class RuntimeBridge {
                 point("pickup", order.getPickupPoint()),
                 point("dropoff", order.getDropoffPoint()),
                 assignedDriver,
-                routePolyline
+                routePayload.polyline(),
+                routePayload.routeSource(),
+                routePayload.routeGeneratedAt()
         );
     }
 
     private DriverActiveTaskView toDriverActiveTaskView(String driverId, Order order) {
         DriverSessionState session = driverFleetRepository.findDriverSession(driverId).orElse(null);
+        RoutePayload routePayload = routePayload(order, session);
         return new DriverActiveTaskView(
                 driverId,
                 "task-" + order.getId(),
@@ -168,7 +178,9 @@ public class RuntimeBridge {
                 session == null ? null : point("driver", new GeoPoint(session.lastLat(), session.lastLng())),
                 point("pickup", order.getPickupPoint()),
                 point("dropoff", order.getDropoffPoint()),
-                routePolyline(order, session)
+                routePayload.polyline(),
+                routePayload.routeSource(),
+                routePayload.routeGeneratedAt()
         );
     }
 
@@ -186,7 +198,30 @@ public class RuntimeBridge {
         );
     }
 
-    private List<MapPointView> routePolyline(Order order, DriverSessionState driverSession) {
+    private RoutePayload routePayload(Order order, DriverSessionState driverSession) {
+        Driver runtimeDriver = runtimeDriver(order.getAssignedDriverId());
+        if (runtimeDriver != null) {
+            List<MapPointView> runtimePolyline = runtimePolyline(runtimeDriver);
+            if (runtimePolyline.size() >= 2) {
+                return new RoutePayload(
+                        runtimePolyline,
+                        RouteSourceView.RUNTIME_OSRM,
+                        routeGeneratedAt(runtimeDriver, driverSession, order));
+            }
+        }
+        return new RoutePayload(
+                fallbackPolyline(order, driverSession),
+                RouteSourceView.RUNTIME_FALLBACK,
+                routeGeneratedAt(runtimeDriver, driverSession, order));
+    }
+
+    private List<MapPointView> runtimePolyline(Driver runtimeDriver) {
+        return runtimeDriver.getRemainingRoutePoints().stream()
+                .map(point -> new MapPointView("route", point[1], point[0]))
+                .toList();
+    }
+
+    private List<MapPointView> fallbackPolyline(Order order, DriverSessionState driverSession) {
         List<MapPointView> points = new ArrayList<>();
         if (driverSession != null) {
             points.add(point("driver", new GeoPoint(driverSession.lastLat(), driverSession.lastLng())));
@@ -203,6 +238,36 @@ public class RuntimeBridge {
             }
         }
         return points;
+    }
+
+    private Driver runtimeDriver(String driverId) {
+        if (driverId == null || driverId.isBlank()) {
+            return null;
+        }
+        return RouteCoreRuntime.liveEngine().getDrivers().stream()
+                .filter(driver -> driverId.equals(driver.getId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String routeGeneratedAt(Driver runtimeDriver, DriverSessionState driverSession, Order order) {
+        Instant generatedAt = null;
+        if (driverSession != null) {
+            generatedAt = driverSession.lastSeenAt();
+        } else if (runtimeDriver != null) {
+            generatedAt = runtimeDriver.getLastSeenAt();
+        } else if (order.getDropoffStartedAt() != null) {
+            generatedAt = order.getDropoffStartedAt();
+        } else if (order.getPickedUpAt() != null) {
+            generatedAt = order.getPickedUpAt();
+        } else if (order.getPickupStartedAt() != null) {
+            generatedAt = order.getPickupStartedAt();
+        } else if (order.getAssignedAt() != null) {
+            generatedAt = order.getAssignedAt();
+        } else {
+            generatedAt = order.getCreatedAt();
+        }
+        return generatedAt == null ? null : generatedAt.toString();
     }
 
     private MapPointView point(String label, GeoPoint geoPoint) {
@@ -250,5 +315,11 @@ public class RuntimeBridge {
         if (engine.getDispatchMode() != SimulationEngine.DispatchMode.COMPACT) {
             engine.setDispatchMode(SimulationEngine.DispatchMode.COMPACT);
         }
+    }
+
+    private record RoutePayload(
+            List<MapPointView> polyline,
+            RouteSourceView routeSource,
+            String routeGeneratedAt) {
     }
 }

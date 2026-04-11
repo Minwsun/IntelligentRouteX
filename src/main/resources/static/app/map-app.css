@@ -230,6 +230,19 @@ button.ghost {
     font-weight: 700;
 }
 
+.map-badge-ok {
+    color: #0f5a42;
+}
+
+.map-badge-warn {
+    color: #8a5c2a;
+    background: rgba(255, 247, 235, 0.96);
+}
+
+.map-badge-muted {
+    color: #5f6d67;
+}
+
 .driver-marker {
     width: 16px;
     height: 16px;

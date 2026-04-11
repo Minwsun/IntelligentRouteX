@@ -11,6 +11,7 @@ import com.routechain.ai.OmegaDispatchAgent;
 import com.routechain.core.CompactCoreAdapter;
 import com.routechain.core.CompactDispatchDecision;
 import com.routechain.core.CompactEvidenceBundle;
+import com.routechain.core.CompactPlanType;
 import com.routechain.core.CompactSelectedPlanEvidence;
 import com.routechain.core.WeightSnapshot;
 
@@ -86,6 +87,8 @@ public class SimulationEngine {
     private volatile int realAssignedPlanCount = 0;
     private volatile int holdOnlySelectionCount = 0;
     private volatile int prePickupAugmentationCount = 0;
+    private final EnumMap<CompactPlanType, Integer> compactSelectedPlanTypeCounts =
+            new EnumMap<>(CompactPlanType.class);
     private volatile double borrowedExecutedDeadheadKm = 0.0;
     private volatile double fallbackExecutedDeadheadKm = 0.0;
     private volatile double waveExecutedDeadheadKm = 0.0;
@@ -241,6 +244,7 @@ public class SimulationEngine {
         realAssignedPlanCount = 0;
         holdOnlySelectionCount = 0;
         prePickupAugmentationCount = 0;
+        compactSelectedPlanTypeCounts.clear();
         borrowedExecutedDeadheadKm = 0.0;
         fallbackExecutedDeadheadKm = 0.0;
         waveExecutedDeadheadKm = 0.0;
@@ -312,6 +316,9 @@ public class SimulationEngine {
         return compactRuntimeCoordinator.currentWeightSnapshot();
     }
     public CompactRuntimeStatusView getCurrentCompactStatus() { return compactRuntimeCoordinator.latestStatus(); }
+    public Map<CompactPlanType, Integer> getCompactSelectedPlanTypeCounts() {
+        return Map.copyOf(compactSelectedPlanTypeCounts);
+    }
     public CompactDispatchDecision previewCompactDispatch(List<Order> openOrders, List<Driver> availableDrivers) {
         if (openOrders == null || openOrders.isEmpty() || availableDrivers == null || availableDrivers.isEmpty()) {
             return new CompactDispatchDecision(
@@ -1080,6 +1087,7 @@ public class SimulationEngine {
                 visibleBundleThreePlusCount++;
             }
             if (dispatchMode == DispatchMode.COMPACT && compactDecision != null) {
+                compactSelectedPlanTypeCounts.merge(executablePlan.getCompactPlanType(), 1, Integer::sum);
                 CompactSelectedPlanEvidence evidence = compactEvidenceByTrace.get(executablePlan.getTraceId());
                 if (evidence != null) {
                     compactRuntimeCoordinator.recordSelectedPlan(
