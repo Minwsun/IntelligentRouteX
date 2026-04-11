@@ -568,29 +568,21 @@ public class MainApp extends Application {
         Label pLabel = new Label("SIMULATION PRESETS");
         pLabel.getStyleClass().add("label-eyebrow");
 
-        HBox presetRow1 = new HBox(4);
-        HBox presetRow2 = new HBox(4);
-        String[] presetsRow1 = {"NORMAL", "RUSH", "RAIN", "SPIKE"};
-        String[] presetsRow2 = {"SHORTAGE", "DELAY", "SPAM", "REPLAY"};
-        for (String p : presetsRow1) {
+        Label presetHint = new Label("JavaFX demo chi con 3 kich ban chay tren live core.");
+        presetHint.setStyle("-fx-text-fill: #888; -fx-font-size: 10; -fx-font-style: italic;");
+
+        HBox presetRow = new HBox(6);
+        String[] presets = {"NORMAL", "SMART_DEMO_3x10", "DINNER_PEAK_HCMC"};
+        for (String p : presets) {
             Button btn = new Button(p);
             btn.getStyleClass().add("secondary-button-small");
-            btn.setPrefWidth(65);
+            btn.setPrefWidth("NORMAL".equals(p) ? 88 : 148);
             btn.setStyle("-fx-font-size: 9px; -fx-background-color: #232629; -fx-text-fill: #aaabad; "
                     + "-fx-background-radius: 6; -fx-padding: 4 6; -fx-cursor: hand;");
             btn.setOnAction(e -> applyScenarioPreset(p));
-            presetRow1.getChildren().add(btn);
+            presetRow.getChildren().add(btn);
         }
-        for (String p : presetsRow2) {
-            Button btn = new Button(p);
-            btn.getStyleClass().add("secondary-button-small");
-            btn.setPrefWidth(65);
-            btn.setStyle("-fx-font-size: 9px; -fx-background-color: #232629; -fx-text-fill: #aaabad; "
-                    + "-fx-background-radius: 6; -fx-padding: 4 6; -fx-cursor: hand;");
-            btn.setOnAction(e -> applyScenarioPreset(p));
-            presetRow2.getChildren().add(btn);
-        }
-        presetBox.getChildren().addAll(pLabel, presetRow1, presetRow2);
+        presetBox.getChildren().addAll(pLabel, presetHint, presetRow);
 
         // ── Traffic intensity slider ────────────────────────────────────
         VBox trafficBox = new VBox(6);
@@ -712,58 +704,75 @@ public class MainApp extends Application {
     private void applyScenarioPreset(String p) {
         simEngine.reset();
         switch (p) {
-            case "NORMAL" -> {  // Scenario 1: Normal Flow
-                simEngine.setInitialDriverCount(35);
-                trafficSlider.setValue(0.3);
-                demandSlider.setValue(1.0);
-                updateWeatherUI(WeatherProfile.CLEAR);
-            }
-            case "RUSH" -> {    // Scenario 2: Rush Hour
-                simEngine.setInitialDriverCount(50);
-                trafficSlider.setValue(0.75);
-                demandSlider.setValue(1.5);
-                updateWeatherUI(WeatherProfile.CLEAR);
-            }
-            case "RAIN" -> {    // Scenario 3: Heavy Rain
-                simEngine.setInitialDriverCount(40);
-                trafficSlider.setValue(0.6);
-                demandSlider.setValue(1.7);
-                updateWeatherUI(WeatherProfile.HEAVY_RAIN);
-            }
-            case "SPIKE" -> {   // Scenario 4: Demand Spike
-                simEngine.setInitialDriverCount(30);
-                trafficSlider.setValue(0.4);
-                demandSlider.setValue(3.5);
-                updateWeatherUI(WeatherProfile.CLEAR);
-            }
-            case "SHORTAGE" -> { // Scenario 5: Driver Shortage
-                simEngine.setInitialDriverCount(8);
-                trafficSlider.setValue(0.5);
-                demandSlider.setValue(2.0);
-                updateWeatherUI(WeatherProfile.LIGHT_RAIN);
-            }
-            case "DELAY" -> {   // Scenario 6: Pickup Delay Cluster
-                simEngine.setInitialDriverCount(40);
-                trafficSlider.setValue(0.55);
-                demandSlider.setValue(1.3);
-                updateWeatherUI(WeatherProfile.LIGHT_RAIN);
-            }
-            case "SPAM" -> {    // Scenario 7: Spam Orders
-                simEngine.setInitialDriverCount(25);
-                trafficSlider.setValue(0.35);
-                demandSlider.setValue(4.0);
-                updateWeatherUI(WeatherProfile.CLEAR);
-            }
-            case "REPLAY" -> {  // Scenario 8: Replay Compare (baseline)
-                simEngine.setInitialDriverCount(35);
-                trafficSlider.setValue(0.4);
-                demandSlider.setValue(1.0);
-                updateWeatherUI(WeatherProfile.CLEAR);
-            }
+            case "NORMAL" -> applyNormalScenarioPreset();
+            case "SMART_DEMO_3x10" -> applySmartDemoPreset();
+            case "DINNER_PEAK_HCMC" -> applyDinnerPeakScenarioPreset();
+            default -> applyNormalScenarioPreset();
         }
         // Auto-start simulation in the new mode
         simEngine.start();
         simStatusText.set("RUNNING");
+    }
+
+    private void applyNormalScenarioPreset() {
+        simEngine.setSimulationStartTime(12, 0);
+        simEngine.setInitialDriverCount(35);
+        trafficSlider.setValue(0.30);
+        demandSlider.setValue(1.0);
+        updateWeatherUI(WeatherProfile.CLEAR);
+    }
+
+    private void applySmartDemoPreset() {
+        simEngine.setSimulationStartTime(18, 15);
+        simEngine.setInitialDriverCount(0);
+        trafficSlider.setValue(0.45);
+        demandSlider.setValue(0.2);
+        simEngine.setDemandMultiplier(0.0);
+        demandValueLabel.setText("Fixed 10 orders");
+        updateWeatherUI(WeatherProfile.CLEAR);
+
+        addDemoDriver(10.77685, 106.69982);
+        addDemoDriver(10.78192, 106.68854);
+        addDemoDriver(10.76894, 106.71382);
+
+        addDemoOrder(10.77610, 106.69935, 10.78120, 106.68890, 32000, 24);
+        addDemoOrder(10.77642, 106.70012, 10.78205, 106.68970, 30000, 24);
+        addDemoOrder(10.77574, 106.69864, 10.78042, 106.68780, 31000, 23);
+        addDemoOrder(10.77730, 106.70110, 10.78310, 106.69120, 34000, 26);
+
+        addDemoOrder(10.77390, 106.70460, 10.75480, 106.72690, 29000, 28);
+        addDemoOrder(10.77425, 106.70518, 10.75390, 106.72785, 29500, 29);
+        addDemoOrder(10.77280, 106.70355, 10.75560, 106.72495, 28500, 28);
+
+        addDemoOrder(10.76955, 106.71320, 10.78490, 106.71040, 33500, 25);
+        addDemoOrder(10.76820, 106.71255, 10.78610, 106.70910, 34500, 25);
+        addDemoOrder(10.77005, 106.71425, 10.78535, 106.71155, 33800, 25);
+    }
+
+    private void applyDinnerPeakScenarioPreset() {
+        simEngine.setSimulationStartTime(19, 0);
+        simEngine.setInitialDriverCount(24);
+        trafficSlider.setValue(0.72);
+        demandSlider.setValue(2.6);
+        updateWeatherUI(WeatherProfile.LIGHT_RAIN);
+    }
+
+    private void addDemoDriver(double lat, double lng) {
+        simEngine.injectDriver(new GeoPoint(lat, lng));
+    }
+
+    private void addDemoOrder(double pickupLat,
+                              double pickupLng,
+                              double dropLat,
+                              double dropLng,
+                              double fee,
+                              int promisedEtaMin) {
+        simEngine.injectOrder(
+                new GeoPoint(pickupLat, pickupLng),
+                new GeoPoint(dropLat, dropLng),
+                fee,
+                promisedEtaMin
+        );
     }
 
     private VBox createKpiBar() {
