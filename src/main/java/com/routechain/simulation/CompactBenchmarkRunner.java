@@ -111,6 +111,10 @@ public final class CompactBenchmarkRunner {
                 "HCMC + INSTANT",
                 "NearestGreedyBaseline",
                 List.of(CompactBenchmarkRegime.values()).stream().map(CompactBenchmarkRegime::slug).toList(),
+                decisionOutcomeStageSemantics(),
+                "AFTER_POST_DROP_WINDOW",
+                "AFTER_POST_DROP_WINDOW",
+                "weighted_by_support",
                 List.copyOf(cases),
                 compactCompletionDelta,
                 compactOnTimeDelta,
@@ -207,6 +211,10 @@ public final class CompactBenchmarkRunner {
         builder.append("- Baseline: ").append(summary.baselinePolicy()).append('\n');
         builder.append("- Regimes: ").append(summary.regimes()).append('\n');
         builder.append("- Seeds: ").append(summary.cases().stream().map(c -> Long.toString(c.seed())).distinct().toList()).append('\n');
+        builder.append("- KPI truth stage: ").append(summary.kpiTruthStage()).append('\n');
+        builder.append("- Weight update stage: ").append(summary.weightUpdateStage()).append('\n');
+        builder.append("- Calibration aggregate: ").append(summary.calibrationAggregateMethod()).append('\n');
+        builder.append("- Stage semantics: ").append(summary.decisionOutcomeStageSemantics()).append('\n');
         builder.append("- Latest snapshot: ").append(summary.latestSnapshotPath().isBlank() ? "n/a" : summary.latestSnapshotPath()).append("\n\n");
         builder.append("## Aggregate\n");
         builder.append("- Completion vs baseline: ").append(format(summary.compactCompletionDeltaVsBaseline())).append(" pp\n");
@@ -295,6 +303,8 @@ public final class CompactBenchmarkRunner {
             builder.append("- Single chosen when batch eligible: ").append(benchmarkCase.singleChosenWhenBatchEligibleContexts()).append('\n');
             builder.append("- Batch rejection reasons: ").append(benchmarkCase.batchRejectionReasons()).append('\n');
             builder.append("- Calibration snapshot: ").append(benchmarkCase.calibrationSnapshot()).append('\n');
+            builder.append("- KPI truth stage: ").append(summary.kpiTruthStage()).append('\n');
+            builder.append("- Weight update stage: ").append(summary.weightUpdateStage()).append('\n');
             builder.append("- Bundle success rate: ").append(String.format("%.2f", benchmarkCase.bundleSuccessRate())).append("%\n");
             builder.append("- Avg observed bundle size: ").append(String.format("%.2f", benchmarkCase.avgObservedBundleSize())).append('\n');
             builder.append("- 3+ bundle rate: ").append(String.format("%.2f", benchmarkCase.bundleThreePlusRate())).append("%\n\n");
@@ -349,19 +359,32 @@ public final class CompactBenchmarkRunner {
         return String.format("%+.3f", value);
     }
 
-    private static CalibrationSnapshot aggregateCalibration(List<CompactBenchmarkCase> cases) {
+    static CalibrationSnapshot aggregateCalibration(List<CompactBenchmarkCase> cases) {
         if (cases.isEmpty()) {
             return CalibrationSnapshot.empty();
         }
+        long etaSamples = cases.stream().mapToLong(c -> c.calibrationSnapshot().etaSamples()).sum();
+        long cancelSamples = cases.stream().mapToLong(c -> c.calibrationSnapshot().cancelSamples()).sum();
+        long postDropSamples = cases.stream().mapToLong(c -> c.calibrationSnapshot().postDropSamples()).sum();
         return new CalibrationSnapshot(
-                mean(cases, c -> c.calibrationSnapshot().etaResidualMaeMinutes()),
-                mean(cases, c -> c.calibrationSnapshot().cancelCalibrationGap()),
-                mean(cases, c -> c.calibrationSnapshot().postDropHitCalibrationGap()),
-                mean(cases, c -> c.calibrationSnapshot().nextIdleMaeMinutes()),
-                mean(cases, c -> c.calibrationSnapshot().emptyKmMae()),
-                cases.stream().mapToLong(c -> c.calibrationSnapshot().etaSamples()).sum(),
-                cases.stream().mapToLong(c -> c.calibrationSnapshot().cancelSamples()).sum(),
-                cases.stream().mapToLong(c -> c.calibrationSnapshot().postDropSamples()).sum());
+                weightedMean(cases,
+                        c -> c.calibrationSnapshot().etaResidualMaeMinutes(),
+                        c -> c.calibrationSnapshot().etaSamples()),
+                weightedMean(cases,
+                        c -> c.calibrationSnapshot().cancelCalibrationGap(),
+                        c -> c.calibrationSnapshot().cancelSamples()),
+                weightedMean(cases,
+                        c -> c.calibrationSnapshot().postDropHitCalibrationGap(),
+                        c -> c.calibrationSnapshot().postDropSamples()),
+                weightedMean(cases,
+                        c -> c.calibrationSnapshot().nextIdleMaeMinutes(),
+                        c -> c.calibrationSnapshot().postDropSamples()),
+                weightedMean(cases,
+                        c -> c.calibrationSnapshot().emptyKmMae(),
+                        c -> c.calibrationSnapshot().postDropSamples()),
+                etaSamples,
+                cancelSamples,
+                postDropSamples);
     }
 
     private static void writeCalibrationArtifacts(CompactBenchmarkSummary summary) throws IOException {
@@ -386,14 +409,17 @@ public final class CompactBenchmarkRunner {
                         + "- ETA samples: " + snapshot.etaSamples() + "\n"
                         + "- Cancel samples: " + snapshot.cancelSamples() + "\n"
                         + "- Post-drop samples: " + snapshot.postDropSamples() + "\n"
+                        + "- Aggregate method: weighted_by_support\n"
+                        + "- KPI truth stage: " + summary.kpiTruthStage() + "\n"
+                        + "- Weight update stage: " + summary.weightUpdateStage() + "\n"
                         + "- Support note: " + supportNote + "\n",
                 StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE,
                 StandardOpenOption.TRUNCATE_EXISTING);
         Files.writeString(
                 OUTPUT_DIR.resolve(baseName + ".csv"),
-                "lane,etaResidualMaeMinutes,cancelCalibrationGap,postDropHitCalibrationGap,nextIdleMaeMinutes,emptyKmMae,etaSamples,cancelSamples,postDropSamples,supportNote\n"
-                        + "%s,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%s\n".formatted(
+                "lane,etaResidualMaeMinutes,cancelCalibrationGap,postDropHitCalibrationGap,nextIdleMaeMinutes,emptyKmMae,etaSamples,cancelSamples,postDropSamples,aggregateMethod,kpiTruthStage,weightUpdateStage,supportNote\n"
+                        + "%s,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%s,%s,%s,%s\n".formatted(
                         summary.lane(),
                         snapshot.etaResidualMaeMinutes(),
                         snapshot.cancelCalibrationGap(),
@@ -403,6 +429,9 @@ public final class CompactBenchmarkRunner {
                         snapshot.etaSamples(),
                         snapshot.cancelSamples(),
                         snapshot.postDropSamples(),
+                        summary.calibrationAggregateMethod(),
+                        summary.kpiTruthStage(),
+                        summary.weightUpdateStage(),
                         supportNote),
                 StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE,
@@ -414,6 +443,33 @@ public final class CompactBenchmarkRunner {
             return "insufficient support";
         }
         return "observability only";
+    }
+
+    private static Map<String, String> decisionOutcomeStageSemantics() {
+        Map<String, String> semantics = new LinkedHashMap<>();
+        semantics.put("AFTER_ACCEPT", "assignment activated on runtime driver sequence; compact v1 accept-equivalent, not marketplace offer acceptance");
+        semantics.put("AFTER_TERMINAL", "all orders in the decision are delivered or cancelled");
+        semantics.put("AFTER_POST_DROP_WINDOW", "post-drop hit observed or post-drop window expired; canonical KPI and weight-update stage");
+        return Map.copyOf(semantics);
+    }
+
+    private static double weightedMean(List<CompactBenchmarkCase> cases,
+                                       ToDoubleFunction<CompactBenchmarkCase> valueExtractor,
+                                       java.util.function.ToLongFunction<CompactBenchmarkCase> weightExtractor) {
+        double weightedSum = 0.0;
+        long totalWeight = 0L;
+        for (CompactBenchmarkCase benchmarkCase : cases) {
+            long weight = Math.max(0L, weightExtractor.applyAsLong(benchmarkCase));
+            if (weight == 0L) {
+                continue;
+            }
+            weightedSum += valueExtractor.applyAsDouble(benchmarkCase) * weight;
+            totalWeight += weight;
+        }
+        if (totalWeight == 0L) {
+            return mean(cases, valueExtractor);
+        }
+        return weightedSum / totalWeight;
     }
 
     private static Map<String, Integer> planTypeCounts(SimulationEngine engine) {

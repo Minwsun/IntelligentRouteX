@@ -218,7 +218,7 @@ tasks.register<JavaExec>("compactSmoke") {
 tasks.register<JavaExec>("compactCertification") {
     group = "verification"
     description = "Runs the compact certification lane with 20 seeds across the v1 regimes."
-    mainClass.set("com.routechain.simulation.CompactVerdictRunner")
+    mainClass.set("com.routechain.simulation.CompactCertificationRunner")
     classpath = sourceSets["main"].runtimeClasspath
     args("certification")
 }
@@ -226,7 +226,7 @@ tasks.register<JavaExec>("compactCertification") {
 tasks.register<JavaExec>("compactNightly") {
     group = "verification"
     description = "Runs the compact nightly lane with 60 seeds across the v1 regimes."
-    mainClass.set("com.routechain.simulation.CompactVerdictRunner")
+    mainClass.set("com.routechain.simulation.CompactCertificationRunner")
     classpath = sourceSets["main"].runtimeClasspath
     args("nightly")
 }
