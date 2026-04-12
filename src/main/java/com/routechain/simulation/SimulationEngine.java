@@ -1394,6 +1394,13 @@ public class SimulationEngine {
             case HEAVY_RAIN -> LOCAL_MINI_DISPATCH_MAX_FIRST_PICKUP_DELAY_MIN;
             case STORM -> 2.5;
         };
+        if (isNightOffPeakWindow()) {
+            firstPickupDelayCapMinutes = Math.min(firstPickupDelayCapMinutes, 3.2);
+        } else if (isMorningOffPeakWindow()) {
+            firstPickupDelayCapMinutes = Math.min(firstPickupDelayCapMinutes, 3.6);
+        } else if (isDemandSpikeWindow()) {
+            firstPickupDelayCapMinutes = Math.min(firstPickupDelayCapMinutes, 3.8);
+        }
         if (mergedFirstStopArrival > baseFirstStop.estimatedArrivalMinutes() + firstPickupDelayCapMinutes) {
             return plan;
         }
@@ -1405,6 +1412,13 @@ public class SimulationEngine {
             case HEAVY_RAIN -> 1.10;
             case STORM -> 1.06;
         };
+        if (isNightOffPeakWindow()) {
+            distanceMultiplierCap = Math.min(distanceMultiplierCap, 1.10);
+        } else if (isMorningOffPeakWindow()) {
+            distanceMultiplierCap = Math.min(distanceMultiplierCap, 1.11);
+        } else if (isDemandSpikeWindow()) {
+            distanceMultiplierCap = Math.min(distanceMultiplierCap, 1.09);
+        }
         if (baseDistanceKm > 0.0 && mergedDistanceKm > baseDistanceKm * distanceMultiplierCap) {
             return plan;
         }
@@ -1417,6 +1431,19 @@ public class SimulationEngine {
                 : weatherProfile == WeatherProfile.LIGHT_RAIN ? 0.12 : 0.08;
         double zigZagCap = weatherProfile == WeatherProfile.CLEAR ? 0.72
                 : weatherProfile == WeatherProfile.LIGHT_RAIN ? 0.68 : 0.60;
+        if (isNightOffPeakWindow()) {
+            corridorTolerance = Math.min(corridorTolerance, 0.09);
+            landingTolerance = Math.min(landingTolerance, 0.06);
+            zigZagCap = Math.min(zigZagCap, 0.56);
+        } else if (isMorningOffPeakWindow()) {
+            corridorTolerance = Math.min(corridorTolerance, 0.10);
+            landingTolerance = Math.min(landingTolerance, 0.09);
+            zigZagCap = Math.min(zigZagCap, 0.58);
+        } else if (isDemandSpikeWindow()) {
+            corridorTolerance = Math.min(corridorTolerance, 0.09);
+            landingTolerance = Math.min(landingTolerance, 0.10);
+            zigZagCap = Math.min(zigZagCap, 0.58);
+        }
         if (metrics.deliveryCorridorScore() + corridorTolerance < Math.max(0.26, plan.getDeliveryCorridorScore())) {
             return plan;
         }
@@ -1434,6 +1461,13 @@ public class SimulationEngine {
             case HEAVY_RAIN -> 0.55;
             case STORM -> 0.35;
         };
+        if (isNightOffPeakWindow()) {
+            addedDeadheadCapKm = Math.min(addedDeadheadCapKm, 0.45);
+        } else if (isMorningOffPeakWindow()) {
+            addedDeadheadCapKm = Math.min(addedDeadheadCapKm, 0.50);
+        } else if (isDemandSpikeWindow()) {
+            addedDeadheadCapKm = Math.min(addedDeadheadCapKm, 0.42);
+        }
         if (addedDistanceKm > addedDeadheadCapKm) {
             return plan;
         }
@@ -1444,6 +1478,13 @@ public class SimulationEngine {
             case HEAVY_RAIN -> 0.03;
             case STORM -> 0.02;
         };
+        if (isNightOffPeakWindow()) {
+            maxOnTimeDrop = Math.min(maxOnTimeDrop, 0.03);
+        } else if (isMorningOffPeakWindow()) {
+            maxOnTimeDrop = Math.min(maxOnTimeDrop, 0.025);
+        } else if (isDemandSpikeWindow()) {
+            maxOnTimeDrop = Math.min(maxOnTimeDrop, 0.02);
+        }
         if (predictedOnTimeDrop > maxOnTimeDrop) {
             return plan;
         }
@@ -1569,6 +1610,13 @@ public class SimulationEngine {
             case HEAVY_RAIN -> 0.30;
             case STORM -> 0.20;
         };
+        if (isNightOffPeakWindow()) {
+            addedDeadheadCapKm = Math.min(addedDeadheadCapKm, 0.32);
+        } else if (isMorningOffPeakWindow()) {
+            addedDeadheadCapKm = Math.min(addedDeadheadCapKm, 0.34);
+        } else if (isDemandSpikeWindow()) {
+            addedDeadheadCapKm = Math.min(addedDeadheadCapKm, 0.28);
+        }
         if (addedDistanceKm > addedDeadheadCapKm) {
             return plan;
         }
@@ -1582,6 +1630,13 @@ public class SimulationEngine {
             case HEAVY_RAIN -> 0.02;
             case STORM -> 0.015;
         };
+        if (isNightOffPeakWindow()) {
+            maxOnTimeDrop = Math.min(maxOnTimeDrop, 0.025);
+        } else if (isMorningOffPeakWindow()) {
+            maxOnTimeDrop = Math.min(maxOnTimeDrop, 0.020);
+        } else if (isDemandSpikeWindow()) {
+            maxOnTimeDrop = Math.min(maxOnTimeDrop, 0.018);
+        }
         if (predictedOnTimeDrop > maxOnTimeDrop) {
             return plan;
         }
@@ -1704,6 +1759,16 @@ public class SimulationEngine {
                 case HEAVY_RAIN -> LOCAL_MINI_DISPATCH_MAX_DETOUR_KM;
                 case STORM -> 0.75;
             };
+            if (isNightOffPeakWindow()) {
+                pickupCapKm = Math.min(pickupCapKm, 2.4);
+                detourCapKm = Math.min(detourCapKm, 0.70);
+            } else if (isMorningOffPeakWindow()) {
+                pickupCapKm = Math.min(pickupCapKm, 2.5);
+                detourCapKm = Math.min(detourCapKm, 0.78);
+            } else if (isDemandSpikeWindow()) {
+                pickupCapKm = Math.min(pickupCapKm, 2.3);
+                detourCapKm = Math.min(detourCapKm, 0.68);
+            }
             GeoPoint routeAnchor = resolvePrePickupRouteAnchor(driver);
             if (routeAnchor == null) {
                 return pickupKm <= pickupCapKm;
@@ -1744,6 +1809,16 @@ public class SimulationEngine {
             case HEAVY_RAIN -> 0.80;
             case STORM -> 0.60;
         };
+        if (isNightOffPeakWindow()) {
+            reachCapKm = Math.min(reachCapKm, 1.45);
+            detourCapKm = Math.min(detourCapKm, 0.52);
+        } else if (isMorningOffPeakWindow()) {
+            reachCapKm = Math.min(reachCapKm, 1.55);
+            detourCapKm = Math.min(detourCapKm, 0.58);
+        } else if (isDemandSpikeWindow()) {
+            reachCapKm = Math.min(reachCapKm, 1.40);
+            detourCapKm = Math.min(detourCapKm, 0.50);
+        }
         return Math.min(pickupKm, anchorPickupKm) <= reachCapKm || detourKm <= detourCapKm;
     }
 
@@ -1775,6 +1850,25 @@ public class SimulationEngine {
         }
         int index = Math.max(0, Math.min(driver.getCurrentSequenceIndex(), assignedSequence.size() - 1));
         return assignedSequence.get(index).location();
+    }
+
+    private boolean isNightOffPeakWindow() {
+        return weatherProfile == WeatherProfile.CLEAR
+                && simulatedHour >= 20
+                && demandMultiplier <= 1.20;
+    }
+
+    private boolean isMorningOffPeakWindow() {
+        return weatherProfile == WeatherProfile.CLEAR
+                && simulatedHour >= 7
+                && simulatedHour <= 10
+                && demandMultiplier <= 0.95;
+    }
+
+    private boolean isDemandSpikeWindow() {
+        return demandMultiplier >= 1.25
+                && weatherProfile != WeatherProfile.HEAVY_RAIN
+                && weatherProfile != WeatherProfile.STORM;
     }
 
     private double computeDetourKm(GeoPoint origin, GeoPoint anchor, GeoPoint candidatePickup) {

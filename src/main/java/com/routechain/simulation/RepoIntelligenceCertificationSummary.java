@@ -23,6 +23,7 @@ public record RepoIntelligenceCertificationSummary(
         CertificationGateResult auxiliaryGate,
         LegacyReferenceResult legacyReference,
         List<ScenarioGroupCertificationResult> scenarioGroups,
+        RouteQualityBlockerSummary routeQualityBlockerSummary,
         boolean overallPass,
         String overallVerdict,
         List<String> notes

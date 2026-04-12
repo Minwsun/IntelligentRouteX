@@ -76,6 +76,8 @@ class RepoIntelligenceCertificationRunnerTest {
         String markdownContent = Files.readString(markdown);
         assertTrue(markdownContent.contains("Repo Intelligence Certification"));
         assertTrue(markdownContent.contains("Correctness"));
+        assertTrue(markdownContent.contains("Route Quality Blockers"));
+        assertTrue(Files.exists(root.resolve("certification").resolve("route-quality-blockers-smoke.json")));
         assertTrue(Files.readString(root.resolve("repo_intelligence_certification.csv")).contains("repo-intelligence-smoke"));
     }
 

@@ -364,15 +364,44 @@ public class SequenceOptimizer {
         double distanceKm = current.distanceTo(order.getPickupPoint()) / 1000.0;
         double readinessScore = Math.max(0.0, 1.0 - order.getPickupDelayHazard());
         double onRouteScore = 0.0;
+        double detourKm = 0.0;
         if (routeAnchor != null) {
-            double detourKm = estimateDetourKm(current, routeAnchor, order.getPickupPoint());
+            detourKm = estimateDetourKm(current, routeAnchor, order.getPickupPoint());
             onRouteScore = 1.0 / (1.0 + detourKm / 0.55);
         }
-        return readinessScore * 0.28
-                + onRouteScore * 0.32
-                + computeCorridorAffinity(order.getDropoffPoint()) * 0.16
-                + computeLandingPotential(order.getDropoffPoint()) * 0.10
-                - distanceKm * 0.22;
+        double readinessWeight = 0.28;
+        double onRouteWeight = 0.32;
+        double corridorWeight = 0.16;
+        double landingWeight = 0.10;
+        double distancePenaltyWeight = 0.22;
+
+        if (isHarshWeatherWindow()) {
+            readinessWeight += 0.08;
+            onRouteWeight += 0.06;
+            corridorWeight -= 0.06;
+            landingWeight -= 0.03;
+            distancePenaltyWeight += 0.08;
+        }
+        if (isSparseContinuityWindow()) {
+            onRouteWeight -= 0.04;
+            corridorWeight -= 0.04;
+            landingWeight += 0.10;
+            distancePenaltyWeight += 0.04;
+        }
+        if (isSupplyFragileWindow()) {
+            readinessWeight += 0.04;
+            onRouteWeight += 0.02;
+            corridorWeight -= 0.03;
+            landingWeight -= 0.01;
+            distancePenaltyWeight += 0.05;
+        }
+        double detourPenalty = routeAnchor == null ? 0.0 : detourKm * (isHarshWeatherWindow() ? 0.18 : 0.10);
+        return readinessScore * readinessWeight
+                + onRouteScore * onRouteWeight
+                + computeCorridorAffinity(order.getDropoffPoint()) * Math.max(0.04, corridorWeight)
+                + computeLandingPotential(order.getDropoffPoint()) * Math.max(0.05, landingWeight)
+                - distanceKm * distancePenaltyWeight
+                - detourPenalty;
     }
 
     private double estimateDetourKm(GeoPoint origin, GeoPoint anchor, GeoPoint pickup) {
@@ -540,6 +569,27 @@ public class SequenceOptimizer {
             corridorDeviationCost *= 0.72;
             lastDropLandingCost *= 0.78;
             returnToDemandCost *= 0.72;
+        }
+        if (isHarshWeatherWindow()) {
+            slaRiskPenalty *= 1.22;
+            urgencyFrontloadPenalty *= 1.18;
+            weatherCongestionPenalty *= 1.20;
+            corridorDeviationCost *= 1.10;
+            lastDropLandingCost *= 0.92;
+            returnToDemandCost *= 0.92;
+        }
+        if (isSparseContinuityWindow()) {
+            dropTransitionCost *= 0.92;
+            corridorDeviationCost *= 0.84;
+            lastDropLandingCost *= 1.26;
+            returnToDemandCost *= 1.36;
+        }
+        if (isSupplyFragileWindow()) {
+            slaRiskPenalty *= 1.16;
+            urgencyFrontloadPenalty *= 1.14;
+            corridorDeviationCost *= 0.94;
+            lastDropLandingCost *= 0.95;
+            returnToDemandCost *= 0.88;
         }
         return totalDistKm
                 + merchantWaitPenalty * stressPenalty
@@ -745,6 +795,9 @@ public class SequenceOptimizer {
     private double maxPickupSpanMinutes(List<Order> orders) {
         boolean cleanThreeOrderWindow = isCleanThreeOrderWindow(orders);
         boolean trafficOnlyStressWindow = isTrafficOnlyStressWindow(orders);
+        if (isHarshWeatherWindow()) {
+            return showcasePickupWave ? 15.0 : 9.0;
+        }
         if (stressRegime == StressRegime.SEVERE_STRESS) {
             return 8.0;
         }
@@ -770,6 +823,9 @@ public class SequenceOptimizer {
     private double maxMerchantWaitMinutes(List<Order> orders) {
         boolean cleanThreeOrderWindow = isCleanThreeOrderWindow(orders);
         boolean trafficOnlyStressWindow = isTrafficOnlyStressWindow(orders);
+        if (isHarshWeatherWindow()) {
+            return showcasePickupWave ? 9.0 : 6.5;
+        }
         if (stressRegime == StressRegime.SEVERE_STRESS) {
             return 5.0;
         }
@@ -795,6 +851,9 @@ public class SequenceOptimizer {
     private double maxDetourRatio(List<Order> orders) {
         boolean cleanThreeOrderWindow = isCleanThreeOrderWindow(orders);
         boolean trafficOnlyStressWindow = isTrafficOnlyStressWindow(orders);
+        if (isHarshWeatherWindow()) {
+            return showcasePickupWave ? 2.2 : 2.0;
+        }
         if (stressRegime == StressRegime.SEVERE_STRESS) {
             return 1.8;
         }
@@ -820,6 +879,9 @@ public class SequenceOptimizer {
     private double slaLatenessFactor(List<Order> orders) {
         boolean cleanThreeOrderWindow = isCleanThreeOrderWindow(orders);
         boolean trafficOnlyStressWindow = isTrafficOnlyStressWindow(orders);
+        if (isHarshWeatherWindow()) {
+            return showcasePickupWave ? 0.68 : 0.60;
+        }
         if (stressRegime == StressRegime.SEVERE_STRESS) {
             return 0.58;
         }
@@ -853,10 +915,31 @@ public class SequenceOptimizer {
         double landingPotential = futureRemaining.isEmpty()
                 ? computeLandingPotential(candidate.getDropoffPoint())
                 : computeLandingPotentialOfFuture(futureRemaining);
-        return corridorAffinity * 0.32
-                + remainingProgress * 0.28
-                + landingPotential * 0.18
-                - distancePenalty * 0.22;
+        double corridorWeight = 0.32;
+        double progressWeight = 0.28;
+        double landingWeight = 0.18;
+        double distancePenaltyWeight = 0.22;
+        if (isSparseContinuityWindow()) {
+            corridorWeight -= 0.08;
+            progressWeight -= 0.04;
+            landingWeight += 0.16;
+            distancePenaltyWeight += 0.04;
+        }
+        if (isHarshWeatherWindow()) {
+            corridorWeight -= 0.06;
+            progressWeight += 0.05;
+            landingWeight += 0.04;
+            distancePenaltyWeight += 0.08;
+        }
+        if (isSupplyFragileWindow()) {
+            progressWeight += 0.06;
+            landingWeight -= 0.03;
+            distancePenaltyWeight += 0.05;
+        }
+        return corridorAffinity * Math.max(0.08, corridorWeight)
+                + remainingProgress * Math.max(0.12, progressWeight)
+                + landingPotential * Math.max(0.08, landingWeight)
+                - distancePenalty * distancePenaltyWeight;
     }
 
     private double scoreRiskAwareDropCandidate(GeoPoint current,
@@ -874,11 +957,33 @@ public class SequenceOptimizer {
         double landingPotential = futureRemaining.isEmpty()
                 ? computeLandingPotential(candidate.getDropoffPoint())
                 : computeLandingPotentialOfFuture(futureRemaining);
-        return urgency * 0.34
-                + (1.0 - distancePenalty / 4.0) * 0.24
-                + slackScore * 0.20
-                + corridorAffinity * 0.14
-                + landingPotential * 0.08;
+        double urgencyWeight = 0.34;
+        double distanceWeight = 0.24;
+        double slackWeight = 0.20;
+        double corridorWeight = 0.14;
+        double landingWeight = 0.08;
+        if (isHarshWeatherWindow()) {
+            urgencyWeight += 0.06;
+            distanceWeight += 0.04;
+            slackWeight += 0.04;
+            corridorWeight -= 0.06;
+            landingWeight -= 0.02;
+        }
+        if (isSparseContinuityWindow()) {
+            corridorWeight -= 0.04;
+            landingWeight += 0.10;
+        }
+        if (isSupplyFragileWindow()) {
+            urgencyWeight += 0.06;
+            distanceWeight += 0.04;
+            slackWeight += 0.05;
+            landingWeight -= 0.03;
+        }
+        return urgency * urgencyWeight
+                + (1.0 - distancePenalty / 4.0) * distanceWeight
+                + slackScore * slackWeight
+                + corridorAffinity * Math.max(0.04, corridorWeight)
+                + landingPotential * Math.max(0.04, landingWeight);
     }
 
     private double computeOrderUrgency(Order order) {
@@ -1020,12 +1125,16 @@ public class SequenceOptimizer {
 
     private double computeLastDropLandingScore(GeoPoint lastDrop) {
         if (context == null || context.endZoneCandidates().isEmpty()) {
+            double sparseBonus = isSparseContinuityWindow() ? 0.10 : 0.0;
+            double harshWeatherPenalty = isHarshWeatherWindow() ? 0.04 : 0.0;
             return clamp01(
                     0.48
                             + (context != null ? clamp01(context.localPostDropOpportunity()) * 0.18 : 0.0)
                             + (context != null ? clamp01(context.deliveryDemandGradient()) * 0.10 : 0.0)
+                            + sparseBonus
                             - (context != null ? clamp01(context.localEmptyZoneRisk()) * 0.10 : 0.0)
-                            - (context != null ? clamp01(context.endZoneIdleRisk()) * 0.08 : 0.0));
+                            - (context != null ? clamp01(context.endZoneIdleRisk()) * 0.08 : 0.0)
+                            - harshWeatherPenalty);
         }
 
         double bestScore = 0.0;
@@ -1035,11 +1144,27 @@ public class SequenceOptimizer {
             double demandScore = Math.min(1.0, candidate.demandForecast10m() / 2.5);
             double shortageScore = Math.min(1.0, candidate.shortageForecast10m() / 2.5);
             double lowEmptyRisk = 1.0 - clamp01(candidate.emptyZoneRisk());
-            double score = candidate.attractionScore() * 0.22
-                    + candidate.postDropOpportunity() * 0.24
-                    + proximity * 0.15
-                    + demandScore * 0.14
-                    + lowEmptyRisk * 0.13
+            double attractionWeight = 0.22;
+            double opportunityWeight = 0.24;
+            double proximityWeight = 0.15;
+            double demandWeight = 0.14;
+            double emptyRiskWeight = 0.13;
+            if (isSparseContinuityWindow()) {
+                attractionWeight -= 0.04;
+                opportunityWeight += 0.08;
+                demandWeight += 0.04;
+                emptyRiskWeight += 0.04;
+            }
+            if (isHarshWeatherWindow()) {
+                proximityWeight += 0.04;
+                demandWeight -= 0.02;
+                emptyRiskWeight += 0.03;
+            }
+            double score = candidate.attractionScore() * attractionWeight
+                    + candidate.postDropOpportunity() * opportunityWeight
+                    + proximity * proximityWeight
+                    + demandScore * demandWeight
+                    + lowEmptyRisk * emptyRiskWeight
                     + (1.0 - candidate.corridorExposure()) * 0.06
                     + (1.0 - candidate.weatherExposure()) * 0.04
                     + shortageScore * 0.02;
@@ -1062,8 +1187,10 @@ public class SequenceOptimizer {
                             + candidate.attractionScore() * 0.25
                             + demandScore * 0.10
                             + (1.0 - clamp01(candidate.emptyZoneRisk())) * 0.10);
+            double sparseRiskWeight = isSparseContinuityWindow() ? 0.75 : 0.55;
+            double weatherRiskWeight = isHarshWeatherWindow() ? 0.30 : 0.20;
             double weightedKm = distKm
-                    * (1.0 + candidate.emptyZoneRisk() * 0.55 + candidate.weatherExposure() * 0.20)
+                    * (1.0 + candidate.emptyZoneRisk() * sparseRiskWeight + candidate.weatherExposure() * weatherRiskWeight)
                     / opportunity;
             bestWeightedKm = Math.min(bestWeightedKm, weightedKm);
         }
@@ -1094,6 +1221,15 @@ public class SequenceOptimizer {
                 - context.deliveryDemandGradient() * 0.60
                 - bestPostDropOpportunity * 2.4
                 + bestEmptyZoneRisk * 1.1;
+        if (isSparseContinuityWindow()) {
+            adjusted += expectedPostCompletionEmptyKm * 0.35
+                    + context.endZoneIdleRisk() * 0.80
+                    - bestPostDropOpportunity * 0.70;
+        }
+        if (isHarshWeatherWindow()) {
+            adjusted += expectedPostCompletionEmptyKm * 0.20
+                    + context.endZoneIdleRisk() * 0.35;
+        }
         return Math.max(0.5, adjusted);
     }
 
@@ -1197,6 +1333,31 @@ public class SequenceOptimizer {
         }
         return averagePickupDelayHazard(orders) <= 0.28
                 && computePickupSpreadKm(orders) <= 1.1;
+    }
+
+    private boolean isHarshWeatherWindow() {
+        return weather == Enums.WeatherProfile.HEAVY_RAIN
+                || weather == Enums.WeatherProfile.STORM
+                || (context != null && context.harshWeatherStress());
+    }
+
+    private boolean isSparseContinuityWindow() {
+        if (context == null || isHarshWeatherWindow()) {
+            return false;
+        }
+        return context.estimatedIdleMinutes() >= 5.5
+                || (context.localDemandForecast10m() <= 0.85
+                && context.deliveryDemandGradient() <= 0.30)
+                || context.endZoneIdleRisk() >= 0.48;
+    }
+
+    private boolean isSupplyFragileWindow() {
+        if (context == null || isHarshWeatherWindow()) {
+            return false;
+        }
+        return context.localDriverDensity() <= 0.38
+                || context.localShortagePressure() >= 0.42
+                || context.effectiveSlaSlackMinutes() <= 9.0;
     }
 
     private double averagePickupDelayHazard(List<Order> orders) {

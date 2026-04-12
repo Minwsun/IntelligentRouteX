@@ -90,6 +90,34 @@ class RouteIntelligenceVerdictRunnerTest {
                         true,
                         List.of()
                 )),
+                new RouteQualityBlockerSummary(
+                        BenchmarkSchema.VERSION,
+                        "route-quality-blockers-smoke",
+                        Instant.parse("2026-04-04T00:00:00Z"),
+                        "abc123",
+                        List.of(new RouteQualityBlockerBucketSummary(
+                                "HEAVY_RAIN",
+                                "blocker",
+                                2,
+                                -5.1,
+                                -4.0,
+                                -2.6,
+                                0.9,
+                                0.4,
+                                6.0,
+                                0.28,
+                                -8.4,
+                                -4.5,
+                                0.31,
+                                1.9,
+                                3.3,
+                                1.1,
+                                1.5,
+                                List.of("eta_bias", "deadhead_inflation", "post_drop_blind_zone"),
+                                List.of("heavy rain remains unsolved")
+                        )),
+                        List.of("phase-3 blocker summary")
+                ),
                 true,
                 "PASS_WITH_WARNING",
                 List.of("smoke lane green")

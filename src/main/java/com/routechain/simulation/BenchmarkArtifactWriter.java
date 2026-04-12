@@ -577,6 +577,33 @@ public final class BenchmarkArtifactWriter {
         }
     }
 
+    public static void writeRouteQualityBlockerSummary(RouteQualityBlockerSummary summary) {
+        if (summary == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(CERTIFICATION_DIR);
+            Path jsonPath = CERTIFICATION_DIR.resolve(safe(summary.laneName()) + ".json");
+            Path markdownPath = CERTIFICATION_DIR.resolve(safe(summary.laneName()) + ".md");
+            Files.writeString(
+                    jsonPath,
+                    GSON.toJson(summary),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            Files.writeString(
+                    markdownPath,
+                    renderRouteQualityBlockerMarkdown(summary),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to write route quality blocker summary", e);
+        }
+    }
+
     public static void writePublicResearchBenchmarkSummary(PublicResearchBenchmarkSummary summary) {
         if (summary == null) {
             return;
@@ -1122,6 +1149,22 @@ public final class BenchmarkArtifactWriter {
                 builder.append("  - ").append(note).append(System.lineSeparator());
             }
         }
+        if (summary.routeQualityBlockerSummary() != null) {
+            builder.append(System.lineSeparator()).append("## Route Quality Blockers").append(System.lineSeparator());
+            for (RouteQualityBlockerBucketSummary bucket : summary.routeQualityBlockerSummary().bucketSummaries()) {
+                builder.append("- ").append(bucket.bucketName())
+                        .append(": samples=").append(bucket.sampleCount())
+                        .append(" gain=").append(String.format("%.2f%%", bucket.overallGainPercentMean()))
+                        .append(" completion=").append(String.format("%+.2fpp", bucket.completionDeltaMean()))
+                        .append(" deadhead=").append(String.format("%+.2fpp", bucket.deadheadDeltaMean()))
+                        .append(" postDrop=").append(String.format("%+.2fpp", bucket.postDropHitDeltaMean()))
+                        .append(" reasons=").append(bucket.blockerReasons().isEmpty() ? "none" : joinList(bucket.blockerReasons()))
+                        .append(System.lineSeparator());
+                for (String note : bucket.notes()) {
+                    builder.append("  - ").append(note).append(System.lineSeparator());
+                }
+            }
+        }
         if (!summary.notes().isEmpty()) {
             builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
             for (String note : summary.notes()) {
@@ -1151,6 +1194,59 @@ public final class BenchmarkArtifactWriter {
                     .append(System.lineSeparator());
             for (String note : family.notes()) {
                 builder.append("  - ").append(note).append(System.lineSeparator());
+            }
+        }
+        if (!summary.notes().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
+            for (String note : summary.notes()) {
+                builder.append("- ").append(note).append(System.lineSeparator());
+            }
+        }
+        return builder.toString();
+    }
+
+    private static String renderRouteQualityBlockerMarkdown(RouteQualityBlockerSummary summary) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# Route Quality Blockers").append(System.lineSeparator()).append(System.lineSeparator());
+        builder.append("- Lane: ").append(summary.laneName()).append(System.lineSeparator());
+        builder.append("- Generated: ").append(summary.generatedAt()).append(System.lineSeparator());
+        builder.append("- Git SHA: ").append(summary.gitRevision()).append(System.lineSeparator());
+        for (RouteQualityBlockerBucketSummary bucket : summary.bucketSummaries()) {
+            builder.append(System.lineSeparator()).append("## ").append(bucket.bucketName()).append(System.lineSeparator());
+            builder.append("- Evidence scope: ").append(bucket.evidenceScope()).append(System.lineSeparator());
+            builder.append("- Samples: ").append(bucket.sampleCount()).append(System.lineSeparator());
+            builder.append("- Gain: ").append(String.format("%.2f%%", bucket.overallGainPercentMean())).append(System.lineSeparator());
+            builder.append("- Completion/on-time: ")
+                    .append(String.format("%+.2fpp / %+.2fpp", bucket.completionDeltaMean(), bucket.onTimeDeltaMean()))
+                    .append(System.lineSeparator());
+            builder.append("- Deadhead: ")
+                    .append(String.format("%+.2fpp | dh/completed %+.2fkm",
+                            bucket.deadheadDeltaMean(),
+                            bucket.deadheadPerCompletedOrderKmDeltaMean()))
+                    .append(System.lineSeparator());
+            builder.append("- Post-drop/landing: ")
+                    .append(String.format("%+.2fpp | landing %+.2fpp | empty-after %+.2fkm | next-idle %+.2fm",
+                            bucket.postDropHitDeltaMean(),
+                            bucket.landingDeltaMean(),
+                            bucket.emptyAfterKmDeltaMean(),
+                            bucket.nextIdleMinutesDeltaMean()))
+                    .append(System.lineSeparator());
+            builder.append("- Cancel/ETA: ")
+                    .append(String.format("%+.2fpp | etaBias %+.2fm",
+                            bucket.cancelDeltaMean(),
+                            bucket.etaBiasMinutesMean()))
+                    .append(System.lineSeparator());
+            builder.append("- Fallback/borrowed/downgrade: ")
+                    .append(String.format("%+.2fpp / %+.2fpp / %+.2fpp",
+                            bucket.fallbackShareDeltaMean(),
+                            bucket.borrowedShareDeltaMean(),
+                            bucket.stressDowngradeDeltaMean()))
+                    .append(System.lineSeparator());
+            builder.append("- Reasons: ")
+                    .append(bucket.blockerReasons().isEmpty() ? "none" : joinList(bucket.blockerReasons()))
+                    .append(System.lineSeparator());
+            for (String note : bucket.notes()) {
+                builder.append("- ").append(note).append(System.lineSeparator());
             }
         }
         if (!summary.notes().isEmpty()) {

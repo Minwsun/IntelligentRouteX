@@ -412,6 +412,7 @@ repoIntelligenceSmokeSummary.configure {
 
 repoIntelligenceCertificationSummary.configure {
     mustRunAfter(hybridBenchmarkTrackA)
+    mustRunAfter(scenarioBatchRealisticHcmc)
 }
 
 scenarioBatchNightly.configure {
@@ -459,6 +460,7 @@ routeIntelligenceVerdictCertificationSummary.configure {
     mustRunAfter(aiInfluenceAblationCertification)
     mustRunAfter(hybridBenchmarkTrackA)
     mustRunAfter(scenarioBatchCertification)
+    mustRunAfter(scenarioBatchRealisticHcmc)
     mustRunAfter(publicResearchBenchmarkCertificationSummary)
     mustRunAfter(batchIntelligenceCertificationSummary)
 }
@@ -491,6 +493,7 @@ tasks.register("repoIntelligenceCertification") {
     dependsOn(cleanBenchmarkArtifacts)
     dependsOn("repoIntelligenceSmoke")
     dependsOn(scenarioBatchCertification)
+    dependsOn(scenarioBatchRealisticHcmc)
     dependsOn(hybridBenchmarkTrackA)
     dependsOn(repoIntelligenceCertificationSummary)
 }
@@ -527,6 +530,7 @@ tasks.register("routeIntelligenceVerdictCertification") {
     dependsOn(cleanBenchmarkArtifacts)
     dependsOn("routeIntelligenceVerdictSmoke")
     dependsOn(scenarioBatchCertification)
+    dependsOn(scenarioBatchRealisticHcmc)
     dependsOn(hybridBenchmarkTrackA)
     dependsOn("researchBenchmark")
     dependsOn(publicResearchBenchmarkCertificationSummary)

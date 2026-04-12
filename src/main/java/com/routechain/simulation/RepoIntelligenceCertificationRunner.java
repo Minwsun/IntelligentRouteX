@@ -47,6 +47,7 @@ public final class RepoIntelligenceCertificationRunner {
         List<RunReport> runs = readJsonDirectory(RUNS_DIR, RunReport.class);
         List<ReplayCompareResult> compares = readJsonDirectory(COMPARES_DIR, ReplayCompareResult.class);
         List<ScenarioGroupCertificationResult> scenarioGroups = evaluateScenarioGroups(lane, baseline, runs);
+        RouteQualityBlockerSummary blockerSummary = buildRouteQualityBlockerSummary(laneName, compares);
 
         CertificationGateResult correctnessGate = evaluateCorrectnessGate(routeSmoke, runs);
         CertificationGateResult latencyGate = evaluateLatencyGate(runtime, scenarioGroups);
@@ -102,11 +103,13 @@ public final class RepoIntelligenceCertificationRunner {
                 auxiliaryGate,
                 legacyReference,
                 scenarioGroups,
+                blockerSummary,
                 overallPass,
                 overallPass ? (legacyReference.warning() ? "PASS_WITH_WARNING" : "PASS") : "FAIL",
                 notes
         );
 
+        BenchmarkArtifactWriter.writeRouteQualityBlockerSummary(blockerSummary);
         BenchmarkArtifactWriter.writeRepoIntelligenceCertificationSummary(summary);
         System.out.println("[RepoIntelligence] lane=" + laneName
                 + " verdict=" + summary.overallVerdict()
@@ -415,6 +418,136 @@ public final class RepoIntelligenceCertificationRunner {
         return results;
     }
 
+    private static RouteQualityBlockerSummary buildRouteQualityBlockerSummary(String laneName,
+                                                                              List<ReplayCompareResult> compares) {
+        List<BucketSpec> bucketSpecs = List.of(
+                new BucketSpec("CLEAR", "mini-matrix", List.of("normal", "instant-normal")),
+                new BucketSpec("RUSH_HOUR", "mini-matrix", List.of("rush_hour", "instant-rush_hour")),
+                new BucketSpec("SHORTAGE", "mini-matrix", List.of("shortage", "post_drop_shortage", "realistic-hcmc-shortage-regime")),
+                new BucketSpec("HEAVY_RAIN", "blocker", List.of("heavy_rain", "realistic-hcmc-heavy-rain-lunch")),
+                new BucketSpec("NIGHT_OFF_PEAK", "realistic-hcmc", List.of("realistic-hcmc-night-off-peak")),
+                new BucketSpec("MORNING_OFF_PEAK", "realistic-hcmc", List.of("realistic-hcmc-morning-off-peak")),
+                new BucketSpec("DEMAND_SPIKE", "mixed", List.of("demand_spike", "instant-demand_spike", "realistic-hcmc-weekend-demand-spike"))
+        );
+        List<RouteQualityBlockerBucketSummary> buckets = new ArrayList<>();
+        for (BucketSpec spec : bucketSpecs) {
+            List<ReplayCompareResult> matched = compares.stream()
+                    .filter(BenchmarkCertificationSupport::isCurrentOmegaCompare)
+                    .filter(compare -> BenchmarkCertificationSupport.matchesScenario(compare.scenarioB(), spec.matchers()))
+                    .toList();
+            buckets.add(summarizeBucket(spec, matched));
+        }
+        return new RouteQualityBlockerSummary(
+                BenchmarkSchema.VERSION,
+                "route-quality-blockers-" + laneName,
+                Instant.now(),
+                BenchmarkCertificationSupport.resolveGitRevision(),
+                buckets,
+                List.of(
+                        "mini-matrix buckets use certification compares when present",
+                        "off-peak and heavy-rain-lunch checkpoints use realistic-hcmc compares"
+                )
+        );
+    }
+
+    private static RouteQualityBlockerBucketSummary summarizeBucket(BucketSpec spec,
+                                                                    List<ReplayCompareResult> compares) {
+        if (compares == null || compares.isEmpty()) {
+            return new RouteQualityBlockerBucketSummary(
+                    spec.bucketName(),
+                    spec.evidenceScope(),
+                    0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    List.of(),
+                    List.of("insufficient support: no matching compare artifacts")
+            );
+        }
+
+        double gain = BenchmarkCertificationSupport.average(compares.stream().map(ReplayCompareResult::overallGainPercent).toList());
+        double completion = BenchmarkCertificationSupport.average(compares.stream().map(ReplayCompareResult::completionRateDelta).toList());
+        double onTime = BenchmarkCertificationSupport.average(compares.stream().map(ReplayCompareResult::onTimeRateDelta).toList());
+        double etaBias = BenchmarkCertificationSupport.average(compares.stream().map(ReplayCompareResult::etaMAEDelta).toList());
+        double cancel = BenchmarkCertificationSupport.average(compares.stream().map(ReplayCompareResult::cancellationRateDelta).toList());
+        double deadhead = BenchmarkCertificationSupport.average(compares.stream().map(ReplayCompareResult::deadheadRatioDelta).toList());
+        double deadheadPerCompleted = BenchmarkCertificationSupport.average(compares.stream().map(ReplayCompareResult::deadheadPerCompletedOrderKmDelta).toList());
+        double postDrop = BenchmarkCertificationSupport.average(compares.stream().map(ReplayCompareResult::postDropOrderHitRateDelta).toList());
+        double landing = BenchmarkCertificationSupport.average(compares.stream().map(ReplayCompareResult::lastDropGoodZoneRateDelta).toList());
+        double emptyAfter = BenchmarkCertificationSupport.average(compares.stream().map(ReplayCompareResult::expectedPostCompletionEmptyKmDelta).toList());
+        double nextIdle = BenchmarkCertificationSupport.average(compares.stream().map(ReplayCompareResult::nextOrderIdleMinutesDelta).toList());
+        double fallback = BenchmarkCertificationSupport.average(compares.stream().map(compare ->
+                compare.recoveryDelta() == null ? 0.0 : (double) compare.recoveryDelta().executedFallbackCountDelta()).toList());
+        double borrowed = BenchmarkCertificationSupport.average(compares.stream().map(compare ->
+                compare.recoveryDelta() == null ? 0.0 : (double) compare.recoveryDelta().executedBorrowedCountDelta()).toList());
+        double downgrade = BenchmarkCertificationSupport.average(compares.stream().map(ReplayCompareResult::stressDowngradeRateDelta).toList());
+
+        List<String> reasons = new ArrayList<>();
+        if (completion <= -1.5 || onTime <= -2.0 || etaBias >= 0.5) {
+            reasons.add("eta_bias");
+        }
+        if (cancel >= 0.5) {
+            reasons.add("cancel_bias");
+        }
+        if (deadhead >= 2.0 || deadheadPerCompleted >= 0.15) {
+            reasons.add("deadhead_inflation");
+        }
+        if (postDrop <= -2.0 || nextIdle >= 1.0) {
+            reasons.add("post_drop_blind_zone");
+        }
+        if (landing <= -2.0 || emptyAfter >= 0.15) {
+            reasons.add("landing_quality");
+        }
+        if (fallback >= 2.0 || borrowed >= 2.0 || downgrade >= 1.0) {
+            reasons.add("fallback_or_borrowed_pressure");
+        }
+        if (reasons.isEmpty() && gain < 0.0) {
+            reasons.add("mixed_regression");
+        }
+
+        List<String> notes = new ArrayList<>();
+        if (compares.size() < 2) {
+            notes.add("insufficient support: fewer than 2 compare samples");
+        }
+        notes.add("gain=" + String.format("%.2f", gain)
+                + " completion=" + String.format("%+.2f", completion)
+                + " deadhead=" + String.format("%+.2f", deadhead)
+                + " postDrop=" + String.format("%+.2f", postDrop));
+
+        return new RouteQualityBlockerBucketSummary(
+                spec.bucketName(),
+                spec.evidenceScope(),
+                compares.size(),
+                gain,
+                completion,
+                onTime,
+                etaBias,
+                cancel,
+                deadhead,
+                deadheadPerCompleted,
+                postDrop,
+                landing,
+                emptyAfter,
+                nextIdle,
+                fallback,
+                borrowed,
+                downgrade,
+                reasons,
+                notes
+        );
+    }
+
     private static List<String> collectScenarioNotes(
             List<ScenarioGroupCertificationResult> groups,
             java.util.function.Predicate<ScenarioGroupCertificationResult> passPredicate,
@@ -485,6 +618,12 @@ public final class RepoIntelligenceCertificationRunner {
     private record LegacyHistoryEntry(
             boolean legacyUnderperforming,
             int consecutiveUnderperformCount
+    ) {}
+
+    private record BucketSpec(
+            String bucketName,
+            String evidenceScope,
+            List<String> matchers
     ) {}
 }
 
