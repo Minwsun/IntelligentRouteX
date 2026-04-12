@@ -74,6 +74,7 @@ public class CompactRuntimeCoordinator {
                 executablePlan.getTraceId(),
                 executablePlan.getDriver().getId(),
                 executablePlan.getBundle().bundleId(),
+                evidence.planType(),
                 executablePlan.getOrders().stream().map(Order::getId).toList(),
                 evidence.featureVector(),
                 evidence.scoreBreakdown(),

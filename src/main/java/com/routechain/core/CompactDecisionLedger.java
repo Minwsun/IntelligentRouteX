@@ -15,6 +15,7 @@ public class CompactDecisionLedger {
     public void recordDecision(String traceId,
                                String driverId,
                                String bundleId,
+                               CompactPlanType planType,
                                List<String> orderIds,
                                PlanFeatureVector featureVector,
                                AdaptiveScoreBreakdown scoreBreakdown,
@@ -28,6 +29,7 @@ public class CompactDecisionLedger {
                 traceId,
                 driverId,
                 bundleId,
+                planType,
                 new LinkedHashSet<>(orderIds),
                 featureVector,
                 scoreBreakdown,
@@ -125,6 +127,7 @@ public class CompactDecisionLedger {
         private final String traceId;
         private final String driverId;
         private final String bundleId;
+        private final CompactPlanType planType;
         private final Set<String> orderIds;
         private final PlanFeatureVector featureVector;
         private final AdaptiveScoreBreakdown scoreBreakdown;
@@ -147,6 +150,7 @@ public class CompactDecisionLedger {
         private Entry(String traceId,
                       String driverId,
                       String bundleId,
+                      CompactPlanType planType,
                       Set<String> orderIds,
                       PlanFeatureVector featureVector,
                       AdaptiveScoreBreakdown scoreBreakdown,
@@ -159,6 +163,7 @@ public class CompactDecisionLedger {
             this.traceId = traceId;
             this.driverId = driverId;
             this.bundleId = bundleId;
+            this.planType = planType;
             this.orderIds = orderIds;
             this.featureVector = featureVector;
             this.scoreBreakdown = scoreBreakdown;
@@ -197,6 +202,29 @@ public class CompactDecisionLedger {
                     landing,
                     postDropQuality,
                     cancelAvoidance);
+            DecisionLogRecord decisionLog = new DecisionLogRecord(
+                    traceId,
+                    driverId,
+                    bundleId,
+                    planType,
+                    List.copyOf(orderIds),
+                    scoreBreakdown.regimeKey(),
+                    featureVector,
+                    scoreBreakdown,
+                    snapshotBefore,
+                    decisionTime,
+                    scoreBreakdown.finalScore(),
+                    plannedDeadheadKm,
+                    plannedRevenue,
+                    plannedLandingScore,
+                    plannedEmptyKm,
+                    featureVector.cancelRisk(),
+                    featureVector.onTimeProbability());
+            ResolvedDecisionSample resolvedSample = new ResolvedDecisionSample(
+                    decisionLog,
+                    outcomeVector,
+                    DecisionOutcomeStage.AFTER_POST_DROP_WINDOW,
+                    resolvedAt == null ? decisionTime : resolvedAt);
             return new CompactDecisionResolution(
                     traceId,
                     driverId,
@@ -208,6 +236,8 @@ public class CompactDecisionLedger {
                     snapshotBefore,
                     null,
                     scoreBreakdown,
+                    decisionLog,
+                    resolvedSample,
                     postDropHit,
                     resolvedAt == null ? decisionTime : resolvedAt);
         }

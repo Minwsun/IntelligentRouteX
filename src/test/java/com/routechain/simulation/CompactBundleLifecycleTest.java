@@ -36,6 +36,7 @@ class CompactBundleLifecycleTest {
                 "trace-bundle",
                 "driver-bundle",
                 "bundle-2",
+                com.routechain.core.CompactPlanType.BATCH_2_COMPACT,
                 List.of("order-1", "order-2"),
                 features,
                 breakdown,
@@ -57,6 +58,7 @@ class CompactBundleLifecycleTest {
 
         assertNotNull(resolution);
         assertEquals(2, resolution.orderIds().size());
+        assertEquals(com.routechain.core.CompactPlanType.BATCH_2_COMPACT, resolution.decisionLog().planType());
         assertEquals(1.0, resolution.outcomeVector().completion(), 1e-9);
         assertEquals(0.5, resolution.outcomeVector().onTime(), 1e-9);
         assertTrue(resolution.postDropHit());

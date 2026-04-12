@@ -31,6 +31,7 @@ class CompactDecisionLedgerTest {
                 "trace-1",
                 "driver-1",
                 "bundle-1",
+                CompactPlanType.SINGLE_LOCAL,
                 List.of("order-1"),
                 features,
                 breakdown,
@@ -50,6 +51,8 @@ class CompactDecisionLedgerTest {
                 Instant.parse("2026-04-11T05:11:00Z"));
 
         assertNotNull(resolution);
+        assertEquals("trace-1", resolution.decisionLog().decisionId());
+        assertEquals(DecisionOutcomeStage.AFTER_POST_DROP_WINDOW, resolution.resolvedSample().outcomeStage());
         assertTrue(resolution.postDropHit());
         assertEquals(1.0, resolution.outcomeVector().completion(), 1e-9);
         assertEquals(1.0, resolution.outcomeVector().onTime(), 1e-9);
@@ -73,6 +76,7 @@ class CompactDecisionLedgerTest {
                 "trace-2",
                 "driver-2",
                 "bundle-2",
+                CompactPlanType.FALLBACK_LOCAL,
                 List.of("order-2"),
                 features,
                 breakdown,

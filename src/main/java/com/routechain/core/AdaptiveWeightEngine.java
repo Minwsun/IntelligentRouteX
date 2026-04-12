@@ -6,10 +6,19 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class AdaptiveWeightEngine {
-    private static final double L2 = 0.012;
-    private static final double EMA_ALPHA = 0.18;
+    private static final double L2 = 0.010;
     private static final double MIN_WEIGHT = -1.20;
     private static final double MAX_WEIGHT = 1.20;
+    private static final double[] FEATURE_MAX_STEPS = {
+            0.030, // on-time
+            0.030, // deadhead
+            0.020, // bundle efficiency
+            0.015, // merchant alignment
+            0.020, // corridor quality
+            0.020, // landing
+            0.025, // post-completion empty km
+            0.025  // cancel risk
+    };
 
     private final CompactPolicyConfig policyConfig;
     private final RegimeClassifier regimeClassifier = new RegimeClassifier();
@@ -28,10 +37,10 @@ public class AdaptiveWeightEngine {
     public AdaptiveWeightEngine(CompactPolicyConfig policyConfig) {
         this.policyConfig = policyConfig == null ? CompactPolicyConfig.defaults() : policyConfig;
         dualPenaltyController.configureWindow(this.policyConfig.rollingPenaltyWindow());
-        seedRegime(RegimeKey.CLEAR_NORMAL, new double[] {0.42, -0.34, 0.26, 0.18, 0.22, 0.20, -0.20, -0.26}, 0.86, 0.18);
-        seedRegime(RegimeKey.CLEAR_SHORTAGE, new double[] {0.46, -0.30, 0.24, 0.16, 0.18, 0.18, -0.18, -0.30}, 0.74, 0.20);
-        seedRegime(RegimeKey.RAIN_STRESS, new double[] {0.52, -0.40, 0.18, 0.14, 0.12, 0.12, -0.24, -0.34}, 0.72, 0.16);
-        seedRegime(RegimeKey.OFFPEAK_LOW_DENSITY, new double[] {0.36, -0.24, 0.20, 0.14, 0.24, 0.28, -0.18, -0.18}, 0.70, 0.14);
+        seedRegime(RegimeKey.CLEAR_NORMAL, new double[] {0.42, -0.34, 0.26, 0.18, 0.22, 0.20, -0.20, -0.26}, 0.86, 0.05);
+        seedRegime(RegimeKey.CLEAR_SHORTAGE, new double[] {0.46, -0.30, 0.24, 0.16, 0.18, 0.18, -0.18, -0.30}, 0.74, 0.04);
+        seedRegime(RegimeKey.RAIN_STRESS, new double[] {0.52, -0.40, 0.18, 0.14, 0.12, 0.12, -0.24, -0.34}, 0.72, 0.03);
+        seedRegime(RegimeKey.OFFPEAK_LOW_DENSITY, new double[] {0.36, -0.24, 0.20, 0.14, 0.24, 0.28, -0.18, -0.18}, 0.70, 0.04);
     }
 
     public double score(PlanFeatureVector phi, CompactDispatchContext context) {
@@ -73,27 +82,70 @@ public class AdaptiveWeightEngine {
         double[] current = regimeWeights.get(regimeKey);
         double[] updated = current.clone();
         double prediction = dot(current, phi.values());
-        double error = outcome.totalReward() - prediction;
+        double rawError = outcome.totalReward() - prediction;
         int samples = sampleCounts.merge(regimeKey, 1, Integer::sum);
         double lr = effectiveLearningRate(regimeKey, samples);
-        if (Math.abs(error) >= policyConfig.noisyOutcomeErrorThreshold()) {
+        if (Math.abs(rawError) >= policyConfig.noisyOutcomeErrorThreshold()) {
             regimeConfidence.put(regimeKey, Math.max(0.25, regimeConfidence.getOrDefault(regimeKey, 0.70) - 0.04));
             dualPenaltyController.recordOutcome(outcome);
             dualPenaltyController.decay();
             return;
         }
+        double error = clip(rawError, policyConfig.onlineLearningErrorClip());
         double[] values = phi.values();
         for (int i = 0; i < values.length; i++) {
             double gradient = clip(error * values[i] - (L2 * current[i]), policyConfig.gradientClip());
-            double candidate = current[i] + clip(lr * gradient, policyConfig.maxFeatureUpdate());
+            double candidate = current[i] + clip(lr * gradient, maxStepForFeature(i));
             candidate = enforceSign(i, candidate);
             candidate = clamp(candidate);
-            updated[i] = current[i] + (candidate - current[i]) * EMA_ALPHA;
+            updated[i] = current[i] + (candidate - current[i]) * policyConfig.learningEmaAlpha();
         }
         regimeWeights.put(regimeKey, updated);
         regimeConfidence.put(regimeKey, confidenceFor(regimeKey, samples, error, outcome.totalReward()));
         dualPenaltyController.recordOutcome(outcome);
         dualPenaltyController.decay();
+    }
+
+    public boolean recordResolvedSample(ResolvedDecisionSample sample) {
+        if (sample == null) {
+            return false;
+        }
+        recordSupport(sample.regimeKey());
+        dualPenaltyController.recordOutcome(sample.outcomeVector());
+        dualPenaltyController.decay();
+        if (learningFrozen || !sample.eligibleForWeightUpdate()) {
+            return false;
+        }
+        int samples = sampleCounts.getOrDefault(sample.regimeKey(), 0);
+        if (samples < policyConfig.minResolvedSamplesForOnlineLearning()) {
+            return false;
+        }
+
+        double[] current = regimeWeights.get(sample.regimeKey());
+        if (current == null) {
+            return false;
+        }
+        double rawError = sample.actualReward() - sample.predictedReward();
+        if (Math.abs(rawError) > policyConfig.onlineLearningMaxAbsError()) {
+            regimeConfidence.put(sample.regimeKey(),
+                    Math.max(0.25, regimeConfidence.getOrDefault(sample.regimeKey(), 0.70) - 0.03));
+            return false;
+        }
+
+        double[] updated = current.clone();
+        double[] values = sample.featureVector().values();
+        double error = clip(rawError, policyConfig.onlineLearningErrorClip());
+        double lr = effectiveLearningRate(sample.regimeKey(), samples);
+        for (int i = 0; i < values.length; i++) {
+            double gradient = (error * values[i]) - (L2 * current[i]);
+            double delta = clip(lr * gradient, maxStepForFeature(i));
+            double candidate = enforceSign(i, current[i] + delta);
+            updated[i] = current[i] + (clamp(candidate) - current[i]) * policyConfig.learningEmaAlpha();
+        }
+        regimeWeights.put(sample.regimeKey(), updated);
+        regimeConfidence.put(sample.regimeKey(),
+                confidenceFor(sample.regimeKey(), samples, error, sample.actualReward()));
+        return true;
     }
 
     public WeightSnapshot snapshot() {
@@ -133,6 +185,10 @@ public class AdaptiveWeightEngine {
 
     public void setLearningRateMultiplier(double learningRateMultiplier) {
         this.learningRateMultiplier = Math.max(0.05, Math.min(1.0, learningRateMultiplier));
+    }
+
+    public void recordSupport(RegimeKey regimeKey) {
+        sampleCounts.merge(regimeKey, 1, Integer::sum);
     }
 
     private RegimeKey resolveRegime(CompactDispatchContext context) {
@@ -180,8 +236,15 @@ public class AdaptiveWeightEngine {
 
     private double effectiveLearningRate(RegimeKey regimeKey, int samples) {
         double base = learningRates.getOrDefault(regimeKey, 0.16);
-        double supportDecay = 1.0 / Math.sqrt(1.0 + samples / 8.0);
+        double supportDecay = 1.0 / Math.sqrt(1.0 + samples / 20.0);
         return base * learningRateMultiplier * supportDecay;
+    }
+
+    private double maxStepForFeature(int index) {
+        if (index < 0 || index >= FEATURE_MAX_STEPS.length) {
+            return policyConfig.maxFeatureUpdate();
+        }
+        return FEATURE_MAX_STEPS[index];
     }
 
     private double confidenceFor(RegimeKey regimeKey, int samples, double error, double reward) {

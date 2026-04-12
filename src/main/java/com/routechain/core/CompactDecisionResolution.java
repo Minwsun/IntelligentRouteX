@@ -14,10 +14,19 @@ public record CompactDecisionResolution(
         WeightSnapshot weightSnapshotBefore,
         WeightSnapshot weightSnapshotAfter,
         AdaptiveScoreBreakdown scoreBreakdown,
+        DecisionLogRecord decisionLog,
+        ResolvedDecisionSample resolvedSample,
         boolean postDropHit,
         Instant resolvedAt) {
 
     public CompactDecisionResolution withSnapshotAfter(WeightSnapshot snapshotAfter, Instant resolvedAt) {
+        ResolvedDecisionSample finalizedSample = resolvedSample == null
+                ? null
+                : new ResolvedDecisionSample(
+                resolvedSample.decisionLog(),
+                resolvedSample.outcomeVector(),
+                resolvedSample.outcomeStage(),
+                resolvedAt);
         return new CompactDecisionResolution(
                 traceId,
                 driverId,
@@ -29,6 +38,8 @@ public record CompactDecisionResolution(
                 weightSnapshotBefore,
                 snapshotAfter,
                 scoreBreakdown,
+                decisionLog,
+                finalizedSample,
                 postDropHit,
                 resolvedAt);
     }

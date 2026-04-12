@@ -6,9 +6,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class DualPenaltyController {
-    private static final double MAX_PENALTY = 0.60;
+    private static final double MAX_PENALTY = 0.25;
     private static final double MIN_PENALTY = 0.00;
-    private static final double DECAY = 0.985;
+    private static final double DECAY = 0.98;
     private static final int DEFAULT_WINDOW = 20;
 
     private double lambdaLate = 0.10;
@@ -44,10 +44,10 @@ public class DualPenaltyController {
         double rollingCancel = recentOutcomes.stream().mapToDouble(OutcomeVector::cancelAvoidance).average().orElse(1.0);
         double rollingPostDrop = recentOutcomes.stream().mapToDouble(OutcomeVector::postDropQuality).average().orElse(1.0);
 
-        lambdaLate = adjust(lambdaLate, PlanFeatureVector.clamp01(0.82 - rollingOnTime), outcome.onTime() < 0.82);
-        lambdaDeadhead = adjust(lambdaDeadhead, PlanFeatureVector.clamp01(0.70 - rollingDeadhead), outcome.deadheadEfficiency() < 0.70);
-        lambdaCancel = adjust(lambdaCancel, PlanFeatureVector.clamp01(0.85 - rollingCancel), outcome.cancelAvoidance() < 0.85);
-        lambdaEmptyAfter = adjust(lambdaEmptyAfter, PlanFeatureVector.clamp01(0.72 - rollingPostDrop), outcome.postDropQuality() < 0.72);
+        lambdaLate = adjust(lambdaLate, rollingOnTime <= 0.815 && outcome.onTime() <= 0.815, 0.02);
+        lambdaDeadhead = adjust(lambdaDeadhead, rollingDeadhead <= 0.69 && outcome.deadheadEfficiency() <= 0.69, 0.02);
+        lambdaCancel = adjust(lambdaCancel, rollingCancel <= 0.847 && outcome.cancelAvoidance() <= 0.847, 0.03);
+        lambdaEmptyAfter = adjust(lambdaEmptyAfter, rollingPostDrop <= 0.705 && outcome.postDropQuality() <= 0.705, 0.02);
     }
 
     public void decay() {
@@ -71,10 +71,10 @@ public class DualPenaltyController {
         }
     }
 
-    private double adjust(double current, double breach, boolean currentOutcomeStillBreaching) {
+    private double adjust(double current, boolean breached, double increaseStep) {
         double next = current * DECAY;
-        if (currentOutcomeStillBreaching && breach > 0.0) {
-            next += breach * 0.05;
+        if (breached) {
+            next += increaseStep;
         }
         return clamp(next);
     }

@@ -10,12 +10,15 @@ import com.routechain.core.AdaptiveWeightEngine;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class CompactLearningRuntime {
     private final CompactPolicyConfig policyConfig;
     private final CompactDecisionLedger ledger = new CompactDecisionLedger();
     private final WeightSnapshotStore snapshotStore = new WeightSnapshotStore();
     private final DriftMonitor driftMonitor = new DriftMonitor();
+    private final Set<String> appliedDecisionIds = ConcurrentHashMap.newKeySet();
     private volatile String latestSnapshotTag = "snapshot-none";
 
     public CompactLearningRuntime(CompactPolicyConfig policyConfig) {
@@ -24,6 +27,7 @@ public class CompactLearningRuntime {
 
     public void reset() {
         ledger.reset();
+        appliedDecisionIds.clear();
         latestSnapshotTag = "snapshot-none";
     }
 
@@ -45,8 +49,11 @@ public class CompactLearningRuntime {
         if (resolution == null) {
             return null;
         }
-        double predicted = resolution.scoreBreakdown().finalScore();
-        double actual = resolution.outcomeVector().totalReward();
+        if (resolution.resolvedSample() == null || !appliedDecisionIds.add(resolution.resolvedSample().decisionId())) {
+            return driftMonitor.snapshot();
+        }
+        double predicted = resolution.resolvedSample().predictedReward();
+        double actual = resolution.resolvedSample().actualReward();
         DriftMonitor.DriftAssessment assessment = driftMonitor.record(predicted, actual, actual >= 0.60);
         weightEngine.setLearningFrozen(assessment.freezeUpdates());
         weightEngine.setLearningRateMultiplier(assessment.freezeUpdates() ? 0.40 : 1.0);
@@ -60,16 +67,15 @@ public class CompactLearningRuntime {
             }
         }
 
-        weightEngine.recordOutcome(
-                resolution.regimeKey(),
-                resolution.featureVector(),
-                resolution.outcomeVector());
-        WeightSnapshot latest = weightEngine.snapshot();
-        latestSnapshotTag = snapshotStore.saveLatest(
-                latest,
-                resolution.traceId() + "-" + resolvedAt.toEpochMilli()).tag();
-        if (!assessment.freezeUpdates() && actual >= 0.60) {
-            snapshotStore.saveLastGood(latest);
+        boolean applied = weightEngine.recordResolvedSample(resolution.resolvedSample());
+        if (applied) {
+            WeightSnapshot latest = weightEngine.snapshot();
+            latestSnapshotTag = snapshotStore.saveLatest(
+                    latest,
+                    resolution.traceId() + "-" + resolvedAt.toEpochMilli()).tag();
+            if (!assessment.freezeUpdates() && actual >= 0.60) {
+                snapshotStore.saveLastGood(latest);
+            }
         }
         return assessment;
     }
