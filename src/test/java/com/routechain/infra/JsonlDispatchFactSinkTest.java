@@ -39,7 +39,13 @@ class JsonlDispatchFactSinkTest {
                 0.64,
                 2.4,
                 0.66,
-                Instant.parse("2026-04-08T15:00:00Z"));
+                Instant.parse("2026-04-08T15:00:00Z"),
+                "AFTER_POST_DROP_WINDOW",
+                14.5,
+                false,
+                true,
+                1.2,
+                3.6);
 
         sink.recordOutcome(outcomeFact);
 
@@ -54,6 +60,59 @@ class JsonlDispatchFactSinkTest {
         assertTrue(payload.contains("\"predictedPostDropDemandProbability\":0.64"));
         assertTrue(payload.contains("\"predictedNextOrderIdleMinutes\":2.4"));
         assertTrue(payload.contains("\"stressRescueOutcomeLabel\":0.66"));
+        assertTrue(payload.contains("\"decisionOutcomeStage\":\"AFTER_POST_DROP_WINDOW\""));
+        assertTrue(payload.contains("\"actualEtaMinutes\":14.5"));
+        assertTrue(payload.contains("\"actualPostDropHit\":true"));
+        assertTrue(payload.contains("\"actualNextOrderIdleMinutes\":3.6"));
+    }
+
+    @Test
+    void decisionFactPersistsCompactCalibrationPredictionFields() throws Exception {
+        JsonlDispatchFactSink sink = new JsonlDispatchFactSink(tempDir);
+        DispatchFactSink.DecisionFact decisionFact = new DispatchFactSink.DecisionFact(
+                "trace-compact-1",
+                "run-compact-1",
+                84L,
+                "driver-1",
+                "COMPACT",
+                "COMPACT_RUNTIME",
+                "NONE",
+                0.82,
+                0.73,
+                2,
+                Map.of("planType", "BATCH_2_COMPACT"),
+                Map.of("regime", "CLEAR_NORMAL"),
+                new double[] {0.1, 0.2},
+                new double[] {0.3, 0.4},
+                "BATCH_2_COMPACT via BATCH_2_COMPACT",
+                "",
+                0,
+                "NOT_REQUESTED",
+                "",
+                "NONE",
+                "instant",
+                "COMPACT_RUNTIME",
+                0L,
+                "BATCH_2_COMPACT",
+                0,
+                0.9,
+                null,
+                Instant.parse("2026-04-08T15:00:00Z"),
+                0.66,
+                14.0,
+                0.08,
+                0.61,
+                1.5,
+                3.4,
+                5.8);
+
+        sink.recordDecision(decisionFact);
+
+        String payload = Files.readString(tempDir.resolve("dispatch_decision_facts.jsonl"));
+        assertTrue(payload.contains("\"predictedRewardNormalized\":0.66"));
+        assertTrue(payload.contains("\"predictedEtaMinutes\":14.0"));
+        assertTrue(payload.contains("\"predictedCancelRisk\":0.08"));
+        assertTrue(payload.contains("\"predictedPostCompletionEmptyKm\":1.5"));
     }
 
     @Test

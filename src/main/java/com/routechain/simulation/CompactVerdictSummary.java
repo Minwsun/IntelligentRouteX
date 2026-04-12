@@ -20,6 +20,7 @@ public record CompactVerdictSummary(
         double postDropHitDeltaVsBaseline,
         double emptyKmImprovementPctVsBaseline,
         double batchChosenWhenEligibleRate,
+        CalibrationSnapshot compactCalibrationSnapshot,
         List<String> notes,
         CompactBenchmarkSummary benchmarkSummary) {
 }

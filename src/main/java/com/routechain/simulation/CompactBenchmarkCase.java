@@ -15,6 +15,7 @@ public record CompactBenchmarkCase(
         int batchChosenWhenEligibleContexts,
         int singleChosenWhenBatchEligibleContexts,
         java.util.Map<String, Integer> batchRejectionReasons,
+        CalibrationSnapshot calibrationSnapshot,
         double bundleSuccessRate,
         double avgObservedBundleSize,
         double bundleThreePlusRate) {

@@ -118,12 +118,12 @@ public class AdaptiveWeightEngine {
         if (sample == null) {
             return false;
         }
-        recordSupport(sample.regimeKey());
-        dualPenaltyController.recordOutcome(sample.outcomeVector());
-        dualPenaltyController.decay();
         if (learningFrozen || !sample.eligibleForWeightUpdate()) {
             return false;
         }
+        recordSupport(sample.regimeKey());
+        dualPenaltyController.recordOutcome(sample.outcomeVector());
+        dualPenaltyController.decay();
         int samples = sampleCounts.getOrDefault(sample.regimeKey(), 0);
         if (samples < policyConfig.minResolvedSamplesForOnlineLearning()) {
             return false;

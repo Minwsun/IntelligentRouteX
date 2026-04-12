@@ -53,8 +53,9 @@ class CompactBundleLifecycleTest {
                 0.82,
                 5.6);
 
-        ledger.recordOrderDelivered("trace-bundle", "order-1", true, 42000.0, 15.0);
-        ledger.recordOrderDelivered("trace-bundle", "order-2", false, 42000.0, 18.0);
+        ledger.recordAccepted("trace-bundle", Instant.parse("2026-04-12T04:31:00Z"));
+        ledger.recordOrderDelivered("trace-bundle", "order-1", true, 42000.0, 15.0, Instant.parse("2026-04-12T04:40:00Z"));
+        ledger.recordOrderDelivered("trace-bundle", "order-2", false, 42000.0, 18.0, Instant.parse("2026-04-12T04:45:00Z"));
         ledger.markDriverIdle("driver-bundle", 50L, Instant.parse("2026-04-12T04:45:00Z"), new com.routechain.domain.GeoPoint(10.776, 106.701));
 
         CompactDecisionResolution resolution = ledger.recordPostDropHit(

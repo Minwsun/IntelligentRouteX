@@ -15,16 +15,23 @@ import com.routechain.domain.Driver;
 import com.routechain.domain.Enums.WeatherProfile;
 import com.routechain.domain.Order;
 import com.routechain.domain.Region;
+import com.routechain.infra.DispatchFactSink;
+import com.routechain.infra.PlatformRuntimeBootstrap;
 import com.routechain.simulation.DispatchPlan;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class CompactRuntimeCoordinator {
     private final CompactPolicyConfig policyConfig;
     private final CompactCoreAdapter compactCoreAdapter;
     private final CompactLearningRuntime learningRuntime;
     private final CompactEvidencePublisher evidencePublisher = new CompactEvidencePublisher();
+    private final DispatchFactSink dispatchFactSink = PlatformRuntimeBootstrap.getDispatchFactSink();
+    private final Map<String, String> runIdsByTrace = new ConcurrentHashMap<>();
 
     public CompactRuntimeCoordinator() {
         this(CompactPolicyConfig.defaults());
@@ -69,12 +76,14 @@ public class CompactRuntimeCoordinator {
                 compactCoreAdapter.core().adaptiveWeightEngine().isLearningFrozen());
     }
 
-    public void recordSelectedPlan(DispatchPlan executablePlan,
+    public void recordSelectedPlan(String runId,
+                                   DispatchPlan executablePlan,
                                    CompactSelectedPlanEvidence evidence,
                                    WeightSnapshot snapshotBefore,
                                    Instant decisionTime) {
         DecisionLogRecord calibratedDecisionLog = learningRuntime.calibrationRuntime().calibrateDecisionLog(
                 buildDecisionLogRecord(executablePlan, evidence, snapshotBefore, decisionTime));
+        runIdsByTrace.put(calibratedDecisionLog.decisionId(), runId == null ? "compact-run-unset" : runId);
         learningRuntime.ledger().recordDecision(
                 calibratedDecisionLog.decisionId(),
                 calibratedDecisionLog.driverId(),
@@ -95,14 +104,21 @@ public class CompactRuntimeCoordinator {
                 calibratedDecisionLog.predictedCancelRisk(),
                 calibratedDecisionLog.predictedOnTimeProbability(),
                 calibratedDecisionLog.predictedTripDistanceKm());
+        recordDecisionFact(runId, executablePlan, calibratedDecisionLog);
+        resolve(learningRuntime.ledger().recordAccepted(calibratedDecisionLog.decisionId(), decisionTime), decisionTime);
     }
 
-    public void recordOrderDelivered(String traceId, String orderId, boolean onTime, double fee, double actualEtaMinutes) {
-        learningRuntime.ledger().recordOrderDelivered(traceId, orderId, onTime, fee, actualEtaMinutes);
+    public void recordOrderDelivered(String traceId,
+                                     String orderId,
+                                     boolean onTime,
+                                     double fee,
+                                     double actualEtaMinutes,
+                                     Instant terminalAt) {
+        resolve(learningRuntime.ledger().recordOrderDelivered(traceId, orderId, onTime, fee, actualEtaMinutes, terminalAt), terminalAt);
     }
 
-    public void recordOrderCancelled(String traceId, String orderId) {
-        learningRuntime.ledger().recordOrderCancelled(traceId, orderId);
+    public void recordOrderCancelled(String traceId, String orderId, Instant terminalAt) {
+        resolve(learningRuntime.ledger().recordOrderCancelled(traceId, orderId, terminalAt), terminalAt);
     }
 
     public void markDriverIdle(String driverId, long tick, Instant when, GeoPoint idleLocation) {
@@ -124,6 +140,7 @@ public class CompactRuntimeCoordinator {
     public void reset() {
         learningRuntime.reset();
         evidencePublisher.reset();
+        runIdsByTrace.clear();
     }
 
     public CompactEvidenceBundle latestEvidence() {
@@ -194,6 +211,7 @@ public class CompactRuntimeCoordinator {
         if (resolution == null) {
             return;
         }
+        recordOutcomeFact(resolution);
         DriftMonitor.DriftAssessment assessment = learningRuntime.resolveAndApply(
                 resolution,
                 resolvedAt,
@@ -207,5 +225,99 @@ public class CompactRuntimeCoordinator {
                 compactCoreAdapter.core().adaptiveWeightEngine().isLearningFrozen(),
                 learningRuntime.calibrationRuntime().snapshot(),
                 assessment);
+        if (finalized.isFinalResolution()) {
+            runIdsByTrace.remove(finalized.traceId());
+        }
+    }
+
+    private void recordDecisionFact(String runId,
+                                    DispatchPlan executablePlan,
+                                    DecisionLogRecord decisionLog) {
+        if (dispatchFactSink == null || executablePlan == null || decisionLog == null) {
+            return;
+        }
+        Map<String, Object> semanticPlanSummary = new LinkedHashMap<>();
+        semanticPlanSummary.put("planType", decisionLog.planType().name());
+        semanticPlanSummary.put("selectionBucket", executablePlan.getSelectionBucket().name());
+        semanticPlanSummary.put("predictedEtaMinutes", decisionLog.predictedEtaMinutes());
+        semanticPlanSummary.put("predictedPostDropDemandProbability", decisionLog.predictedPostDropDemandProbability());
+        semanticPlanSummary.put("predictedPostCompletionEmptyKm", decisionLog.predictedPostCompletionEmptyKm());
+        semanticPlanSummary.put("predictedNextOrderIdleMinutes", decisionLog.predictedNextOrderIdleMinutes());
+
+        dispatchFactSink.recordDecision(new DispatchFactSink.DecisionFact(
+                decisionLog.decisionId(),
+                runId == null || runId.isBlank() ? "compact-run-unset" : runId,
+                decisionLog.decisionTime() == null ? 0L : decisionLog.decisionTime().toEpochMilli(),
+                decisionLog.driverId(),
+                "COMPACT",
+                "COMPACT_RUNTIME",
+                "NONE",
+                decisionLog.predictedUtilityRaw(),
+                executablePlan.getConfidence(),
+                executablePlan.getBundleSize(),
+                semanticPlanSummary,
+                Map.of("regime", decisionLog.regimeKey().name()),
+                new double[0],
+                decisionLog.featureVector().values(),
+                decisionLog.planType().name() + " via " + executablePlan.getSelectionBucket().name(),
+                "",
+                0,
+                "NOT_REQUESTED",
+                "",
+                "NONE",
+                executablePlan.getServiceTier(),
+                "COMPACT_RUNTIME",
+                0L,
+                executablePlan.getSelectionBucket().name(),
+                executablePlan.getHoldRemainingCycles(),
+                executablePlan.getMarginalDeadheadPerAddedOrder(),
+                null,
+                decisionLog.decisionTime(),
+                decisionLog.predictedRewardNormalized(),
+                decisionLog.predictedEtaMinutes(),
+                decisionLog.predictedCancelRisk(),
+                decisionLog.predictedPostDropDemandProbability(),
+                decisionLog.predictedPostCompletionEmptyKm(),
+                decisionLog.predictedNextOrderIdleMinutes(),
+                decisionLog.predictedTripDistanceKm()));
+    }
+
+    private void recordOutcomeFact(CompactDecisionResolution resolution) {
+        if (dispatchFactSink == null || resolution == null || resolution.resolvedSample() == null || resolution.decisionLog() == null) {
+            return;
+        }
+        DecisionLogRecord decisionLog = resolution.decisionLog();
+        dispatchFactSink.recordOutcome(new DispatchFactSink.OutcomeFact(
+                resolution.traceId(),
+                runIdsByTrace.getOrDefault(resolution.traceId(), "compact-run-unset"),
+                resolution.resolvedAt() == null ? 0L : resolution.resolvedAt().toEpochMilli(),
+                resolution.resolvedSample().actualReward(),
+                resolution.resolvedSample().actualCancelled(),
+                resolution.outcomeVector().onTime() < 0.999,
+                decisionLog.predictedRevenue() * resolution.outcomeVector().profit(),
+                decisionLog.predictedDeadheadKm(),
+                decisionLog.predictedPostCompletionEmptyKm(),
+                decisionLog.featureVector().bundleEfficiency(),
+                resolution.orderIds().size(),
+                resolution.regimeKey().name(),
+                decisionLog.planType() == com.routechain.core.CompactPlanType.FALLBACK_LOCAL,
+                resolution.outcomeVector().postDropQuality(),
+                resolution.outcomeVector().completion(),
+                resolution.outcomeVector().landing(),
+                decisionLog.predictedLandingScore(),
+                decisionLog.predictedPostDropDemandProbability(),
+                decisionLog.predictedNextOrderIdleMinutes(),
+                resolution.outcomeVector().profit(),
+                resolution.resolvedAt(),
+                resolution.outcomeStage() == null ? "" : resolution.outcomeStage().name(),
+                safeFactDouble(resolution.resolvedSample().actualEtaMinutes()),
+                resolution.resolvedSample().actualCancelled(),
+                resolution.resolvedSample().actualPostDropHit(),
+                safeFactDouble(resolution.resolvedSample().actualPostCompletionEmptyKm()),
+                safeFactDouble(resolution.resolvedSample().actualNextOrderIdleMinutes())));
+    }
+
+    private double safeFactDouble(double value) {
+        return Double.isFinite(value) ? value : -1.0;
     }
 }

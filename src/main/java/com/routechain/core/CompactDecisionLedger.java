@@ -58,14 +58,24 @@ public class CompactDecisionLedger {
         traceByDriver.put(driverId, traceId);
     }
 
-    public void recordOrderDelivered(String traceId,
-                                     String orderId,
-                                     boolean onTime,
-                                     double fee,
-                                     double actualEtaMinutes) {
+    public CompactDecisionResolution recordAccepted(String traceId, Instant acceptedAt) {
         Entry entry = entriesByTrace.get(traceId);
-        if (entry == null || entry.resolved) {
-            return;
+        if (entry == null || entry.finalResolved || entry.acceptResolved) {
+            return null;
+        }
+        entry.acceptResolved = true;
+        return entry.toResolution(DecisionOutcomeStage.AFTER_ACCEPT, acceptedAt, false);
+    }
+
+    public CompactDecisionResolution recordOrderDelivered(String traceId,
+                                                          String orderId,
+                                                          boolean onTime,
+                                                          double fee,
+                                                          double actualEtaMinutes,
+                                                          Instant terminalAt) {
+        Entry entry = entriesByTrace.get(traceId);
+        if (entry == null || entry.finalResolved) {
+            return null;
         }
         if (entry.orderIds.contains(orderId)) {
             entry.deliveredOrderIds.add(orderId);
@@ -78,21 +88,31 @@ public class CompactDecisionLedger {
                 entry.actualEtaSamples++;
             }
         }
+        if (entry.isTerminal() && !entry.terminalResolved) {
+            entry.terminalResolved = true;
+            return entry.toResolution(DecisionOutcomeStage.AFTER_TERMINAL, terminalAt, false);
+        }
+        return null;
     }
 
-    public void recordOrderCancelled(String traceId, String orderId) {
+    public CompactDecisionResolution recordOrderCancelled(String traceId, String orderId, Instant terminalAt) {
         Entry entry = entriesByTrace.get(traceId);
-        if (entry == null || entry.resolved) {
-            return;
+        if (entry == null || entry.finalResolved) {
+            return null;
         }
         if (entry.orderIds.contains(orderId)) {
             entry.cancelledOrderIds.add(orderId);
         }
+        if (entry.isTerminal() && !entry.terminalResolved) {
+            entry.terminalResolved = true;
+            return entry.toResolution(DecisionOutcomeStage.AFTER_TERMINAL, terminalAt, false);
+        }
+        return null;
     }
 
     public void markDriverIdle(String driverId, long tick, Instant when, GeoPoint idleLocation) {
         Entry entry = entryForDriver(driverId);
-        if (entry == null || entry.resolved) {
+        if (entry == null || entry.finalResolved) {
             return;
         }
         if (entry.isTerminal()) {
@@ -108,15 +128,15 @@ public class CompactDecisionLedger {
                                                        Instant when,
                                                        GeoPoint nextPickupLocation) {
         Entry entry = entryForDriver(driverId);
-        if (entry == null || entry.resolved || !entry.awaitingPostDrop) {
+        if (entry == null || entry.finalResolved || !entry.awaitingPostDrop) {
             return null;
         }
         entry.postDropHit = true;
         entry.actualPostCompletionEmptyKm = distanceKm(entry.idleLocation, nextPickupLocation);
         entry.actualNextOrderIdleMinutes = durationMinutes(entry.idleAt, when);
-        entry.resolved = true;
+        entry.finalResolved = true;
         traceByDriver.remove(driverId);
-        return entry.toResolution(when);
+        return entry.toResolution(DecisionOutcomeStage.AFTER_POST_DROP_WINDOW, when, true);
     }
 
     public List<CompactDecisionResolution> expirePostDrop(long currentTick,
@@ -124,22 +144,22 @@ public class CompactDecisionLedger {
                                                           long hitWindowTicks) {
         List<CompactDecisionResolution> expired = new ArrayList<>();
         for (Entry entry : entriesByTrace.values()) {
-            if (entry.resolved || !entry.awaitingPostDrop) {
+            if (entry.finalResolved || !entry.awaitingPostDrop) {
                 continue;
             }
             if (entry.idleTick >= 0 && currentTick - entry.idleTick > hitWindowTicks) {
                 entry.actualPostCompletionEmptyKm = Double.NaN;
                 entry.actualNextOrderIdleMinutes = durationMinutes(entry.idleAt, when);
-                entry.resolved = true;
+                entry.finalResolved = true;
                 traceByDriver.remove(entry.driverId);
-                expired.add(entry.toResolution(when));
+                expired.add(entry.toResolution(DecisionOutcomeStage.AFTER_POST_DROP_WINDOW, when, false));
             }
         }
         return expired;
     }
 
     public void clearResolved() {
-        entriesByTrace.entrySet().removeIf(entry -> entry.getValue().resolved);
+        entriesByTrace.entrySet().removeIf(entry -> entry.getValue().finalResolved);
     }
 
     public void reset() {
@@ -180,7 +200,9 @@ public class CompactDecisionLedger {
         private int actualEtaSamples = 0;
         private boolean awaitingPostDrop = false;
         private boolean postDropHit = false;
-        private boolean resolved = false;
+        private boolean acceptResolved = false;
+        private boolean terminalResolved = false;
+        private boolean finalResolved = false;
         private long idleTick = -1L;
         private Instant idleAt;
         private GeoPoint idleLocation;
@@ -231,7 +253,9 @@ public class CompactDecisionLedger {
             return deliveredOrderIds.size() + cancelledOrderIds.size() >= orderIds.size();
         }
 
-        private CompactDecisionResolution toResolution(Instant resolvedAt) {
+        private CompactDecisionResolution toResolution(DecisionOutcomeStage stage,
+                                                       Instant resolvedAt,
+                                                       boolean resolvedPostDropHit) {
             int totalOrders = Math.max(1, orderIds.size());
             int delivered = deliveredOrderIds.size();
             int cancelled = cancelledOrderIds.size();
@@ -248,13 +272,13 @@ public class CompactDecisionLedger {
             double cancelAvoidance = 1.0 - (cancelled / (double) totalOrders);
             double actualEtaMinutes = actualEtaSamples == 0 ? predictedEtaMinutes : actualEtaMinutesSum / actualEtaSamples;
             OutcomeVector outcomeVector = new OutcomeVector(
-                    onTime,
-                    completion,
+                    stage == DecisionOutcomeStage.AFTER_ACCEPT ? 0.0 : onTime,
+                    stage == DecisionOutcomeStage.AFTER_ACCEPT ? 0.0 : completion,
                     deadheadEfficiency,
-                    profit,
-                    landing,
-                    postDropQuality,
-                    cancelAvoidance);
+                    stage == DecisionOutcomeStage.AFTER_ACCEPT ? 0.0 : profit,
+                    stage == DecisionOutcomeStage.AFTER_ACCEPT ? plannedLandingScore : landing,
+                    stage == DecisionOutcomeStage.AFTER_POST_DROP_WINDOW ? postDropQuality : 0.0,
+                    stage == DecisionOutcomeStage.AFTER_ACCEPT ? 1.0 : cancelAvoidance);
             DecisionLogRecord decisionLog = new DecisionLogRecord(
                     traceId,
                     driverId,
@@ -281,12 +305,12 @@ public class CompactDecisionLedger {
             ResolvedDecisionSample resolvedSample = new ResolvedDecisionSample(
                     decisionLog,
                     outcomeVector,
-                    DecisionOutcomeStage.AFTER_POST_DROP_WINDOW,
-                    actualEtaMinutes,
-                    cancelled > 0,
-                    postDropHit,
-                    actualPostCompletionEmptyKm,
-                    actualNextOrderIdleMinutes,
+                    stage,
+                    stage == DecisionOutcomeStage.AFTER_ACCEPT ? Double.NaN : actualEtaMinutes,
+                    stage == DecisionOutcomeStage.AFTER_ACCEPT ? false : cancelled > 0,
+                    stage == DecisionOutcomeStage.AFTER_POST_DROP_WINDOW && resolvedPostDropHit,
+                    stage == DecisionOutcomeStage.AFTER_POST_DROP_WINDOW ? actualPostCompletionEmptyKm : Double.NaN,
+                    stage == DecisionOutcomeStage.AFTER_POST_DROP_WINDOW ? actualNextOrderIdleMinutes : Double.NaN,
                     resolvedAt == null ? decisionTime : resolvedAt);
             return new CompactDecisionResolution(
                     traceId,
@@ -301,7 +325,7 @@ public class CompactDecisionLedger {
                     scoreBreakdown,
                     decisionLog,
                     resolvedSample,
-                    postDropHit,
+                    resolvedPostDropHit,
                     resolvedAt == null ? decisionTime : resolvedAt);
         }
     }

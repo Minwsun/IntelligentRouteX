@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class CompactCalibrationRuntimeTest {
 
@@ -38,6 +39,19 @@ class CompactCalibrationRuntimeTest {
                 || calibrated.predictedNextOrderIdleMinutes() != 2.6);
     }
 
+    @Test
+    void shouldRespectStageGatingForCalibrators() {
+        CompactCalibrationRuntime runtime = new CompactCalibrationRuntime();
+        runtime.recordResolvedSample(sample("accept-only", 18.0, Double.NaN, true, false, Double.NaN, Double.NaN, DecisionOutcomeStage.AFTER_ACCEPT));
+        runtime.recordResolvedSample(sample("terminal-only", 18.0, 14.0, false, false, Double.NaN, Double.NaN, DecisionOutcomeStage.AFTER_TERMINAL));
+
+        CalibrationSnapshot snapshot = runtime.snapshot();
+
+        assertEquals(1L, snapshot.etaSamples());
+        assertEquals(2L, snapshot.cancelSamples());
+        assertEquals(0L, snapshot.postDropSamples());
+    }
+
     private ResolvedDecisionSample sample(String id,
                                           double predictedEta,
                                           double actualEta,
@@ -45,6 +59,18 @@ class CompactCalibrationRuntimeTest {
                                           boolean actualPostDropHit,
                                           double actualEmptyKm,
                                           double actualIdleMinutes) {
+        return sample(id, predictedEta, actualEta, actualCancelled, actualPostDropHit, actualEmptyKm, actualIdleMinutes,
+                DecisionOutcomeStage.AFTER_POST_DROP_WINDOW);
+    }
+
+    private ResolvedDecisionSample sample(String id,
+                                          double predictedEta,
+                                          double actualEta,
+                                          boolean actualCancelled,
+                                          boolean actualPostDropHit,
+                                          double actualEmptyKm,
+                                          double actualIdleMinutes,
+                                          DecisionOutcomeStage stage) {
         PlanFeatureVector phi = new PlanFeatureVector(0.82, 0.18, 0.72, 0.64, 0.68, 0.70, 0.20, 0.10);
         AdaptiveScoreBreakdown breakdown = AdaptiveScoreBreakdown.of(
                 RegimeKey.CLEAR_NORMAL,
@@ -79,7 +105,7 @@ class CompactCalibrationRuntimeTest {
         return new ResolvedDecisionSample(
                 log,
                 new OutcomeVector(0.92, actualCancelled ? 0.0 : 1.0, 0.88, 0.80, 0.82, actualPostDropHit ? 1.0 : 0.40, actualCancelled ? 0.0 : 1.0),
-                DecisionOutcomeStage.AFTER_POST_DROP_WINDOW,
+                stage,
                 actualEta,
                 actualCancelled,
                 actualPostDropHit,

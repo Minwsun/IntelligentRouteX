@@ -25,6 +25,7 @@ public record CompactBenchmarkSummary(
         int compactSingleChosenWhenBatchEligibleContexts,
         double compactBatchChosenWhenEligibleRate,
         java.util.Map<String, Integer> compactBatchRejectionReasons,
+        CalibrationSnapshot compactCalibrationSnapshot,
         double compactBundleSuccessRate,
         double compactAvgObservedBundleSize,
         double compactBundleThreePlusRate,

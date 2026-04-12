@@ -19,7 +19,7 @@ public class CompactLearningRuntime {
     private final WeightSnapshotStore snapshotStore = new WeightSnapshotStore();
     private final DriftMonitor driftMonitor = new DriftMonitor();
     private final CompactCalibrationRuntime calibrationRuntime = new CompactCalibrationRuntime();
-    private final Set<String> appliedDecisionIds = ConcurrentHashMap.newKeySet();
+    private final Set<String> appliedDecisionStages = ConcurrentHashMap.newKeySet();
     private volatile String latestSnapshotTag = "snapshot-none";
 
     public CompactLearningRuntime(CompactPolicyConfig policyConfig) {
@@ -29,7 +29,7 @@ public class CompactLearningRuntime {
     public void reset() {
         ledger.reset();
         calibrationRuntime.reset();
-        appliedDecisionIds.clear();
+        appliedDecisionStages.clear();
         latestSnapshotTag = "snapshot-none";
     }
 
@@ -55,9 +55,15 @@ public class CompactLearningRuntime {
         if (resolution == null) {
             return null;
         }
-        if (resolution.resolvedSample() == null || !appliedDecisionIds.add(resolution.resolvedSample().decisionId())) {
+        if (resolution.resolvedSample() == null
+                || !appliedDecisionStages.add(stageKey(resolution.resolvedSample()))) {
             return driftMonitor.snapshot();
         }
+        calibrationRuntime.recordResolvedSample(resolution.resolvedSample());
+        if (!resolution.resolvedSample().eligibleForWeightUpdate()) {
+            return driftMonitor.snapshot();
+        }
+
         double predicted = resolution.resolvedSample().predictedReward();
         double actual = resolution.resolvedSample().actualReward();
         DriftMonitor.DriftAssessment assessment = driftMonitor.record(predicted, actual, actual >= 0.60);
@@ -73,7 +79,6 @@ public class CompactLearningRuntime {
             }
         }
 
-        calibrationRuntime.recordResolvedSample(resolution.resolvedSample());
         boolean applied = weightEngine.recordResolvedSample(resolution.resolvedSample());
         if (applied) {
             WeightSnapshot latest = weightEngine.snapshot();
@@ -85,6 +90,10 @@ public class CompactLearningRuntime {
             }
         }
         return assessment;
+    }
+
+    private String stageKey(com.routechain.core.ResolvedDecisionSample sample) {
+        return sample.decisionId() + "|" + sample.outcomeStage().name();
     }
 
     public List<CompactDecisionResolution> expire(long currentTick,

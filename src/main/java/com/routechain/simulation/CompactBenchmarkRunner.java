@@ -67,6 +67,7 @@ public final class CompactBenchmarkRunner {
                         compact.batchChosenWhenEligibleContexts(),
                         compact.singleChosenWhenBatchEligibleContexts(),
                         compact.batchRejectionReasons(),
+                        compact.calibrationSnapshot(),
                         compact.report().bundleSuccessRate(),
                         compact.report().avgObservedBundleSize(),
                         compact.report().bundleThreePlusRate()));
@@ -96,6 +97,7 @@ public final class CompactBenchmarkRunner {
                 ? 0.0
                 : (batchChosenWhenEligibleContexts * 100.0) / batchEligibleContexts;
         Map<String, Integer> batchRejectionReasons = sumCounts(cases, CompactBenchmarkCase::batchRejectionReasons);
+        CalibrationSnapshot calibrationSnapshot = aggregateCalibration(cases);
         double compactBundleSuccessRate = mean(cases, CompactBenchmarkCase::bundleSuccessRate);
         double compactAvgObservedBundleSize = mean(cases, CompactBenchmarkCase::avgObservedBundleSize);
         double compactBundleThreePlusRate = mean(cases, CompactBenchmarkCase::bundleThreePlusRate);
@@ -125,6 +127,7 @@ public final class CompactBenchmarkRunner {
                 singleChosenWhenBatchEligibleContexts,
                 batchChosenWhenEligibleRate,
                 batchRejectionReasons,
+                calibrationSnapshot,
                 compactBundleSuccessRate,
                 compactAvgObservedBundleSize,
                 compactBundleThreePlusRate,
@@ -163,6 +166,7 @@ public final class CompactBenchmarkRunner {
                 engine.getCompactBatchChosenWhenEligibleCount(),
                 engine.getCompactSingleChosenWhenBatchEligibleCount(),
                 engine.getCompactBatchRejectionReasons(),
+                engine.getCurrentCompactStatus().calibrationSnapshot(),
                 engine.getLatestCompactEvidence().explanations().stream()
                         .map(CompactDecisionExplanation::summary)
                         .limit(3)
@@ -188,6 +192,7 @@ public final class CompactBenchmarkRunner {
                     StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE,
                     StandardOpenOption.TRUNCATE_EXISTING);
+            writeCalibrationArtifacts(summary);
             writePerSeedMarkdown(summary);
         } catch (IOException e) {
             throw new IllegalStateException("Unable to write compact benchmark summary", e);
@@ -219,6 +224,8 @@ public final class CompactBenchmarkRunner {
         builder.append("- Single chosen when batch eligible: ").append(summary.compactSingleChosenWhenBatchEligibleContexts()).append('\n');
         builder.append("- Batch chosen when eligible rate: ").append(format(summary.compactBatchChosenWhenEligibleRate())).append("%\n");
         builder.append("- Batch rejection reasons: ").append(summary.compactBatchRejectionReasons()).append('\n');
+        builder.append("- Calibration snapshot: ").append(summary.compactCalibrationSnapshot()).append('\n');
+        builder.append("- Calibration support: ").append(calibrationSupportNote(summary.compactCalibrationSnapshot())).append('\n');
         builder.append("- Compact bundle success rate: ").append(format(summary.compactBundleSuccessRate())).append("%\n");
         builder.append("- Compact avg observed bundle size: ").append(format(summary.compactAvgObservedBundleSize())).append('\n');
         builder.append("- Compact 3+ bundle rate: ").append(format(summary.compactBundleThreePlusRate())).append("%\n");
@@ -287,6 +294,7 @@ public final class CompactBenchmarkRunner {
             builder.append("- Batch chosen when eligible: ").append(benchmarkCase.batchChosenWhenEligibleContexts()).append('\n');
             builder.append("- Single chosen when batch eligible: ").append(benchmarkCase.singleChosenWhenBatchEligibleContexts()).append('\n');
             builder.append("- Batch rejection reasons: ").append(benchmarkCase.batchRejectionReasons()).append('\n');
+            builder.append("- Calibration snapshot: ").append(benchmarkCase.calibrationSnapshot()).append('\n');
             builder.append("- Bundle success rate: ").append(String.format("%.2f", benchmarkCase.bundleSuccessRate())).append("%\n");
             builder.append("- Avg observed bundle size: ").append(String.format("%.2f", benchmarkCase.avgObservedBundleSize())).append('\n');
             builder.append("- 3+ bundle rate: ").append(String.format("%.2f", benchmarkCase.bundleThreePlusRate())).append("%\n\n");
@@ -341,6 +349,73 @@ public final class CompactBenchmarkRunner {
         return String.format("%+.3f", value);
     }
 
+    private static CalibrationSnapshot aggregateCalibration(List<CompactBenchmarkCase> cases) {
+        if (cases.isEmpty()) {
+            return CalibrationSnapshot.empty();
+        }
+        return new CalibrationSnapshot(
+                mean(cases, c -> c.calibrationSnapshot().etaResidualMaeMinutes()),
+                mean(cases, c -> c.calibrationSnapshot().cancelCalibrationGap()),
+                mean(cases, c -> c.calibrationSnapshot().postDropHitCalibrationGap()),
+                mean(cases, c -> c.calibrationSnapshot().nextIdleMaeMinutes()),
+                mean(cases, c -> c.calibrationSnapshot().emptyKmMae()),
+                cases.stream().mapToLong(c -> c.calibrationSnapshot().etaSamples()).sum(),
+                cases.stream().mapToLong(c -> c.calibrationSnapshot().cancelSamples()).sum(),
+                cases.stream().mapToLong(c -> c.calibrationSnapshot().postDropSamples()).sum());
+    }
+
+    private static void writeCalibrationArtifacts(CompactBenchmarkSummary summary) throws IOException {
+        CalibrationSnapshot snapshot = summary.compactCalibrationSnapshot();
+        String supportNote = calibrationSupportNote(snapshot);
+        String baseName = summary.lane() + "-calibration";
+        Files.writeString(
+                OUTPUT_DIR.resolve(baseName + ".json"),
+                GSON.toJson(snapshot),
+                StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING);
+        Files.writeString(
+                OUTPUT_DIR.resolve(baseName + ".md"),
+                "# Compact Calibration Summary\n\n"
+                        + "- Lane: " + summary.lane() + "\n"
+                        + "- ETA residual MAE: " + format(snapshot.etaResidualMaeMinutes()) + "\n"
+                        + "- Cancel calibration gap: " + format(snapshot.cancelCalibrationGap()) + "\n"
+                        + "- Post-drop hit calibration gap: " + format(snapshot.postDropHitCalibrationGap()) + "\n"
+                        + "- Next-idle MAE: " + format(snapshot.nextIdleMaeMinutes()) + "\n"
+                        + "- Empty-km MAE: " + format(snapshot.emptyKmMae()) + "\n"
+                        + "- ETA samples: " + snapshot.etaSamples() + "\n"
+                        + "- Cancel samples: " + snapshot.cancelSamples() + "\n"
+                        + "- Post-drop samples: " + snapshot.postDropSamples() + "\n"
+                        + "- Support note: " + supportNote + "\n",
+                StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING);
+        Files.writeString(
+                OUTPUT_DIR.resolve(baseName + ".csv"),
+                "lane,etaResidualMaeMinutes,cancelCalibrationGap,postDropHitCalibrationGap,nextIdleMaeMinutes,emptyKmMae,etaSamples,cancelSamples,postDropSamples,supportNote\n"
+                        + "%s,%.6f,%.6f,%.6f,%.6f,%.6f,%d,%d,%d,%s\n".formatted(
+                        summary.lane(),
+                        snapshot.etaResidualMaeMinutes(),
+                        snapshot.cancelCalibrationGap(),
+                        snapshot.postDropHitCalibrationGap(),
+                        snapshot.nextIdleMaeMinutes(),
+                        snapshot.emptyKmMae(),
+                        snapshot.etaSamples(),
+                        snapshot.cancelSamples(),
+                        snapshot.postDropSamples(),
+                        supportNote),
+                StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING);
+    }
+
+    private static String calibrationSupportNote(CalibrationSnapshot snapshot) {
+        if (snapshot == null || snapshot.etaSamples() < 10 || snapshot.cancelSamples() < 10 || snapshot.postDropSamples() < 10) {
+            return "insufficient support";
+        }
+        return "observability only";
+    }
+
     private static Map<String, Integer> planTypeCounts(SimulationEngine engine) {
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (CompactPlanType type : CompactPlanType.values()) {
@@ -391,6 +466,7 @@ public final class CompactBenchmarkRunner {
             int batchChosenWhenEligibleContexts,
             int singleChosenWhenBatchEligibleContexts,
             Map<String, Integer> batchRejectionReasons,
+            CalibrationSnapshot calibrationSnapshot,
             List<String> topExplanations) {
     }
 }

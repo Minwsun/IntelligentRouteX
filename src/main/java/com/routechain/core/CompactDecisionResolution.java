@@ -19,6 +19,14 @@ public record CompactDecisionResolution(
         boolean postDropHit,
         Instant resolvedAt) {
 
+    public DecisionOutcomeStage outcomeStage() {
+        return resolvedSample == null ? null : resolvedSample.outcomeStage();
+    }
+
+    public boolean isFinalResolution() {
+        return resolvedSample != null && resolvedSample.eligibleForWeightUpdate();
+    }
+
     public CompactDecisionResolution withSnapshotAfter(WeightSnapshot snapshotAfter, Instant resolvedAt) {
         ResolvedDecisionSample finalizedSample = resolvedSample == null
                 ? null

@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CompactLearningRuntimeTest {
 
@@ -39,7 +40,34 @@ class CompactLearningRuntimeTest {
         assertEquals(afterFirst, afterDuplicate, 1e-9);
     }
 
-    private com.routechain.core.CompactDecisionResolution resolution(String decisionId, double predictedReward) {
+    @Test
+    void shouldAllowDifferentStagesForSameDecisionWithoutDoubleApplyingFinalWeightUpdate() {
+        CompactLearningRuntime runtime = new CompactLearningRuntime(com.routechain.core.CompactPolicyConfig.defaults());
+        AdaptiveWeightEngine engine = new AdaptiveWeightEngine();
+
+        for (int i = 0; i < 29; i++) {
+            runtime.resolveAndApply(resolution("seed-" + i, 0.52, DecisionOutcomeStage.AFTER_POST_DROP_WINDOW), Instant.parse("2026-04-12T06:10:00Z"), engine);
+        }
+
+        double before = engine.snapshot().weights().get(RegimeKey.CLEAR_NORMAL)[0];
+        runtime.resolveAndApply(resolution("stage-1", 0.52, DecisionOutcomeStage.AFTER_ACCEPT), Instant.parse("2026-04-12T06:11:00Z"), engine);
+        double afterAccept = engine.snapshot().weights().get(RegimeKey.CLEAR_NORMAL)[0];
+        runtime.resolveAndApply(resolution("stage-1", 0.52, DecisionOutcomeStage.AFTER_TERMINAL), Instant.parse("2026-04-12T06:12:00Z"), engine);
+        double afterTerminal = engine.snapshot().weights().get(RegimeKey.CLEAR_NORMAL)[0];
+        runtime.resolveAndApply(resolution("stage-1", 0.52, DecisionOutcomeStage.AFTER_POST_DROP_WINDOW), Instant.parse("2026-04-12T06:13:00Z"), engine);
+        double afterFinal = engine.snapshot().weights().get(RegimeKey.CLEAR_NORMAL)[0];
+        runtime.resolveAndApply(resolution("stage-1", 0.52, DecisionOutcomeStage.AFTER_POST_DROP_WINDOW), Instant.parse("2026-04-12T06:14:00Z"), engine);
+        double afterFinalDuplicate = engine.snapshot().weights().get(RegimeKey.CLEAR_NORMAL)[0];
+
+        assertEquals(before, afterAccept, 1e-9);
+        assertEquals(afterAccept, afterTerminal, 1e-9);
+        assertTrue(afterFinal > afterTerminal);
+        assertEquals(afterFinal, afterFinalDuplicate, 1e-9);
+    }
+
+    private com.routechain.core.CompactDecisionResolution resolution(String decisionId,
+                                                                     double predictedReward,
+                                                                     DecisionOutcomeStage stage) {
         PlanFeatureVector phi = new PlanFeatureVector(0.84, 0.16, 0.74, 0.62, 0.68, 0.72, 0.18, 0.08);
         AdaptiveScoreBreakdown breakdown = AdaptiveScoreBreakdown.of(
                 RegimeKey.CLEAR_NORMAL,
@@ -74,12 +102,12 @@ class CompactLearningRuntimeTest {
         ResolvedDecisionSample sample = new ResolvedDecisionSample(
                 decisionLog,
                 new OutcomeVector(0.96, 1.0, 0.90, 0.84, 0.86, 0.90, 0.98),
-                DecisionOutcomeStage.AFTER_POST_DROP_WINDOW,
-                11.0,
+                stage,
+                stage == DecisionOutcomeStage.AFTER_ACCEPT ? Double.NaN : 11.0,
                 false,
-                true,
-                0.4,
-                1.8,
+                stage == DecisionOutcomeStage.AFTER_POST_DROP_WINDOW,
+                stage == DecisionOutcomeStage.AFTER_POST_DROP_WINDOW ? 0.4 : Double.NaN,
+                stage == DecisionOutcomeStage.AFTER_POST_DROP_WINDOW ? 1.8 : Double.NaN,
                 Instant.parse("2026-04-12T06:10:00Z"));
         return new com.routechain.core.CompactDecisionResolution(
                 decisionId,
@@ -94,7 +122,11 @@ class CompactLearningRuntimeTest {
                 decisionLog.scoreBreakdown(),
                 decisionLog,
                 sample,
-                true,
+                stage == DecisionOutcomeStage.AFTER_POST_DROP_WINDOW,
                 sample.resolvedAt());
+    }
+
+    private com.routechain.core.CompactDecisionResolution resolution(String decisionId, double predictedReward) {
+        return resolution(decisionId, predictedReward, DecisionOutcomeStage.AFTER_POST_DROP_WINDOW);
     }
 }

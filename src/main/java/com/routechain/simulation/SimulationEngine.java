@@ -1285,13 +1285,14 @@ public class SimulationEngine {
                 visibleBundleThreePlusCount++;
             }
             if (dispatchMode == DispatchMode.COMPACT && compactDecision != null) {
-                compactSelectedPlanTypeCounts.merge(executablePlan.getCompactPlanType(), 1, Integer::sum);
-                CompactSelectedPlanEvidence evidence = compactEvidenceByTrace.get(executablePlan.getTraceId());
-                if (evidence != null) {
-                    compactRuntimeCoordinator.recordSelectedPlan(
-                            executablePlan,
-                            evidence,
-                            compactDecision.weightSnapshotBefore(),
+                    compactSelectedPlanTypeCounts.merge(executablePlan.getCompactPlanType(), 1, Integer::sum);
+                    CompactSelectedPlanEvidence evidence = compactEvidenceByTrace.get(executablePlan.getTraceId());
+                    if (evidence != null) {
+                        compactRuntimeCoordinator.recordSelectedPlan(
+                                currentRunId,
+                                executablePlan,
+                                evidence,
+                                compactDecision.weightSnapshotBefore(),
                             decisionTime);
                 }
             }
@@ -1914,7 +1915,8 @@ public class SimulationEngine {
                                         order.getId(),
                                         !order.isLate(),
                                         order.getQuotedFee(),
-                                        etaActual);
+                                        etaActual,
+                                        simulatedNow);
                             }
                             if (dispatchMode == DispatchMode.OMEGA) {
                                 omegaAgent.onOrderDelivered(order, driver, etaActual, order.isLate(),
@@ -2023,7 +2025,8 @@ public class SimulationEngine {
                             && order.getDecisionTraceId() != null) {
                         compactRuntimeCoordinator.recordOrderCancelled(
                                 order.getDecisionTraceId(),
-                                order.getId());
+                                order.getId(),
+                                simulatedNow);
                     }
 
                     // Omega learning callback

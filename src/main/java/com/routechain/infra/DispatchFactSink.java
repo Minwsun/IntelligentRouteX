@@ -83,8 +83,54 @@ public interface DispatchFactSink {
             int holdTtlRemaining,
             double marginalDeadheadPerAddedOrder,
             LLMAdvisorResponse llmShadow,
-            Instant recordedAt
-    ) {}
+            Instant recordedAt,
+            double predictedRewardNormalized,
+            double predictedEtaMinutes,
+            double predictedCancelRisk,
+            double predictedPostDropDemandProbability,
+            double predictedPostCompletionEmptyKm,
+            double predictedNextOrderIdleMinutes,
+            double predictedTripDistanceKm
+    ) {
+        public DecisionFact(
+                String traceId,
+                String runId,
+                long tick,
+                String driverId,
+                String policyUsed,
+                String executionProfile,
+                String ablationMode,
+                double predictedUtility,
+                double confidence,
+                int bundleSize,
+                Map<String, Object> semanticPlanSummary,
+                Map<String, Object> contextSnapshot,
+                double[] contextFeatures,
+                double[] planFeatures,
+                String explanation,
+                String llmRequestClass,
+                int llmEstimatedInputTokens,
+                String llmQuotaDecision,
+                String llmFallbackChain,
+                String llmFinalMode,
+                String serviceTier,
+                String routeLatencyMode,
+                long dispatchDecisionLatencyMs,
+                String selectionBucket,
+                int holdTtlRemaining,
+                double marginalDeadheadPerAddedOrder,
+                LLMAdvisorResponse llmShadow,
+                Instant recordedAt
+        ) {
+            this(traceId, runId, tick, driverId, policyUsed, executionProfile, ablationMode,
+                    predictedUtility, confidence, bundleSize, semanticPlanSummary, contextSnapshot,
+                    contextFeatures, planFeatures, explanation, llmRequestClass, llmEstimatedInputTokens,
+                    llmQuotaDecision, llmFallbackChain, llmFinalMode, serviceTier, routeLatencyMode,
+                    dispatchDecisionLatencyMs, selectionBucket, holdTtlRemaining, marginalDeadheadPerAddedOrder,
+                    llmShadow, recordedAt,
+                    -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0);
+        }
+    }
 
     record OutcomeFact(
             String traceId,
@@ -107,6 +153,43 @@ public interface DispatchFactSink {
             double predictedPostDropDemandProbability,
             double predictedNextOrderIdleMinutes,
             double stressRescueOutcomeLabel,
-            Instant recordedAt
-    ) {}
+            Instant recordedAt,
+            String decisionOutcomeStage,
+            double actualEtaMinutes,
+            boolean actualCancelled,
+            boolean actualPostDropHit,
+            double actualPostCompletionEmptyKm,
+            double actualNextOrderIdleMinutes
+    ) {
+        public OutcomeFact(
+                String traceId,
+                String runId,
+                long completionTick,
+                double actualReward,
+                boolean cancelled,
+                boolean late,
+                double realizedProfit,
+                double predictedDeadheadKm,
+                double predictedPostCompletionEmptyKm,
+                double bundleEfficiency,
+                int bundleSize,
+                String stressRegime,
+                boolean stressFallbackOnly,
+                double continuationActualNorm,
+                double batchOutcomeLabel,
+                double positioningOutcomeLabel,
+                double predictedLastDropLandingScore,
+                double predictedPostDropDemandProbability,
+                double predictedNextOrderIdleMinutes,
+                double stressRescueOutcomeLabel,
+                Instant recordedAt
+        ) {
+            this(traceId, runId, completionTick, actualReward, cancelled, late, realizedProfit,
+                    predictedDeadheadKm, predictedPostCompletionEmptyKm, bundleEfficiency, bundleSize,
+                    stressRegime, stressFallbackOnly, continuationActualNorm, batchOutcomeLabel,
+                    positioningOutcomeLabel, predictedLastDropLandingScore, predictedPostDropDemandProbability,
+                    predictedNextOrderIdleMinutes, stressRescueOutcomeLabel, recordedAt,
+                    "", -1.0, cancelled, false, -1.0, -1.0);
+        }
+    }
 }

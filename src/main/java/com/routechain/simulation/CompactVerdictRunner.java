@@ -64,6 +64,16 @@ public final class CompactVerdictRunner {
                 notes.add("batch rejection reasons=" + summary.compactBatchRejectionReasons());
             }
         }
+        if (summary.compactCalibrationSnapshot().etaSamples() < 10
+                || summary.compactCalibrationSnapshot().cancelSamples() < 10
+                || summary.compactCalibrationSnapshot().postDropSamples() < 10) {
+            notes.add("calibration support is still low; metrics remain observability-only");
+        } else {
+            notes.add("calibration health etaMae="
+                    + String.format("%.3f", summary.compactCalibrationSnapshot().etaResidualMaeMinutes())
+                    + " cancelGap=" + String.format("%.3f", summary.compactCalibrationSnapshot().cancelCalibrationGap())
+                    + " postDropGap=" + String.format("%.3f", summary.compactCalibrationSnapshot().postDropHitCalibrationGap()));
+        }
 
         boolean overallPass = completionPass
                 && onTimePass
@@ -93,6 +103,7 @@ public final class CompactVerdictRunner {
                 summary.compactPostDropHitDeltaVsBaseline(),
                 summary.compactEmptyKmImprovementPctVsBaseline(),
                 summary.compactBatchChosenWhenEligibleRate(),
+                summary.compactCalibrationSnapshot(),
                 List.copyOf(notes),
                 summary);
     }
@@ -135,6 +146,7 @@ public final class CompactVerdictRunner {
         builder.append("- Post-drop hit delta vs baseline: ").append(String.format("%+.3f pp", verdict.postDropHitDeltaVsBaseline())).append('\n');
         builder.append("- Empty-km improvement vs baseline: ").append(String.format("%+.3f%%", verdict.emptyKmImprovementPctVsBaseline())).append("\n\n");
         builder.append("- Batch chosen when eligible rate: ").append(String.format("%+.3f%%", verdict.batchChosenWhenEligibleRate())).append("\n\n");
+        builder.append("- Calibration snapshot: ").append(verdict.compactCalibrationSnapshot()).append("\n\n");
         builder.append("## Notes\n");
         for (String note : verdict.notes()) {
             builder.append("- ").append(note).append('\n');
