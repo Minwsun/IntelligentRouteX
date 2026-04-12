@@ -63,8 +63,10 @@ public final class BenchmarkCheckpointRunner {
                 : authority.authorityDirty()
                 ? "DIRTY_TRIAGE_ONLY"
                 : "CLEAN_CANONICAL_CHECKPOINT";
+        Instant generatedAt = Instant.now();
 
         List<String> notes = new ArrayList<>();
+        List<String> degradedReasons = new ArrayList<>();
         notes.add("authority checkpoint status=" + checkpointStatus.toLowerCase(Locale.ROOT));
         if (authority.authorityDetectionFailed()) {
             notes.add("git authority detection failed; do not treat this pack as a clean canonical checkpoint");
@@ -77,19 +79,23 @@ public final class BenchmarkCheckpointRunner {
         }
         if (routeAi == null) {
             notes.add("missing route-ai-certification-" + laneName + " artifact");
+            degradedReasons.add("missing route-ai summary");
         } else {
             notes.add("route-ai overallPass=" + routeAi.overallPass());
             if (routeAiFallbackToSmoke) {
                 notes.add("route-ai checkpoint fell back to smoke hot-path summary for lane " + laneName);
+                degradedReasons.add("route-ai summary fell back to smoke for non-smoke lane");
             }
         }
         if (repo == null) {
             notes.add("missing repo-intelligence-" + laneName + " artifact");
+            degradedReasons.add("missing repo summary");
         } else {
             notes.add("repo summary verdict=" + repo.overallVerdict());
         }
         if (verdict == null) {
             notes.add("missing route-intelligence-verdict-" + laneName + " artifact");
+            degradedReasons.add("missing route intelligence verdict summary");
         } else {
             notes.add("route verdict ai=" + verdict.aiVerdict() + " routing=" + verdict.routingVerdict());
         }
@@ -98,15 +104,28 @@ public final class BenchmarkCheckpointRunner {
         } else {
             notes.add("route blocker summary present with " + blockers.bucketSummaries().size() + " bucket(s)");
         }
+        boolean degradedCheckpoint = !degradedReasons.isEmpty();
+        boolean promotionEligible = "CLEAN_CANONICAL_CHECKPOINT".equals(checkpointStatus) && !degradedCheckpoint;
+        String gitRevision = BenchmarkCertificationSupport.resolveGitRevision();
+        String checkpointId = BenchmarkGovernanceSupport.checkpointId(laneName, gitRevision, generatedAt);
+        if (degradedCheckpoint) {
+            notes.add("checkpoint degraded: " + String.join("; ", degradedReasons));
+        }
+        if (!promotionEligible) {
+            notes.add("checkpoint is not promotion-eligible");
+        }
 
         BenchmarkCheckpointSummary summary = new BenchmarkCheckpointSummary(
                 BenchmarkSchema.VERSION,
                 laneName,
-                Instant.now(),
-                BenchmarkCertificationSupport.resolveGitRevision(),
+                generatedAt,
+                gitRevision,
+                checkpointId,
                 checkpointStatus,
                 authority.cleanCheckpointEligible(),
                 authority.triageOnly(),
+                degradedCheckpoint,
+                promotionEligible,
                 routeAi != null,
                 repo != null,
                 verdict != null,
@@ -114,12 +133,15 @@ public final class BenchmarkCheckpointRunner {
                 routeAi == null ? "MISSING" : routeAi.overallPass() ? "PASS" : "FAIL",
                 repo == null ? "MISSING" : repo.overallVerdict(),
                 verdict == null ? "MISSING" : verdict.routingVerdict(),
+                degradedReasons,
                 notes
         );
         BenchmarkArtifactWriter.writeBenchmarkCheckpointSummary(summary);
         System.out.println("[BenchmarkCheckpoint] lane=" + laneName
+                + " checkpointId=" + summary.checkpointId()
                 + " status=" + summary.checkpointStatus()
                 + " clean=" + summary.cleanCheckpoint()
+                + " promotionEligible=" + summary.promotionEligible()
                 + " routeAi=" + summary.routeAiVerdict()
                 + " repo=" + summary.repoVerdict()
                 + " routing=" + summary.routingVerdict());

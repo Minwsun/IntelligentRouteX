@@ -32,6 +32,10 @@ public final class BenchmarkArtifactWriter {
     private static final Path STAGE_LATENCY_DIR = ROOT.resolve("stage-latency");
     private static final Path ACCEPTANCE_DIR = ROOT.resolve("acceptance");
     private static final Path CERTIFICATION_DIR = ROOT.resolve("certification");
+    private static final Path GOVERNANCE_DIR = ROOT.resolve("governance");
+    private static final Path BASELINE_DIR = GOVERNANCE_DIR.resolve("baselines");
+    private static final Path EXPERIMENTS_DIR = GOVERNANCE_DIR.resolve("experiments");
+    private static final Path PROMOTIONS_DIR = GOVERNANCE_DIR.resolve("promotions");
     private static final Path CONTROL_ROOM_DIR = ROOT.resolve("control-room");
     private static final Path CONTROL_ROOM_FRAMES_DIR = CONTROL_ROOM_DIR.resolve("frames");
     private static final Path RUNS_CSV = ROOT.resolve("run_reports.csv");
@@ -48,6 +52,9 @@ public final class BenchmarkArtifactWriter {
     private static final Path ROUTE_INTELLIGENCE_VERDICT_CSV = ROOT.resolve("route_intelligence_verdict.csv");
     private static final Path BENCHMARK_AUTHORITY_CSV = ROOT.resolve("benchmark_authority.csv");
     private static final Path BENCHMARK_CHECKPOINT_CSV = ROOT.resolve("benchmark_checkpoint.csv");
+    private static final Path BENCHMARK_BASELINE_CSV = ROOT.resolve("benchmark_baselines.csv");
+    private static final Path BENCHMARK_EXPERIMENT_CSV = ROOT.resolve("benchmark_experiments.csv");
+    private static final Path BENCHMARK_PROMOTION_CSV = ROOT.resolve("benchmark_promotions.csv");
     private static final Path PUBLIC_RESEARCH_CSV = ROOT.resolve("public_research_benchmark.csv");
     private static final Path BATCH_INTELLIGENCE_CSV = ROOT.resolve("batch_intelligence_certification.csv");
     private static final Path CITY_TWIN_CSV = CONTROL_ROOM_DIR.resolve("city_twin_cells.csv");
@@ -809,15 +816,18 @@ public final class BenchmarkArtifactWriter {
             );
             appendCsv(
                     BENCHMARK_CHECKPOINT_CSV,
-                    "laneName,generatedAt,gitRevision,checkpointStatus,cleanCheckpoint,triageOnly,routeAiSummaryPresent,repoSummaryPresent,verdictSummaryPresent,blockerSummaryPresent,routeAiVerdict,repoVerdict,routingVerdict",
+                    "laneName,generatedAt,gitRevision,checkpointId,checkpointStatus,cleanCheckpoint,triageOnly,degradedCheckpoint,promotionEligible,routeAiSummaryPresent,repoSummaryPresent,verdictSummaryPresent,blockerSummaryPresent,routeAiVerdict,repoVerdict,routingVerdict",
                     String.format(
-                            "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s",
+                            "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s",
                             safe(summary.laneName()),
                             safe(String.valueOf(summary.generatedAt())),
                             safe(summary.gitRevision()),
+                            safe(summary.checkpointId()),
                             safe(summary.checkpointStatus()),
                             Boolean.toString(summary.cleanCheckpoint()),
                             Boolean.toString(summary.triageOnly()),
+                            Boolean.toString(summary.degradedCheckpoint()),
+                            Boolean.toString(summary.promotionEligible()),
                             Boolean.toString(summary.routeAiSummaryPresent()),
                             Boolean.toString(summary.repoSummaryPresent()),
                             Boolean.toString(summary.verdictSummaryPresent()),
@@ -829,6 +839,131 @@ public final class BenchmarkArtifactWriter {
             );
         } catch (IOException e) {
             throw new IllegalStateException("Unable to write benchmark checkpoint summary", e);
+        }
+    }
+
+    public static void writeBenchmarkBaselineRef(BenchmarkBaselineRef baseline) {
+        if (baseline == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(BASELINE_DIR);
+            Files.createDirectories(GOVERNANCE_DIR);
+            Path jsonPath = BASELINE_DIR.resolve(safe(baseline.baselineId()) + ".json");
+            Path markdownPath = BASELINE_DIR.resolve(safe(baseline.baselineId()) + ".md");
+            Path currentPath = GOVERNANCE_DIR.resolve("benchmark-baseline-current.json");
+            Files.writeString(jsonPath, GSON.toJson(baseline), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            Files.writeString(markdownPath, renderBenchmarkBaselineMarkdown(baseline), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            Files.writeString(currentPath, GSON.toJson(baseline), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            appendCsv(
+                    BENCHMARK_BASELINE_CSV,
+                    "baselineId,promotedAt,gitRevision,laneName,checkpointId,checkpointStatus,promotionDecisionId,supersedesBaselineId,active",
+                    String.format(
+                            "%s,%s,%s,%s,%s,%s,%s,%s,%s",
+                            safe(baseline.baselineId()),
+                            safe(String.valueOf(baseline.promotedAt())),
+                            safe(baseline.gitRevision()),
+                            safe(baseline.laneName()),
+                            safe(baseline.checkpointId()),
+                            safe(baseline.checkpointStatus()),
+                            safe(baseline.promotionDecisionId()),
+                            safe(baseline.supersedesBaselineId()),
+                            Boolean.toString(baseline.active())
+                    )
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to write benchmark baseline ref", e);
+        }
+    }
+
+    public static void writeBenchmarkExperimentSpec(BenchmarkExperimentSpec spec) {
+        if (spec == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(EXPERIMENTS_DIR);
+            Path jsonPath = EXPERIMENTS_DIR.resolve(safe(spec.experimentId()) + "-spec.json");
+            Path markdownPath = EXPERIMENTS_DIR.resolve(safe(spec.experimentId()) + "-spec.md");
+            Files.writeString(jsonPath, GSON.toJson(spec), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            Files.writeString(markdownPath, renderBenchmarkExperimentSpecMarkdown(spec), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            appendCsv(
+                    BENCHMARK_EXPERIMENT_CSV,
+                    "experimentId,createdAt,gitRevision,hypothesisId,laneType,baselineCheckpointId,baselineLaneName,authorityStatus,changedKnobGroup,targetBuckets,seedSetType,workspaceStrategy,artifactRoot",
+                    String.format(
+                            "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s",
+                            safe(spec.experimentId()),
+                            safe(String.valueOf(spec.createdAt())),
+                            safe(spec.gitRevision()),
+                            safe(spec.hypothesisId()),
+                            safe(spec.laneType()),
+                            safe(spec.baselineCheckpointId()),
+                            safe(spec.baselineLaneName()),
+                            safe(spec.authorityStatus()),
+                            safe(spec.changedKnobGroup()),
+                            safe(joinList(spec.targetBuckets())),
+                            safe(spec.seedSetType()),
+                            safe(spec.workspaceStrategy()),
+                            safe(spec.artifactRoot())
+                    )
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to write benchmark experiment spec", e);
+        }
+    }
+
+    public static void writeBenchmarkExperimentResult(BenchmarkExperimentResult result) {
+        if (result == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(EXPERIMENTS_DIR);
+            Path jsonPath = EXPERIMENTS_DIR.resolve(safe(result.experimentId()) + "-result.json");
+            Path markdownPath = EXPERIMENTS_DIR.resolve(safe(result.experimentId()) + "-result.md");
+            Files.writeString(jsonPath, GSON.toJson(result), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            Files.writeString(markdownPath, renderBenchmarkExperimentResultMarkdown(result), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to write benchmark experiment result", e);
+        }
+    }
+
+    public static void writeBenchmarkPromotionDecision(BenchmarkPromotionDecision decision) {
+        if (decision == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(PROMOTIONS_DIR);
+            Path jsonPath = PROMOTIONS_DIR.resolve(safe(decision.decisionId()) + ".json");
+            Path markdownPath = PROMOTIONS_DIR.resolve(safe(decision.decisionId()) + ".md");
+            Files.writeString(jsonPath, GSON.toJson(decision), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            Files.writeString(markdownPath, renderBenchmarkPromotionMarkdown(decision), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            appendCsv(
+                    BENCHMARK_PROMOTION_CSV,
+                    "decisionId,decidedAt,decisionType,experimentId,laneName,baselineCheckpointId,candidateCheckpointId,decision,canonicalRecheckRequired,holdoutRequired",
+                    String.format(
+                            "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s",
+                            safe(decision.decisionId()),
+                            safe(String.valueOf(decision.decidedAt())),
+                            safe(decision.decisionType()),
+                            safe(decision.experimentId()),
+                            safe(decision.laneName()),
+                            safe(decision.baselineCheckpointId()),
+                            safe(decision.candidateCheckpointId()),
+                            safe(decision.decision()),
+                            Boolean.toString(decision.canonicalRecheckRequired()),
+                            Boolean.toString(decision.holdoutRequired())
+                    )
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to write benchmark promotion decision", e);
         }
     }
 
@@ -1430,9 +1565,12 @@ public final class BenchmarkArtifactWriter {
         builder.append("- Lane: ").append(summary.laneName()).append(System.lineSeparator());
         builder.append("- Generated: ").append(summary.generatedAt()).append(System.lineSeparator());
         builder.append("- Git SHA: ").append(summary.gitRevision()).append(System.lineSeparator());
+        builder.append("- Checkpoint id: ").append(summary.checkpointId()).append(System.lineSeparator());
         builder.append("- Checkpoint status: ").append(summary.checkpointStatus()).append(System.lineSeparator());
         builder.append("- Clean checkpoint: ").append(summary.cleanCheckpoint()).append(System.lineSeparator());
         builder.append("- Triage only: ").append(summary.triageOnly()).append(System.lineSeparator());
+        builder.append("- Degraded checkpoint: ").append(summary.degradedCheckpoint()).append(System.lineSeparator());
+        builder.append("- Promotion eligible: ").append(summary.promotionEligible()).append(System.lineSeparator());
         builder.append("- Route AI summary present: ").append(summary.routeAiSummaryPresent()).append(System.lineSeparator());
         builder.append("- Repo summary present: ").append(summary.repoSummaryPresent()).append(System.lineSeparator());
         builder.append("- Verdict summary present: ").append(summary.verdictSummaryPresent()).append(System.lineSeparator());
@@ -1440,9 +1578,111 @@ public final class BenchmarkArtifactWriter {
         builder.append("- Route AI verdict: ").append(summary.routeAiVerdict()).append(System.lineSeparator());
         builder.append("- Repo verdict: ").append(summary.repoVerdict()).append(System.lineSeparator());
         builder.append("- Routing verdict: ").append(summary.routingVerdict()).append(System.lineSeparator());
+        if (!summary.degradedReasons().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Degraded Reasons").append(System.lineSeparator());
+            for (String reason : summary.degradedReasons()) {
+                builder.append("- ").append(reason).append(System.lineSeparator());
+            }
+        }
         if (!summary.notes().isEmpty()) {
             builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
             for (String note : summary.notes()) {
+                builder.append("- ").append(note).append(System.lineSeparator());
+            }
+        }
+        return builder.toString();
+    }
+
+    private static String renderBenchmarkBaselineMarkdown(BenchmarkBaselineRef baseline) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# Benchmark Baseline").append(System.lineSeparator()).append(System.lineSeparator());
+        builder.append("- Baseline id: ").append(baseline.baselineId()).append(System.lineSeparator());
+        builder.append("- Promoted at: ").append(baseline.promotedAt()).append(System.lineSeparator());
+        builder.append("- Git SHA: ").append(baseline.gitRevision()).append(System.lineSeparator());
+        builder.append("- Lane: ").append(baseline.laneName()).append(System.lineSeparator());
+        builder.append("- Checkpoint id: ").append(baseline.checkpointId()).append(System.lineSeparator());
+        builder.append("- Checkpoint status: ").append(baseline.checkpointStatus()).append(System.lineSeparator());
+        builder.append("- Promotion decision id: ").append(baseline.promotionDecisionId()).append(System.lineSeparator());
+        builder.append("- Supersedes baseline id: ").append(baseline.supersedesBaselineId()).append(System.lineSeparator());
+        builder.append("- Active: ").append(baseline.active()).append(System.lineSeparator());
+        if (!baseline.notes().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
+            for (String note : baseline.notes()) {
+                builder.append("- ").append(note).append(System.lineSeparator());
+            }
+        }
+        return builder.toString();
+    }
+
+    private static String renderBenchmarkExperimentSpecMarkdown(BenchmarkExperimentSpec spec) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# Benchmark Experiment Spec").append(System.lineSeparator()).append(System.lineSeparator());
+        builder.append("- Experiment id: ").append(spec.experimentId()).append(System.lineSeparator());
+        builder.append("- Created at: ").append(spec.createdAt()).append(System.lineSeparator());
+        builder.append("- Hypothesis id: ").append(spec.hypothesisId()).append(System.lineSeparator());
+        builder.append("- Lane type: ").append(spec.laneType()).append(System.lineSeparator());
+        builder.append("- Baseline checkpoint id: ").append(spec.baselineCheckpointId()).append(System.lineSeparator());
+        builder.append("- Baseline lane: ").append(spec.baselineLaneName()).append(System.lineSeparator());
+        builder.append("- Git SHA: ").append(spec.gitRevision()).append(System.lineSeparator());
+        builder.append("- Authority status: ").append(spec.authorityStatus()).append(System.lineSeparator());
+        builder.append("- Changed knob group: ").append(spec.changedKnobGroup()).append(System.lineSeparator());
+        builder.append("- Target buckets: ").append(String.join(", ", spec.targetBuckets())).append(System.lineSeparator());
+        builder.append("- Seed set type: ").append(spec.seedSetType()).append(System.lineSeparator());
+        builder.append("- Workspace strategy: ").append(spec.workspaceStrategy()).append(System.lineSeparator());
+        builder.append("- Artifact root: ").append(spec.artifactRoot()).append(System.lineSeparator());
+        if (!spec.notes().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
+            for (String note : spec.notes()) {
+                builder.append("- ").append(note).append(System.lineSeparator());
+            }
+        }
+        return builder.toString();
+    }
+
+    private static String renderBenchmarkExperimentResultMarkdown(BenchmarkExperimentResult result) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# Benchmark Experiment Result").append(System.lineSeparator()).append(System.lineSeparator());
+        builder.append("- Experiment id: ").append(result.experimentId()).append(System.lineSeparator());
+        builder.append("- Generated at: ").append(result.generatedAt()).append(System.lineSeparator());
+        builder.append("- Hypothesis id: ").append(result.hypothesisId()).append(System.lineSeparator());
+        builder.append("- Lane type: ").append(result.laneType()).append(System.lineSeparator());
+        builder.append("- Baseline checkpoint id: ").append(result.baselineCheckpointId()).append(System.lineSeparator());
+        builder.append("- Candidate checkpoint id: ").append(result.candidateCheckpointId()).append(System.lineSeparator());
+        builder.append("- Git SHA: ").append(result.gitRevision()).append(System.lineSeparator());
+        builder.append("- Authority status: ").append(result.authorityStatus()).append(System.lineSeparator());
+        builder.append("- Checkpoint status: ").append(result.checkpointStatus()).append(System.lineSeparator());
+        builder.append("- Seed set type: ").append(result.seedSetType()).append(System.lineSeparator());
+        builder.append("- Artifact root: ").append(result.artifactRoot()).append(System.lineSeparator());
+        builder.append("- Route AI verdict: ").append(result.routeAiVerdict()).append(System.lineSeparator());
+        builder.append("- Repo verdict: ").append(result.repoVerdict()).append(System.lineSeparator());
+        builder.append("- Routing verdict: ").append(result.routingVerdict()).append(System.lineSeparator());
+        builder.append("- Blocker summary present: ").append(result.blockerSummaryPresent()).append(System.lineSeparator());
+        builder.append("- Promising: ").append(result.promising()).append(System.lineSeparator());
+        if (!result.notes().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
+            for (String note : result.notes()) {
+                builder.append("- ").append(note).append(System.lineSeparator());
+            }
+        }
+        return builder.toString();
+    }
+
+    private static String renderBenchmarkPromotionMarkdown(BenchmarkPromotionDecision decision) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# Benchmark Promotion Decision").append(System.lineSeparator()).append(System.lineSeparator());
+        builder.append("- Decision id: ").append(decision.decisionId()).append(System.lineSeparator());
+        builder.append("- Decided at: ").append(decision.decidedAt()).append(System.lineSeparator());
+        builder.append("- Decision type: ").append(decision.decisionType()).append(System.lineSeparator());
+        builder.append("- Experiment id: ").append(decision.experimentId()).append(System.lineSeparator());
+        builder.append("- Lane: ").append(decision.laneName()).append(System.lineSeparator());
+        builder.append("- Baseline checkpoint id: ").append(decision.baselineCheckpointId()).append(System.lineSeparator());
+        builder.append("- Candidate checkpoint id: ").append(decision.candidateCheckpointId()).append(System.lineSeparator());
+        builder.append("- Decision: ").append(decision.decision()).append(System.lineSeparator());
+        builder.append("- Canonical recheck required: ").append(decision.canonicalRecheckRequired()).append(System.lineSeparator());
+        builder.append("- Holdout required: ").append(decision.holdoutRequired()).append(System.lineSeparator());
+        if (!decision.notes().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
+            for (String note : decision.notes()) {
                 builder.append("- ").append(note).append(System.lineSeparator());
             }
         }

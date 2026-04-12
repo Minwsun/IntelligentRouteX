@@ -95,7 +95,9 @@ class BenchmarkCheckpointRunnerTest {
         String jsonContent = Files.readString(json);
         String markdownContent = Files.readString(markdown);
         assertTrue(jsonContent.contains("\"checkpointStatus\": \"DIRTY_TRIAGE_ONLY\""));
+        assertTrue(jsonContent.contains("\"promotionEligible\": false"));
         assertTrue(markdownContent.contains("Checkpoint status: DIRTY_TRIAGE_ONLY"));
+        assertTrue(markdownContent.contains("Promotion eligible: false"));
         assertTrue(Files.readString(root.resolve("benchmark_checkpoint.csv")).contains("DIRTY_TRIAGE_ONLY"));
     }
 

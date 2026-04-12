@@ -175,10 +175,18 @@ public final class BenchmarkCertificationSupport {
             String value = result.output();
             List<String> dirtyPaths = new ArrayList<>();
             for (String line : value.split("\\R")) {
-                if (line == null || line.isBlank() || line.length() < 4) {
+                if (line == null || line.isBlank()) {
                     continue;
                 }
-                dirtyPaths.add(line.substring(3).trim().replace('\\', '/'));
+                String normalized = line.replace('\t', ' ').replace('\\', '/');
+                if (normalized.length() < 4) {
+                    continue;
+                }
+                String path = normalized.substring(3).trim();
+                if (path.isEmpty()) {
+                    continue;
+                }
+                dirtyPaths.add(path);
             }
             return new DirtyTrackedPathsProbe(dirtyPaths, false, "");
         } catch (Exception e) {

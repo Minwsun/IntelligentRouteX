@@ -3,159 +3,170 @@ doc_id: "working.nextstepplan"
 doc_kind: "temporary_plan"
 canonical: false
 priority: 95
-updated_at: "2026-04-12T22:40:00+07:00"
-git_sha: "f19ef42"
+updated_at: "2026-04-12T23:55:00+07:00"
+git_sha: "HEAD"
 tags: ["next-step", "benchmark-first", "route-core", "phase-plan"]
-depends_on: ["canonical.architecture", "canonical.result", "working.benchmark-authority-rules"]
+depends_on: ["canonical.architecture", "canonical.result", "working.benchmark-authority-rules", "working.benchmark-experiment-governance"]
 bootstrap: true
 ---
 
-# Kế hoạch bước tiếp theo: clean checkpoint trước, tune route sau
+# Ke hoach buoc tiep theo: benchmark-governed loop truoc, tune route sau
 
-- Thời gian chốt kế hoạch: `2026-04-12` (Asia/Saigon)
-- Base SHA: `f19ef42`
-- Vai trò của file: implementation brief tạm thời cho vòng lặp benchmark-first sau khi repo đã có authority artifact và checkpoint pack riêng
+- Thoi gian chot ke hoach: `2026-04-12` (Asia/Saigon)
+- Base SHA: `HEAD`
+- Vai tro cua file: implementation brief tam thoi cho benchmark-governed route loop sau khi repo da co authority artifact, checkpoint pack, baseline registry va isolated triage experiment runner
 
-## 1. Mục tiêu phase hiện tại
+## 1. Muc tieu phase hien tai
 
-Mục tiêu gần nhất của repo không phải mở app slice hay tune route ngay, mà là vận hành theo vòng lặp chuẩn:
+Muc tieu gan nhat cua repo khong phai mo app slice hay tune route ngay, ma la van hanh theo vong lap benchmark-governed chuan:
 
-1. chạy canonical checkpoint lane
-2. chỉ tiếp tục nếu checkpoint là `CLEAN_CANONICAL_CHECKPOINT`
-3. đổi đúng một hypothesis trong lane triage-only
-4. đọc delta qua blocker summary và checkpoint status
-5. quay lại canonical checkpoint
-6. chỉ promote nếu canonical checkpoint vẫn sạch và không làm lùi gate chính
-7. cập nhật một working note ngắn cho vòng đó
+1. chay canonical checkpoint lane
+2. chi tiep tuc neu checkpoint co `checkpointStatus = CLEAN_CANONICAL_CHECKPOINT` va `promotionEligible = true`
+3. promote checkpoint do vao baseline registry
+4. doi dung mot hypothesis trong lane triage-only isolated
+5. doc delta qua blocker summary + experiment result + checkpoint status
+6. quay lai canonical checkpoint
+7. chi promote neu canonical checkpoint van sach va khong lam lui gate chinh
+8. cap nhat mot working note ngan cho vong do
 
-Nguyên tắc bị khóa:
+Nguyen tac bi khoa:
 
-- `OMEGA` vẫn là route core mặc định
-- benchmark/evidence vẫn là truth gate duy nhất
-- `compact` tiếp tục là lane nội bộ có gate riêng
-- canonical claim chưa đổi:
+- `OMEGA` van la route core mac dinh
+- benchmark/evidence van la truth gate duy nhat
+- `compact` tiep tuc la lane noi bo co gate rieng
+- canonical claim chua doi:
   - `AI Verdict = YES`
   - `Routing Verdict = PARTIAL`
   - `Claim Readiness = INTERNAL_ONLY`
 
-## 2. Phase ưu tiên hiện tại
+## 2. Phase uu tien hien tai
 
-### Phase 1 — chốt clean checkpoint thật
+### Phase 1 - chot clean checkpoint that va ghi baseline registry
 
-Việc phải làm:
+Viec phai lam:
 
-- dùng chính các task đã có:
+- dung chinh cac task da co:
   - `benchmarkCleanCheckpointSmoke`
   - `benchmarkCleanCheckpointCertification`
-- không tune `HEAVY_RAIN` hay `night-off-peak` cho đến khi cả hai checkpoint đều ra `CLEAN_CANONICAL_CHECKPOINT`
-- dọn toàn bộ dirty benchmark-sensitive paths trước khi coi checkpoint là canonical:
+- promote baseline bang:
+  - `benchmarkPromoteSmokeBaseline`
+  - `benchmarkPromoteCertificationBaseline`
+- khong tune `HEAVY_RAIN` hay `night-off-peak` cho den khi checkpoint sach va baseline registry co entry active
+- don toan bo dirty benchmark-sensitive paths truoc khi coi checkpoint la canonical:
   - `build.gradle.kts`
   - `src/main/java/com/routechain/simulation/**`
   - `src/main/java/com/routechain/ai/**`
   - `src/main/java/com/routechain/infra/PlatformRuntimeBootstrap.java`
-- nếu checkpoint ra `DIRTY_TRIAGE_ONLY` hoặc `AUTHORITY_CHECK_FAILED`, phase chưa hoàn tất; artifact vẫn giữ để triage, nhưng không được dùng làm baseline promotion
+- neu checkpoint ra `DIRTY_TRIAGE_ONLY`, `AUTHORITY_CHECK_FAILED`, hoac `promotionEligible=false`, phase chua hoan tat
 
 Definition of done:
 
-- smoke checkpoint sạch
-- certification checkpoint sạch
-- một baseline note ghi rõ SHA, lane, checkpoint status, dirty-path policy
+- smoke checkpoint sach
+- certification checkpoint sach
+- baseline registry co entry active
+- mot baseline note ghi ro SHA, lane, checkpoint status, dirty-path policy
 
-### Phase 2 — heavy-rain triage loop hẹp
+### Phase 2 - heavy-rain triage loop hep
 
-Chỉ bắt đầu sau khi Phase 1 xong.
+Chi bat dau sau khi Phase 1 xong.
 
-Việc phải làm:
+Viec phai lam:
 
-- triage lane dùng `phase31RouteQualityTuning`
-- canonical lane dùng checkpoint smoke/certification
-- mỗi vòng chỉ đổi một hypothesis ở `HEAVY_RAIN`, ví dụ:
-  - pickup feasibility quá gắt
-  - detour penalty quá nặng
-  - pre-pickup augmentation bị chặn quá sớm
-  - landing/post-drop bị phạt sai trong mưa lớn
-- mỗi vòng phải sinh:
-  - triage artifact
+- triage lane dung `phase31RouteQualityTuning`
+- task nay khong con la lane truth truc tiep; no la wrapper cho isolated experiment runner
+- canonical lane dung checkpoint smoke/certification
+- moi vong chi doi mot hypothesis o `HEAVY_RAIN`, vi du:
+  - pickup feasibility qua gat
+  - detour penalty qua nang
+  - pre-pickup augmentation bi chan qua som
+  - landing/post-drop bi phat sai trong mua lon
+- moi vong phai sinh:
+  - experiment spec
+  - experiment result
   - blocker summary
   - checkpoint pack sau triage
-  - một working note rất ngắn: hypothesis, delta, keep/drop
-- chỉ promote nếu canonical checkpoint không làm `CLEAR`, `RUSH_HOUR`, `SHORTAGE` lùi rõ và `HEAVY_RAIN` cải thiện ít nhất một trục chính:
+  - promotion decision neu ai do co promote tu triage
+  - mot working note rat ngan: hypothesis, delta, keep/drop
+- chi promote neu canonical checkpoint khong lam `CLEAR`, `RUSH_HOUR`, `SHORTAGE` lui ro va `HEAVY_RAIN` cai thien it nhat mot truc chinh:
   - completion
   - deadhead per completed order
   - post-drop hit
 
-### Phase 3 — night-off-peak triage loop hẹp
+### Phase 3 - night-off-peak triage loop hep
 
-Chỉ bắt đầu sau khi `HEAVY_RAIN` không còn là blocker đỏ nhất.
+Chi bat dau sau khi `HEAVY_RAIN` khong con la blocker do nhat.
 
-Việc phải làm:
+Viec phai lam:
 
-- mỗi vòng chỉ đổi một nhóm:
+- moi vong chi doi mot nhom:
   - landing score
   - empty-after weighting
   - next-idle bias
   - pre-pickup augmentation cap
   - fallback/borrowed guard
-- mục tiêu của phase:
-  - giảm `fallback_or_borrowed_pressure`
-  - cải thiện landing, post-drop, next-idle thật
-  - không đổi deadhead đẹp giả bằng completion tụt
+- muc tieu cua phase:
+  - giam `fallback_or_borrowed_pressure`
+  - cai thien landing, post-drop, next-idle that
+  - khong doi deadhead dep gia bang completion tut
 
-### Phase 4 — morning-off-peak và demand-spike
+### Phase 4 - morning-off-peak va demand-spike
 
-- tách thành hai sub-loop độc lập
-- `MORNING_OFF_PEAK`: ưu tiên assignability, completion, on-time khi supply mỏng
-- `DEMAND_SPIKE`: giữ completion trong khi không làm mất deadhead gain hiện có
-- vẫn áp dụng cùng loop chuẩn: clean baseline -> triage một hypothesis -> canonical re-check
+- tach thanh hai sub-loop doc lap
+- `MORNING_OFF_PEAK`: uu tien assignability, completion, on-time khi supply mong
+- `DEMAND_SPIKE`: giu completion trong khi khong lam mat deadhead gain hien co
+- van ap dung cung loop chuan: clean baseline -> triage mot hypothesis -> canonical re-check
 
-### Phase 5 — route gate recovery
+### Phase 5 - route gate recovery
 
-- chỉ khi các bucket đỏ lớn đã dịu đi mới gom các tuning đã vượt qua canonical checkpoint để đánh lại:
+- chi khi cac bucket do lon da diu di moi gom cac tuning da vuot qua canonical checkpoint de danh lai:
   - `routeAiCertification`
   - `repoIntelligenceCertification`
   - `routeIntelligenceVerdict`
-- không giữ bất kỳ tuning nào chỉ thắng ở triage lane mà không sống sót sau canonical checkpoint
+- khong giu bat ky tuning nao chi thang o triage lane ma khong song sot sau canonical checkpoint
 
-## 3. Trạng thái checkpoint hiện tại
+## 3. Trang thai checkpoint hien tai
 
-Checkpoint gần nhất sau `f19ef42` cho thấy:
+Checkpoint gan nhat sau `f19ef42` cho thay:
 
 - smoke checkpoint: `DIRTY_TRIAGE_ONLY`
 - certification checkpoint: `DIRTY_TRIAGE_ONLY`
-- authority detection: `OK`, không bị `AUTHORITY_CHECK_FAILED`
+- authority detection: `OK`, khong bi `AUTHORITY_CHECK_FAILED`
 
-Điều này có nghĩa:
+Dieu nay co nghia:
 
-- workflow checkpoint hiện đã nói thật về authority status
-- repo chưa có clean canonical baseline để bắt đầu route tuning
-- mọi tuning tiếp theo lúc này chỉ được coi là triage, không phải promotion signal
+- workflow checkpoint hien da noi that ve authority status
+- repo chua co clean canonical baseline de bat dau route tuning
+- baseline registry chua nen duoc coi la active cho toi khi promotion task chay pass
+- moi tuning tiep theo luc nay chi duoc coi la triage, khong phai promotion signal
 
-## 4. Thứ tự ưu tiên bị khóa
+## 4. Thu tu uu tien bi khoa
 
-1. clean checkpoint thật
-2. `HEAVY_RAIN`
-3. `NIGHT_OFF_PEAK`
-4. `MORNING_OFF_PEAK`
-5. `DEMAND_SPIKE`
-6. route gate recovery
-7. compact re-entry
-8. canonical docs reset
-9. app/runtime integration
-10. production hardening
+1. clean checkpoint that
+2. baseline registry active
+3. `HEAVY_RAIN`
+4. `NIGHT_OFF_PEAK`
+5. `MORNING_OFF_PEAK`
+6. `DEMAND_SPIKE`
+7. route gate recovery
+8. compact re-entry
+9. canonical docs reset
+10. app/runtime integration
+11. production hardening
 
-## 5. Acceptance và nguyên tắc trung thực
+## 5. Acceptance va nguyen tac trung thuc
 
-Acceptance cho phase benchmark-first hiện tại:
+Acceptance cho phase benchmark-first hien tai:
 
-- checkpoint chỉ được coi là baseline khi status là `CLEAN_CANONICAL_CHECKPOINT`
-- `authorityDetectionFailed` không bao giờ được đọc như checkpoint sạch
-- mỗi vòng triage chỉ đổi đúng một hypothesis hoặc một nhóm knob
-- mọi promote đều phải có canonical re-check ngay sau triage
-- canonical docs không đổi chỉ vì triage artifact đẹp hơn
+- checkpoint chi duoc coi la baseline khi status la `CLEAN_CANONICAL_CHECKPOINT`
+- `authorityDetectionFailed` khong bao gio duoc doc nhu checkpoint sach
+- `promotionEligible=false` chan baseline promotion ngay ca khi checkpoint status la clean
+- moi vong triage chi doi dung mot hypothesis hoac mot nhom knob
+- moi promote deu phai co canonical re-check ngay sau triage
+- canonical docs khong doi chi vi triage artifact dep hon
 
-Những thứ tiếp tục ngoài scope cho tới khi route gate recovery ổn hơn:
+Nhung thu tiep tuc ngoai scope cho toi khi route gate recovery on hon:
 
-- app/runtime integration như product surface chính
-- compact promotion lên default
+- app/runtime integration nhu product surface chinh
+- compact promotion len default
 - canonical claim reset
-- production hardening rộng
+- production hardening rong

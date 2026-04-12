@@ -54,6 +54,8 @@ class BenchmarkCertificationSupportTest {
         assertTrue(snapshot.workspaceDirty());
         assertTrue(snapshot.authorityDirty());
         assertTrue(snapshot.dirtyTrackedPaths().contains("build.gradle.kts"));
+        assertTrue(snapshot.dirtyTrackedPaths().contains("docs/notes.md"));
+        assertFalse(snapshot.dirtyTrackedPaths().contains("ocs/notes.md"));
         assertTrue(snapshot.dirtyAuthorityPaths().contains("src/main/java/com/routechain/simulation/SimulationEngine.java"));
     }
 }

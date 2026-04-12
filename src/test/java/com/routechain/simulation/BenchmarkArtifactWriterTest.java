@@ -539,6 +539,91 @@ class BenchmarkArtifactWriterTest {
     }
 
     @Test
+    void shouldPersistGovernanceArtifacts() throws IOException {
+        Path root = Path.of("build", "routechain-apex", "benchmarks");
+        deleteRecursively(root);
+
+        BenchmarkBaselineRef baseline = new BenchmarkBaselineRef(
+                BenchmarkSchema.VERSION,
+                "baseline-certification-1",
+                "certification-abc123-1000",
+                "certification",
+                Instant.parse("2026-04-12T15:00:00Z"),
+                "abc123",
+                "CLEAN_CANONICAL_CHECKPOINT",
+                "decision-certification-1",
+                "",
+                true,
+                List.of("clean canonical baseline")
+        );
+        BenchmarkExperimentSpec spec = new BenchmarkExperimentSpec(
+                BenchmarkSchema.VERSION,
+                "route-exp-1",
+                Instant.parse("2026-04-12T15:05:00Z"),
+                "heavy-rain-reach",
+                "triage",
+                baseline.checkpointId(),
+                baseline.laneName(),
+                "abc123",
+                "CLEAN_CANONICAL_CHECKPOINT",
+                "heavy-rain-reach",
+                List.of("HEAVY_RAIN"),
+                "tuning",
+                "detached-worktree",
+                "build/routechain-apex/experiments/route-exp-1",
+                List.of("isolated artifact root")
+        );
+        BenchmarkExperimentResult result = new BenchmarkExperimentResult(
+                BenchmarkSchema.VERSION,
+                "route-exp-1",
+                Instant.parse("2026-04-12T15:10:00Z"),
+                "heavy-rain-reach",
+                "triage",
+                baseline.checkpointId(),
+                "certification-def456-2000",
+                "def456",
+                "CLEAN_CANONICAL_CHECKPOINT",
+                "CLEAN_CANONICAL_CHECKPOINT",
+                "tuning",
+                "build/routechain-apex/experiments/route-exp-1",
+                "PASS",
+                "FAIL",
+                "PARTIAL",
+                true,
+                true,
+                List.of("canonical recheck required")
+        );
+        BenchmarkPromotionDecision decision = new BenchmarkPromotionDecision(
+                BenchmarkSchema.VERSION,
+                "decision-exp-1",
+                Instant.parse("2026-04-12T15:12:00Z"),
+                "experiment",
+                result.experimentId(),
+                baseline.checkpointId(),
+                result.candidateCheckpointId(),
+                "triage",
+                "REQUIRES_CANONICAL_RECHECK",
+                true,
+                true,
+                List.of("triage cannot promote directly")
+        );
+
+        BenchmarkArtifactWriter.writeBenchmarkBaselineRef(baseline);
+        BenchmarkArtifactWriter.writeBenchmarkExperimentSpec(spec);
+        BenchmarkArtifactWriter.writeBenchmarkExperimentResult(result);
+        BenchmarkArtifactWriter.writeBenchmarkPromotionDecision(decision);
+
+        assertTrue(Files.exists(root.resolve("governance").resolve("benchmark-baseline-current.json")));
+        assertTrue(Files.exists(root.resolve("governance").resolve("baselines").resolve("baseline-certification-1.json")));
+        assertTrue(Files.exists(root.resolve("governance").resolve("experiments").resolve("route-exp-1-spec.json")));
+        assertTrue(Files.exists(root.resolve("governance").resolve("experiments").resolve("route-exp-1-result.json")));
+        assertTrue(Files.exists(root.resolve("governance").resolve("promotions").resolve("decision-exp-1.json")));
+        assertTrue(Files.readString(root.resolve("benchmark_baselines.csv")).contains("baseline-certification-1"));
+        assertTrue(Files.readString(root.resolve("benchmark_experiments.csv")).contains("route-exp-1"));
+        assertTrue(Files.readString(root.resolve("benchmark_promotions.csv")).contains("REQUIRES_CANONICAL_RECHECK"));
+    }
+
+    @Test
     void shouldPersistControlRoomArtifacts() throws IOException {
         Path root = Path.of("build", "routechain-apex", "benchmarks");
         deleteRecursively(root);

@@ -12,9 +12,12 @@ public record BenchmarkCheckpointSummary(
         String laneName,
         Instant generatedAt,
         String gitRevision,
+        String checkpointId,
         String checkpointStatus,
         boolean cleanCheckpoint,
         boolean triageOnly,
+        boolean degradedCheckpoint,
+        boolean promotionEligible,
         boolean routeAiSummaryPresent,
         boolean repoSummaryPresent,
         boolean verdictSummaryPresent,
@@ -22,6 +25,7 @@ public record BenchmarkCheckpointSummary(
         String routeAiVerdict,
         String repoVerdict,
         String routingVerdict,
+        List<String> degradedReasons,
         List<String> notes
 ) {
     public BenchmarkCheckpointSummary {
@@ -29,12 +33,16 @@ public record BenchmarkCheckpointSummary(
         laneName = laneName == null || laneName.isBlank() ? "smoke" : laneName;
         generatedAt = generatedAt == null ? Instant.now() : generatedAt;
         gitRevision = gitRevision == null || gitRevision.isBlank() ? "unknown" : gitRevision;
+        checkpointId = checkpointId == null || checkpointId.isBlank()
+                ? laneName + "-" + gitRevision + "-" + generatedAt.toEpochMilli()
+                : checkpointId;
         checkpointStatus = checkpointStatus == null || checkpointStatus.isBlank()
                 ? "DIRTY_TRIAGE_ONLY"
                 : checkpointStatus;
         routeAiVerdict = routeAiVerdict == null || routeAiVerdict.isBlank() ? "MISSING" : routeAiVerdict;
         repoVerdict = repoVerdict == null || repoVerdict.isBlank() ? "MISSING" : repoVerdict;
         routingVerdict = routingVerdict == null || routingVerdict.isBlank() ? "MISSING" : routingVerdict;
+        degradedReasons = degradedReasons == null ? List.of() : List.copyOf(degradedReasons);
         notes = notes == null ? List.of() : List.copyOf(notes);
     }
 }

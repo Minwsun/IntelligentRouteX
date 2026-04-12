@@ -393,6 +393,40 @@ val benchmarkCheckpointCertificationSummary by tasks.registering(JavaExec::class
     args("certification")
 }
 
+val benchmarkPromotionSmokeBaseline by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Promotes the smoke checkpoint to the baseline registry only if it is clean and non-degraded."
+    mainClass.set("com.routechain.simulation.BenchmarkPromotionRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("checkpoint", "smoke")
+}
+
+val benchmarkPromotionCertificationBaseline by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Promotes the certification checkpoint to the baseline registry only if it is clean and non-degraded."
+    mainClass.set("com.routechain.simulation.BenchmarkPromotionRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("checkpoint", "certification")
+}
+
+val phase31RouteQualityExperiment by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Runs a detached-worktree triage experiment for Phase 3.1 and writes experiment-governance artifacts."
+    mainClass.set("com.routechain.simulation.BenchmarkExperimentRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("phase31-route-quality", "heavy-rain-and-night-off-peak", "HEAVY_RAIN,NIGHT_OFF_PEAK")
+}
+
+val phase31RouteQualityTriageLane by tasks.registering {
+    group = "verification"
+    description = "Internal triage lane used by the governance experiment runner. Not a canonical truth task."
+    dependsOn(cleanBenchmarkArtifacts)
+    dependsOn("repoIntelligenceSmoke")
+    dependsOn(scenarioBatchCertification)
+    dependsOn(scenarioBatchRealisticHcmcTuning)
+    dependsOn(repoIntelligenceCertificationSummary)
+}
+
 tasks.named("performanceBenchmarkSmoke") {
     mustRunAfter("test")
     mustRunAfter(routeAiRegressionSmoke)
@@ -597,12 +631,23 @@ tasks.register("benchmarkCleanCheckpointCertification") {
 
 tasks.register("phase31RouteQualityTuning") {
     group = "verification"
-    description = "Triage-only Phase 3.1 Omega-first tuning loop with expanded realistic HCMC support."
-    dependsOn(cleanBenchmarkArtifacts)
-    dependsOn("repoIntelligenceSmoke")
-    dependsOn(scenarioBatchCertification)
-    dependsOn(scenarioBatchRealisticHcmcTuning)
-    dependsOn(repoIntelligenceCertificationSummary)
+    description = "Governed triage wrapper: launches the Phase 3.1 tuning loop as an isolated experiment, not a canonical truth lane."
+    dependsOn("classes")
+    dependsOn(phase31RouteQualityExperiment)
+}
+
+tasks.register("benchmarkPromoteSmokeBaseline") {
+    group = "verification"
+    description = "Canonical smoke checkpoint plus explicit baseline promotion decision."
+    dependsOn("benchmarkCleanCheckpointSmoke")
+    finalizedBy(benchmarkPromotionSmokeBaseline)
+}
+
+tasks.register("benchmarkPromoteCertificationBaseline") {
+    group = "verification"
+    description = "Canonical certification checkpoint plus explicit baseline promotion decision."
+    dependsOn("benchmarkCleanCheckpointCertification")
+    finalizedBy(benchmarkPromotionCertificationBaseline)
 }
 
 tasks.register("routeIntelligenceDemoProof") {
