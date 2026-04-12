@@ -1,6 +1,7 @@
 package com.routechain.api.service;
 
 import com.routechain.api.dto.LiveMapSnapshot;
+import com.routechain.api.dto.RoutePreviewSourceView;
 import com.routechain.api.dto.RouteSourceView;
 import com.routechain.api.store.InMemoryOperationalStore;
 import com.routechain.backend.offer.DriverSessionState;
@@ -57,6 +58,10 @@ class AppMapReadModelContractTest {
         assertEquals(RouteSourceView.RUNTIME_FALLBACK, driverSnapshot.routeSource());
         assertFalse(riderSnapshot.routePolyline().isEmpty());
         assertFalse(driverSnapshot.routePolyline().isEmpty());
+        assertEquals(RoutePreviewSourceView.RUNTIME_PREVIEW, riderSnapshot.remainingRoutePreviewSource());
+        assertEquals(RoutePreviewSourceView.RUNTIME_PREVIEW, driverSnapshot.remainingRoutePreviewSource());
+        assertNotNull(riderSnapshot.runtimeDriverLocation());
+        assertNotNull(driverSnapshot.runtimeDriverLocation());
         assertNotNull(riderSnapshot.routeGeneratedAt());
         assertNotNull(driverSnapshot.routeGeneratedAt());
     }

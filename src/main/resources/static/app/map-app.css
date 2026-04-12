@@ -218,7 +218,18 @@ button.ghost {
     right: 18px;
     display: flex;
     justify-content: space-between;
+    align-items: flex-start;
     pointer-events: none;
+}
+
+.map-overlay-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.map-overlay-group-right {
+    align-items: flex-end;
 }
 
 .map-badge {

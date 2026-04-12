@@ -48,9 +48,14 @@
     <section class="map-surface">
         <div id="map"></div>
         <div class="map-overlay">
-            <div class="map-badge" id="driverLocationBadge">Driver location: not set</div>
-            <div class="map-badge map-badge-muted" id="routeBadge">route unavailable</div>
-            <div class="map-badge"><a href="/app/rider.html">Switch to Rider</a></div>
+            <div class="map-overlay-group">
+                <div class="map-badge" id="driverLocationBadge">Driver location: not set</div>
+                <div class="map-badge map-badge-muted" id="routeBadge">route unavailable</div>
+                <div class="map-badge map-badge-muted" id="previewBadge">no next leg</div>
+            </div>
+            <div class="map-overlay-group map-overlay-group-right">
+                <div class="map-badge"><a href="/app/rider.html">Switch to Rider</a></div>
+            </div>
         </div>
     </section>
 </main>
@@ -85,8 +90,13 @@
             : "No active task.";
         RouteChainMapApp.renderRouteBadge(
             document.getElementById("routeBadge"),
-            task ? task.routeSource : null,
-            task ? task.routeGeneratedAt : null
+            task ? (task.activeRouteSource || task.routeSource) : null,
+            task ? (task.activeRouteGeneratedAt || task.routeGeneratedAt) : null
+        );
+        RouteChainMapApp.renderPreviewBadge(
+            document.getElementById("previewBadge"),
+            task ? task.remainingRoutePreviewSource : "NONE",
+            task ? task.remainingRoutePreviewPolyline : []
         );
     }
 
@@ -134,9 +144,19 @@
         RouteChainMapApp.drawSnapshot(state, snapshot);
         RouteChainMapApp.renderRouteBadge(
             document.getElementById("routeBadge"),
-            snapshot.routeSource,
-            snapshot.routeGeneratedAt
+            snapshot.activeRouteSource || snapshot.routeSource,
+            snapshot.activeRouteGeneratedAt || snapshot.routeGeneratedAt
         );
+        RouteChainMapApp.renderPreviewBadge(
+            document.getElementById("previewBadge"),
+            snapshot.remainingRoutePreviewSource,
+            snapshot.remainingRoutePreviewPolyline
+        );
+        const liveDriver = snapshot.runtimeDriverLocation
+            || (snapshot.assignedDriver ? { lat: snapshot.assignedDriver.lat, lng: snapshot.assignedDriver.lng } : null);
+        document.getElementById("driverLocationBadge").textContent = liveDriver
+            ? `Driver live: ${liveDriver.lat.toFixed(4)}, ${liveDriver.lng.toFixed(4)}`
+            : `Driver location: ${driverLocation.lat.toFixed(4)}, ${driverLocation.lng.toFixed(4)}`;
         try {
             const task = await RouteChainMapApp.fetchJson(`/v1/driver/tasks/active?driverId=${encodeURIComponent(id)}`);
             renderTask(task);

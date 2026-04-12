@@ -1,6 +1,7 @@
 package com.routechain.api.service;
 
 import com.routechain.api.dto.DriverActiveTaskView;
+import com.routechain.api.dto.RoutePreviewSourceView;
 import com.routechain.api.dto.RouteSourceView;
 import com.routechain.api.dto.TripTrackingView;
 import com.routechain.api.store.InMemoryOperationalStore;
@@ -83,9 +84,13 @@ class RuntimeBridgeRouteGeometryTest {
         TripTrackingView tracking = bridge.tripTracking(order.getId()).orElseThrow();
 
         assertEquals(RouteSourceView.RUNTIME_OSRM, tracking.routeSource());
+        assertEquals(RouteSourceView.RUNTIME_OSRM, tracking.activeRouteSource());
         assertEquals(3, tracking.routePolyline().size());
         assertEquals(10.7773, tracking.routePolyline().get(1).lat(), 1e-6);
         assertEquals(106.7021, tracking.routePolyline().get(1).lng(), 1e-6);
+        assertEquals(RoutePreviewSourceView.RUNTIME_PREVIEW, tracking.remainingRoutePreviewSource());
+        assertEquals(2, tracking.remainingRoutePreviewPolyline().size());
+        assertEquals(10.7765, tracking.runtimeDriverLocation().lat(), 1e-6);
         assertNotNull(tracking.routeGeneratedAt());
     }
 
@@ -128,6 +133,9 @@ class RuntimeBridgeRouteGeometryTest {
         assertEquals(RouteSourceView.RUNTIME_FALLBACK, activeTask.routeSource());
         assertFalse(activeTask.routePolyline().isEmpty());
         assertEquals("driver", activeTask.routePolyline().get(0).label());
+        assertEquals(2, activeTask.routePolyline().size());
+        assertEquals(RoutePreviewSourceView.RUNTIME_PREVIEW, activeTask.remainingRoutePreviewSource());
+        assertEquals(2, activeTask.remainingRoutePreviewPolyline().size());
         assertNotNull(activeTask.routeGeneratedAt());
     }
 }

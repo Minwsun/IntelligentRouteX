@@ -2,6 +2,7 @@ package com.routechain.api.service;
 
 import com.routechain.api.dto.DriverLoginRequest;
 import com.routechain.api.dto.DriverTaskStatusUpdate;
+import com.routechain.api.dto.RoutePreviewSourceView;
 import com.routechain.api.dto.RouteSourceView;
 import com.routechain.api.dto.TripTrackingView;
 import com.routechain.api.dto.UserOrderRequest;
@@ -117,13 +118,18 @@ class AppRuntimeRouteTruthIntegrationTest {
         assertEquals(RouteSourceView.RUNTIME_OSRM, activeTask.routeSource());
         assertFalse(trackingView.routePolyline().isEmpty());
         assertFalse(activeTask.routePolyline().isEmpty());
+        assertEquals(RoutePreviewSourceView.RUNTIME_PREVIEW, trackingView.remainingRoutePreviewSource());
+        assertEquals(RoutePreviewSourceView.RUNTIME_PREVIEW, activeTask.remainingRoutePreviewSource());
         assertEquals("2026-04-12T02:05:00Z", trackingView.routeGeneratedAt());
         assertEquals("2026-04-12T02:05:00Z", activeTask.routeGeneratedAt());
+        assertNotNull(trackingView.runtimeDriverLocation());
+        assertNotNull(activeTask.runtimeDriverLocation());
 
         driverOperationsService.updateTaskStatus("drv-app-route", "task-" + orderId, new DriverTaskStatusUpdate("PICKED_UP"));
         Optional<TripTrackingView> postPickupTracking = runtimeBridge.tripTracking(orderId);
         assertTrue(postPickupTracking.isPresent());
         assertEquals("PICKED_UP", postPickupTracking.get().status());
+        assertEquals(RoutePreviewSourceView.NONE, postPickupTracking.get().remainingRoutePreviewSource());
     }
 
     private static final class InMemoryDriverPresenceStore implements DriverPresenceStore {

@@ -50,9 +50,14 @@
     <section class="map-surface">
         <div id="map"></div>
         <div class="map-overlay">
-            <div class="map-badge" id="selectedPins">Pickup: not set, Dropoff: not set</div>
-            <div class="map-badge map-badge-muted" id="routeBadge">route unavailable</div>
-            <div class="map-badge"><a href="/app/driver.html">Switch to Driver</a></div>
+            <div class="map-overlay-group">
+                <div class="map-badge" id="selectedPins">Pickup: not set, Dropoff: not set</div>
+                <div class="map-badge map-badge-muted" id="routeBadge">route unavailable</div>
+                <div class="map-badge map-badge-muted" id="previewBadge">no next leg</div>
+            </div>
+            <div class="map-overlay-group map-overlay-group-right">
+                <div class="map-badge"><a href="/app/driver.html">Switch to Driver</a></div>
+            </div>
         </div>
     </section>
 </main>
@@ -90,6 +95,7 @@
             status.textContent = "idle";
             meta.textContent = "No active trip yet.";
             RouteChainMapApp.renderRouteBadge(document.getElementById("routeBadge"), null, null);
+            RouteChainMapApp.renderPreviewBadge(document.getElementById("previewBadge"), "NONE", []);
             return;
         }
         status.textContent = trip.stage;
@@ -101,8 +107,13 @@
         });
         RouteChainMapApp.renderRouteBadge(
             document.getElementById("routeBadge"),
-            trip.routeSource,
-            trip.routeGeneratedAt
+            trip.activeRouteSource || trip.routeSource,
+            trip.activeRouteGeneratedAt || trip.routeGeneratedAt
+        );
+        RouteChainMapApp.renderPreviewBadge(
+            document.getElementById("previewBadge"),
+            trip.remainingRoutePreviewSource,
+            trip.remainingRoutePreviewPolyline
         );
     }
 
@@ -112,11 +123,19 @@
             return;
         }
         const snapshot = await RouteChainMapApp.fetchJson(`/v1/user/map-snapshot?customerId=${encodeURIComponent(customerId)}&orderId=${encodeURIComponent(activeOrderId)}`);
+        if (!activeOrderId && snapshot.orderId) {
+            activeOrderId = snapshot.orderId;
+        }
         RouteChainMapApp.drawSnapshot(state, snapshot);
         RouteChainMapApp.renderRouteBadge(
             document.getElementById("routeBadge"),
-            snapshot.routeSource,
-            snapshot.routeGeneratedAt
+            snapshot.activeRouteSource || snapshot.routeSource,
+            snapshot.activeRouteGeneratedAt || snapshot.routeGeneratedAt
+        );
+        RouteChainMapApp.renderPreviewBadge(
+            document.getElementById("previewBadge"),
+            snapshot.remainingRoutePreviewSource,
+            snapshot.remainingRoutePreviewPolyline
         );
         renderNearby(snapshot.nearbyDrivers);
         if (activeOrderId) {
@@ -191,8 +210,9 @@
         activeOrderId = "";
         updatePinText();
         renderTrip(null);
-        RouteChainMapApp.drawSnapshot(state, { nearbyDrivers: [], routePolyline: [] });
+        RouteChainMapApp.drawSnapshot(state, { nearbyDrivers: [], activeRoutePolyline: [], remainingRoutePreviewPolyline: [] });
         RouteChainMapApp.renderRouteBadge(document.getElementById("routeBadge"), null, null);
+        RouteChainMapApp.renderPreviewBadge(document.getElementById("previewBadge"), "NONE", []);
     });
 
     connectUserStream();

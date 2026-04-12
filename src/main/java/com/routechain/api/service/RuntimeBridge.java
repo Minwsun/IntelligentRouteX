@@ -4,6 +4,7 @@ import com.routechain.api.dto.DriverActiveTaskView;
 import com.routechain.api.dto.LiveMapSnapshot;
 import com.routechain.api.dto.MapPointView;
 import com.routechain.api.dto.NearbyDriverView;
+import com.routechain.api.dto.RoutePreviewSourceView;
 import com.routechain.api.dto.RouteSourceView;
 import com.routechain.api.dto.TripTrackingView;
 import com.routechain.backend.offer.OfferBrokerService;
@@ -169,9 +170,15 @@ public class RuntimeBridge {
                 trip == null ? null : trip.pickup(),
                 trip == null ? null : trip.dropoff(),
                 trip == null ? null : trip.assignedDriver(),
+                trip == null ? null : trip.runtimeDriverLocation(),
                 trip == null ? List.of() : trip.routePolyline(),
                 trip == null ? null : trip.routeSource(),
-                trip == null ? null : trip.routeGeneratedAt()
+                trip == null ? null : trip.routeGeneratedAt(),
+                trip == null ? List.of() : trip.activeRoutePolyline(),
+                trip == null ? null : trip.activeRouteSource(),
+                trip == null ? null : trip.activeRouteGeneratedAt(),
+                trip == null ? List.of() : trip.remainingRoutePreviewPolyline(),
+                trip == null ? RoutePreviewSourceView.NONE : trip.remainingRoutePreviewSource()
         );
     }
 
@@ -190,22 +197,28 @@ public class RuntimeBridge {
                 nearbyDrivers(anchor.lat(), anchor.lng(), 6),
                 activeTask == null ? null : activeTask.pickup(),
                 activeTask == null ? null : activeTask.dropoff(),
-                session == null ? null : toNearbyDriverView(session, anchor),
+                activeTask == null ? (session == null ? null : toNearbyDriverView(session, anchor))
+                        : activeDriverMarker(activeTask, session, anchor),
+                activeTask == null ? null : activeTask.runtimeDriverLocation(),
                 activeTask == null ? List.of() : activeTask.routePolyline(),
                 activeTask == null ? null : activeTask.routeSource(),
-                activeTask == null ? null : activeTask.routeGeneratedAt()
+                activeTask == null ? null : activeTask.routeGeneratedAt(),
+                activeTask == null ? List.of() : activeTask.activeRoutePolyline(),
+                activeTask == null ? null : activeTask.activeRouteSource(),
+                activeTask == null ? null : activeTask.activeRouteGeneratedAt(),
+                activeTask == null ? List.of() : activeTask.remainingRoutePreviewPolyline(),
+                activeTask == null ? RoutePreviewSourceView.NONE : activeTask.remainingRoutePreviewSource()
         );
     }
 
     private TripTrackingView toTripTrackingView(Order order) {
+        Driver runtimeDriver = runtimeDriver(order.getAssignedDriverId());
         DriverSessionState assignedSession = order.getAssignedDriverId() == null
                 ? null
                 : driverFleetRepository.findDriverSession(order.getAssignedDriverId()).orElse(null);
-        RoutePayload routePayload = routePayload(order, assignedSession);
+        RoutePayload routePayload = routePayload(order, assignedSession, runtimeDriver);
         DriverOfferBatch batch = offerStateStore.latestBatchForOrder(order.getId()).orElse(null);
-        NearbyDriverView assignedDriver = assignedSession == null ? null : toNearbyDriverView(
-                assignedSession,
-                order.getPickupPoint());
+        NearbyDriverView assignedDriver = assignedDriverView(order, assignedSession, runtimeDriver);
         return new TripTrackingView(
                 order.getId(),
                 order.getCustomerId(),
@@ -219,15 +232,22 @@ public class RuntimeBridge {
                 point("pickup", order.getPickupPoint()),
                 point("dropoff", order.getDropoffPoint()),
                 assignedDriver,
-                routePayload.polyline(),
-                routePayload.routeSource(),
-                routePayload.routeGeneratedAt()
+                routePayload.runtimeDriverLocation(),
+                routePayload.activeRoutePolyline(),
+                routePayload.activeRouteSource(),
+                routePayload.activeRouteGeneratedAt(),
+                routePayload.activeRoutePolyline(),
+                routePayload.activeRouteSource(),
+                routePayload.activeRouteGeneratedAt(),
+                routePayload.remainingRoutePreviewPolyline(),
+                routePayload.remainingRoutePreviewSource()
         );
     }
 
     private DriverActiveTaskView toDriverActiveTaskView(String driverId, Order order) {
         DriverSessionState session = driverFleetRepository.findDriverSession(driverId).orElse(null);
-        RoutePayload routePayload = routePayload(order, session);
+        Driver runtimeDriver = runtimeDriver(driverId);
+        RoutePayload routePayload = routePayload(order, session, runtimeDriver);
         return new DriverActiveTaskView(
                 driverId,
                 "task-" + order.getId(),
@@ -236,12 +256,20 @@ public class RuntimeBridge {
                 order.getServiceType(),
                 order.getCustomerId(),
                 estimateEtaMinutes(order, session),
-                session == null ? null : point("driver", new GeoPoint(session.lastLat(), session.lastLng())),
+                routePayload.runtimeDriverLocation() != null
+                        ? routePayload.runtimeDriverLocation()
+                        : (session == null ? null : point("driver", new GeoPoint(session.lastLat(), session.lastLng()))),
+                routePayload.runtimeDriverLocation(),
                 point("pickup", order.getPickupPoint()),
                 point("dropoff", order.getDropoffPoint()),
-                routePayload.polyline(),
-                routePayload.routeSource(),
-                routePayload.routeGeneratedAt()
+                routePayload.activeRoutePolyline(),
+                routePayload.activeRouteSource(),
+                routePayload.activeRouteGeneratedAt(),
+                routePayload.activeRoutePolyline(),
+                routePayload.activeRouteSource(),
+                routePayload.activeRouteGeneratedAt(),
+                routePayload.remainingRoutePreviewPolyline(),
+                routePayload.remainingRoutePreviewSource()
         );
     }
 
@@ -259,24 +287,48 @@ public class RuntimeBridge {
         );
     }
 
-    private RoutePayload routePayload(Order order, DriverSessionState driverSession) {
-        Driver runtimeDriver = runtimeDriver(order.getAssignedDriverId());
+    private RoutePayload routePayload(Order order, DriverSessionState driverSession, Driver runtimeDriver) {
+        MapPointView runtimeDriverLocation = runtimeDriverLocation(order, runtimeDriver, driverSession);
+        String generatedAt = routeGeneratedAt(runtimeDriver, driverSession, order);
+        if (isTerminal(order.getStatus())) {
+            return new RoutePayload(
+                    List.of(),
+                    null,
+                    null,
+                    List.of(),
+                    RoutePreviewSourceView.NONE,
+                    null);
+        }
+
+        List<MapPointView> activePolyline = List.of();
+        RouteSourceView activeSource = null;
         if (runtimeDriver != null) {
             List<MapPointView> runtimePolyline = runtimePolyline(runtimeDriver);
             if (runtimePolyline.size() >= 2) {
-                RouteSourceView runtimeSource = runtimeDriver.getRouteGeometrySource() == Driver.RouteGeometrySource.OSRM
+                activePolyline = runtimePolyline;
+                activeSource = runtimeDriver.getRouteGeometrySource() == Driver.RouteGeometrySource.OSRM
                         ? RouteSourceView.RUNTIME_OSRM
                         : RouteSourceView.RUNTIME_FALLBACK;
-                return new RoutePayload(
-                        runtimePolyline,
-                        runtimeSource,
-                        routeGeneratedAt(runtimeDriver, driverSession, order));
             }
         }
+        if (activePolyline.isEmpty()) {
+            activePolyline = fallbackActivePolyline(order, runtimeDriverLocation);
+            if (!activePolyline.isEmpty()) {
+                activeSource = RouteSourceView.RUNTIME_FALLBACK;
+            }
+        }
+
+        List<MapPointView> previewPolyline = remainingRoutePreviewPolyline(order, runtimeDriver);
+        RoutePreviewSourceView previewSource = previewPolyline.size() >= 2
+                ? RoutePreviewSourceView.RUNTIME_PREVIEW
+                : RoutePreviewSourceView.NONE;
         return new RoutePayload(
-                fallbackPolyline(order, driverSession),
-                RouteSourceView.RUNTIME_FALLBACK,
-                routeGeneratedAt(runtimeDriver, driverSession, order));
+                activePolyline,
+                activeSource,
+                generatedAt,
+                previewPolyline,
+                previewSource,
+                runtimeDriverLocation);
     }
 
     private List<MapPointView> runtimePolyline(Driver runtimeDriver) {
@@ -285,23 +337,116 @@ public class RuntimeBridge {
                 .toList();
     }
 
-    private List<MapPointView> fallbackPolyline(Order order, DriverSessionState driverSession) {
+    private List<MapPointView> fallbackActivePolyline(Order order, MapPointView runtimeDriverLocation) {
         List<MapPointView> points = new ArrayList<>();
-        if (driverSession != null) {
-            points.add(point("driver", new GeoPoint(driverSession.lastLat(), driverSession.lastLng())));
+        if (runtimeDriverLocation != null) {
+            points.add(runtimeDriverLocation);
         }
         switch (order.getStatus()) {
-            case ASSIGNED, PICKUP_EN_ROUTE, CONFIRMED, PENDING_ASSIGNMENT -> {
+            case ASSIGNED, PICKUP_EN_ROUTE -> {
+                points.add(point("pickup", order.getPickupPoint()));
+            }
+            case PICKED_UP, DROPOFF_EN_ROUTE -> {
+                points.add(point("dropoff", order.getDropoffPoint()));
+            }
+            case CONFIRMED, PENDING_ASSIGNMENT, QUOTED -> {
                 points.add(point("pickup", order.getPickupPoint()));
                 points.add(point("dropoff", order.getDropoffPoint()));
             }
-            case PICKED_UP, DROPOFF_EN_ROUTE -> points.add(point("dropoff", order.getDropoffPoint()));
-            case DELIVERED, CANCELLED, FAILED, EXPIRED, QUOTED -> {
-                points.add(point("pickup", order.getPickupPoint()));
-                points.add(point("dropoff", order.getDropoffPoint()));
+            case DELIVERED, CANCELLED, FAILED, EXPIRED -> {
+                points.clear();
             }
         }
         return points;
+    }
+
+    private List<MapPointView> remainingRoutePreviewPolyline(Order order, Driver runtimeDriver) {
+        if (order.getStatus() != OrderStatus.ASSIGNED
+                && order.getStatus() != OrderStatus.PICKUP_EN_ROUTE
+                && order.getStatus() != OrderStatus.CONFIRMED
+                && order.getStatus() != OrderStatus.PENDING_ASSIGNMENT) {
+            return List.of();
+        }
+        if (runtimeDriver != null && runtimeDriver.getAssignedSequence() != null) {
+            List<MapPointView> points = runtimeDriver.getAssignedSequence().stream()
+                    .filter(stop -> order.getId().equals(stop.orderId()))
+                    .map(stop -> point(stop.type().name().toLowerCase(), stop.location()))
+                    .toList();
+            if (points.size() >= 2) {
+                return points;
+            }
+        }
+        return List.of(
+                point("pickup", order.getPickupPoint()),
+                point("dropoff", order.getDropoffPoint()));
+    }
+
+    private MapPointView runtimeDriverLocation(Order order,
+                                               Driver runtimeDriver,
+                                               DriverSessionState driverSession) {
+        if (order == null || isTerminal(order.getStatus())) {
+            return null;
+        }
+        if (runtimeDriver != null && runtimeDriver.getCurrentLocation() != null) {
+            boolean runtimeActive = runtimeDriver.getActiveOrderIds().contains(order.getId())
+                    || !runtimeDriver.getRemainingRoutePoints().isEmpty()
+                    || (runtimeDriver.getAssignedSequence() != null && !runtimeDriver.getAssignedSequence().isEmpty());
+            if (runtimeActive) {
+                return point("driver", runtimeDriver.getCurrentLocation());
+            }
+        }
+        if (driverSession == null) {
+            return null;
+        }
+        return point("driver", new GeoPoint(driverSession.lastLat(), driverSession.lastLng()));
+    }
+
+    private NearbyDriverView assignedDriverView(Order order,
+                                                DriverSessionState driverSession,
+                                                Driver runtimeDriver) {
+        MapPointView driverPoint = runtimeDriverLocation(order, runtimeDriver, driverSession);
+        if (driverPoint == null || order.getAssignedDriverId() == null || order.getAssignedDriverId().isBlank()) {
+            return null;
+        }
+        double distanceKm = order.getPickupPoint().distanceTo(new GeoPoint(driverPoint.lat(), driverPoint.lng())) / 1000.0;
+        boolean available = driverSession != null && driverSession.available();
+        String state = runtimeDriver != null && runtimeDriver.getState() != null
+                ? runtimeDriver.getState().name()
+                : (driverSession == null ? Enums.DriverState.RESERVED.name()
+                : (driverSession.available() ? Enums.DriverState.ONLINE_IDLE.name() : Enums.DriverState.RESERVED.name()));
+        String activeOfferId = driverSession == null ? "" : driverSession.activeOfferId();
+        return new NearbyDriverView(
+                order.getAssignedDriverId(),
+                available,
+                driverPoint.lat(),
+                driverPoint.lng(),
+                distanceKm,
+                state,
+                activeOfferId
+        );
+    }
+
+    private NearbyDriverView activeDriverMarker(DriverActiveTaskView activeTask,
+                                                DriverSessionState session,
+                                                GeoPoint anchor) {
+        MapPointView driverLocation = activeTask.runtimeDriverLocation() != null
+                ? activeTask.runtimeDriverLocation()
+                : activeTask.currentLocation();
+        if (driverLocation == null) {
+            return session == null ? null : toNearbyDriverView(session, anchor);
+        }
+        boolean available = session != null && session.available();
+        String activeOfferId = session == null ? "" : session.activeOfferId();
+        double distanceKm = anchor.distanceTo(new GeoPoint(driverLocation.lat(), driverLocation.lng())) / 1000.0;
+        return new NearbyDriverView(
+                activeTask.driverId(),
+                available,
+                driverLocation.lat(),
+                driverLocation.lng(),
+                distanceKm,
+                activeTask.status(),
+                activeOfferId
+        );
     }
 
     private Driver runtimeDriver(String driverId) {
@@ -419,8 +564,11 @@ public class RuntimeBridge {
     }
 
     private record RoutePayload(
-            List<MapPointView> polyline,
-            RouteSourceView routeSource,
-            String routeGeneratedAt) {
+            List<MapPointView> activeRoutePolyline,
+            RouteSourceView activeRouteSource,
+            String activeRouteGeneratedAt,
+            List<MapPointView> remainingRoutePreviewPolyline,
+            RoutePreviewSourceView remainingRoutePreviewSource,
+            MapPointView runtimeDriverLocation) {
     }
 }
