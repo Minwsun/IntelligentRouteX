@@ -68,11 +68,19 @@ public class AdaptiveWeightEngine {
                 dualPenaltyController.currentPenalties());
     }
 
+    /**
+     * Legacy compatibility path. Compact runtime should use {@link #recordResolvedSample(ResolvedDecisionSample)}.
+     */
+    @Deprecated
     public void recordOutcome(PlanFeatureVector phi, CompactDispatchContext context, OutcomeVector outcome) {
         RegimeKey regimeKey = resolveRegime(context);
         recordOutcome(regimeKey, phi, outcome);
     }
 
+    /**
+     * Legacy compatibility path. Compact runtime should use {@link #recordResolvedSample(ResolvedDecisionSample)}.
+     */
+    @Deprecated
     public void recordOutcome(RegimeKey regimeKey, PlanFeatureVector phi, OutcomeVector outcome) {
         if (learningFrozen) {
             dualPenaltyController.recordOutcome(outcome);

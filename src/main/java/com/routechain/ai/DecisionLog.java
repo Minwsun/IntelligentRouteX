@@ -7,7 +7,8 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Decision journal for dispatch decisions.
+ * Legacy/Omega-oriented decision journal for dispatch decisions.
+ * Compact online learning should use resolved-sample records from the compact runtime path instead.
  */
 public class DecisionLog {
 

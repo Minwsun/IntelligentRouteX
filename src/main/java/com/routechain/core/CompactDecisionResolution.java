@@ -26,6 +26,11 @@ public record CompactDecisionResolution(
                 resolvedSample.decisionLog(),
                 resolvedSample.outcomeVector(),
                 resolvedSample.outcomeStage(),
+                resolvedSample.actualEtaMinutes(),
+                resolvedSample.actualCancelled(),
+                resolvedSample.actualPostDropHit(),
+                resolvedSample.actualPostCompletionEmptyKm(),
+                resolvedSample.actualNextOrderIdleMinutes(),
                 resolvedAt);
         return new CompactDecisionResolution(
                 traceId,

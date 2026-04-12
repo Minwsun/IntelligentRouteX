@@ -26,6 +26,7 @@ public class CompactEvidencePublisher {
                                 Instant decisionTime,
                                 CompactDispatchDecision decision,
                                 WeightSnapshot snapshotAfter,
+                                CalibrationSnapshot calibrationSnapshot,
                                 String snapshotTag,
                                 boolean rollbackAvailable,
                                 boolean learningFrozen) {
@@ -44,6 +45,7 @@ public class CompactEvidencePublisher {
                 : decision.explanations().get(0).breakdown();
         latestStatus = buildStatus(
                 primaryBreakdown,
+                calibrationSnapshot,
                 snapshotTag,
                 rollbackAvailable,
                 learningFrozen,
@@ -56,10 +58,12 @@ public class CompactEvidencePublisher {
                                   String snapshotTag,
                                   boolean rollbackAvailable,
                                   boolean learningFrozen,
+                                  CalibrationSnapshot calibrationSnapshot,
                                   DriftMonitor.DriftAssessment assessment) {
         latestEvidence = latestEvidence.withResolution(resolution.weightSnapshotAfter(), resolution);
         latestStatus = buildStatus(
                 resolution.scoreBreakdown(),
+                calibrationSnapshot,
                 snapshotTag,
                 rollbackAvailable,
                 learningFrozen,
@@ -77,6 +81,7 @@ public class CompactEvidencePublisher {
     }
 
     private CompactRuntimeStatusView buildStatus(AdaptiveScoreBreakdown breakdown,
+                                                 CalibrationSnapshot calibrationSnapshot,
                                                  String snapshotTag,
                                                  boolean rollbackAvailable,
                                                  boolean learningFrozen,
@@ -91,6 +96,7 @@ public class CompactEvidencePublisher {
                     latestEvidence.weightSnapshotAfter() == null
                             ? java.util.Map.of()
                             : latestEvidence.weightSnapshotAfter().dualPenalties(),
+                    calibrationSnapshot == null ? CalibrationSnapshot.empty() : calibrationSnapshot,
                     snapshotTag,
                     rollbackAvailable,
                     learningFrozen,
@@ -108,6 +114,7 @@ public class CompactEvidencePublisher {
                 breakdown.regimeKey().name(),
                 top,
                 breakdown.dualPenalties(),
+                calibrationSnapshot == null ? CalibrationSnapshot.empty() : calibrationSnapshot,
                 snapshotTag,
                 rollbackAvailable,
                 learningFrozen,

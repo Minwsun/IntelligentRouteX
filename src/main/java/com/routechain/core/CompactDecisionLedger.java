@@ -1,5 +1,8 @@
 package com.routechain.core;
 
+import com.routechain.domain.GeoPoint;
+
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -21,10 +24,16 @@ public class CompactDecisionLedger {
                                AdaptiveScoreBreakdown scoreBreakdown,
                                WeightSnapshot snapshotBefore,
                                Instant decisionTime,
+                               double predictedEtaMinutes,
                                double plannedDeadheadKm,
                                double plannedRevenue,
                                double plannedLandingScore,
-                               double plannedEmptyKm) {
+                               double predictedPostDropDemandProbability,
+                               double plannedEmptyKm,
+                               double predictedNextOrderIdleMinutes,
+                               double predictedCancelRisk,
+                               double predictedOnTimeProbability,
+                               double predictedTripDistanceKm) {
         Entry entry = new Entry(
                 traceId,
                 driverId,
@@ -35,15 +44,25 @@ public class CompactDecisionLedger {
                 scoreBreakdown,
                 snapshotBefore,
                 decisionTime,
+                predictedEtaMinutes,
                 plannedDeadheadKm,
                 plannedRevenue,
                 plannedLandingScore,
-                plannedEmptyKm);
+                predictedPostDropDemandProbability,
+                plannedEmptyKm,
+                predictedNextOrderIdleMinutes,
+                predictedCancelRisk,
+                predictedOnTimeProbability,
+                predictedTripDistanceKm);
         entriesByTrace.put(traceId, entry);
         traceByDriver.put(driverId, traceId);
     }
 
-    public void recordOrderDelivered(String traceId, String orderId, boolean onTime, double fee) {
+    public void recordOrderDelivered(String traceId,
+                                     String orderId,
+                                     boolean onTime,
+                                     double fee,
+                                     double actualEtaMinutes) {
         Entry entry = entriesByTrace.get(traceId);
         if (entry == null || entry.resolved) {
             return;
@@ -54,6 +73,10 @@ public class CompactDecisionLedger {
                 entry.onTimeDeliveries++;
             }
             entry.realizedRevenue += fee;
+            if (actualEtaMinutes > 0.0) {
+                entry.actualEtaMinutesSum += actualEtaMinutes;
+                entry.actualEtaSamples++;
+            }
         }
     }
 
@@ -67,7 +90,7 @@ public class CompactDecisionLedger {
         }
     }
 
-    public void markDriverIdle(String driverId, long tick, Instant when) {
+    public void markDriverIdle(String driverId, long tick, Instant when, GeoPoint idleLocation) {
         Entry entry = entryForDriver(driverId);
         if (entry == null || entry.resolved) {
             return;
@@ -76,17 +99,21 @@ public class CompactDecisionLedger {
             entry.awaitingPostDrop = true;
             entry.idleTick = tick;
             entry.idleAt = when;
+            entry.idleLocation = idleLocation;
         }
     }
 
     public CompactDecisionResolution recordPostDropHit(String driverId,
                                                        long tick,
-                                                       Instant when) {
+                                                       Instant when,
+                                                       GeoPoint nextPickupLocation) {
         Entry entry = entryForDriver(driverId);
         if (entry == null || entry.resolved || !entry.awaitingPostDrop) {
             return null;
         }
         entry.postDropHit = true;
+        entry.actualPostCompletionEmptyKm = distanceKm(entry.idleLocation, nextPickupLocation);
+        entry.actualNextOrderIdleMinutes = durationMinutes(entry.idleAt, when);
         entry.resolved = true;
         traceByDriver.remove(driverId);
         return entry.toResolution(when);
@@ -101,6 +128,8 @@ public class CompactDecisionLedger {
                 continue;
             }
             if (entry.idleTick >= 0 && currentTick - entry.idleTick > hitWindowTicks) {
+                entry.actualPostCompletionEmptyKm = Double.NaN;
+                entry.actualNextOrderIdleMinutes = durationMinutes(entry.idleAt, when);
                 entry.resolved = true;
                 traceByDriver.remove(entry.driverId);
                 expired.add(entry.toResolution(when));
@@ -133,19 +162,30 @@ public class CompactDecisionLedger {
         private final AdaptiveScoreBreakdown scoreBreakdown;
         private final WeightSnapshot snapshotBefore;
         private final Instant decisionTime;
+        private final double predictedEtaMinutes;
         private final double plannedDeadheadKm;
         private final double plannedRevenue;
         private final double plannedLandingScore;
+        private final double predictedPostDropDemandProbability;
         private final double plannedEmptyKm;
+        private final double predictedNextOrderIdleMinutes;
+        private final double predictedCancelRisk;
+        private final double predictedOnTimeProbability;
+        private final double predictedTripDistanceKm;
         private final Set<String> deliveredOrderIds = new LinkedHashSet<>();
         private final Set<String> cancelledOrderIds = new LinkedHashSet<>();
         private double realizedRevenue = 0.0;
         private int onTimeDeliveries = 0;
+        private double actualEtaMinutesSum = 0.0;
+        private int actualEtaSamples = 0;
         private boolean awaitingPostDrop = false;
         private boolean postDropHit = false;
         private boolean resolved = false;
         private long idleTick = -1L;
         private Instant idleAt;
+        private GeoPoint idleLocation;
+        private double actualPostCompletionEmptyKm = Double.NaN;
+        private double actualNextOrderIdleMinutes = Double.NaN;
 
         private Entry(String traceId,
                       String driverId,
@@ -156,10 +196,16 @@ public class CompactDecisionLedger {
                       AdaptiveScoreBreakdown scoreBreakdown,
                       WeightSnapshot snapshotBefore,
                       Instant decisionTime,
+                      double predictedEtaMinutes,
                       double plannedDeadheadKm,
                       double plannedRevenue,
                       double plannedLandingScore,
-                      double plannedEmptyKm) {
+                      double predictedPostDropDemandProbability,
+                      double plannedEmptyKm,
+                      double predictedNextOrderIdleMinutes,
+                      double predictedCancelRisk,
+                      double predictedOnTimeProbability,
+                      double predictedTripDistanceKm) {
             this.traceId = traceId;
             this.driverId = driverId;
             this.bundleId = bundleId;
@@ -169,10 +215,16 @@ public class CompactDecisionLedger {
             this.scoreBreakdown = scoreBreakdown;
             this.snapshotBefore = snapshotBefore;
             this.decisionTime = decisionTime;
+            this.predictedEtaMinutes = predictedEtaMinutes;
             this.plannedDeadheadKm = plannedDeadheadKm;
             this.plannedRevenue = plannedRevenue;
             this.plannedLandingScore = plannedLandingScore;
+            this.predictedPostDropDemandProbability = predictedPostDropDemandProbability;
             this.plannedEmptyKm = plannedEmptyKm;
+            this.predictedNextOrderIdleMinutes = predictedNextOrderIdleMinutes;
+            this.predictedCancelRisk = predictedCancelRisk;
+            this.predictedOnTimeProbability = predictedOnTimeProbability;
+            this.predictedTripDistanceKm = predictedTripDistanceKm;
         }
 
         private boolean isTerminal() {
@@ -194,6 +246,7 @@ public class CompactDecisionLedger {
                     ? 1.0
                     : 1.0 - Math.min(1.0, plannedEmptyKm / 3.0));
             double cancelAvoidance = 1.0 - (cancelled / (double) totalOrders);
+            double actualEtaMinutes = actualEtaSamples == 0 ? predictedEtaMinutes : actualEtaMinutesSum / actualEtaSamples;
             OutcomeVector outcomeVector = new OutcomeVector(
                     onTime,
                     completion,
@@ -214,16 +267,26 @@ public class CompactDecisionLedger {
                     snapshotBefore,
                     decisionTime,
                     scoreBreakdown.finalScore(),
+                    RewardProjection.project(scoreBreakdown, featureVector),
+                    predictedEtaMinutes,
                     plannedDeadheadKm,
                     plannedRevenue,
                     plannedLandingScore,
+                    predictedPostDropDemandProbability,
                     plannedEmptyKm,
-                    featureVector.cancelRisk(),
-                    featureVector.onTimeProbability());
+                    predictedNextOrderIdleMinutes,
+                    predictedCancelRisk,
+                    predictedOnTimeProbability,
+                    predictedTripDistanceKm);
             ResolvedDecisionSample resolvedSample = new ResolvedDecisionSample(
                     decisionLog,
                     outcomeVector,
                     DecisionOutcomeStage.AFTER_POST_DROP_WINDOW,
+                    actualEtaMinutes,
+                    cancelled > 0,
+                    postDropHit,
+                    actualPostCompletionEmptyKm,
+                    actualNextOrderIdleMinutes,
                     resolvedAt == null ? decisionTime : resolvedAt);
             return new CompactDecisionResolution(
                     traceId,
@@ -241,5 +304,19 @@ public class CompactDecisionLedger {
                     postDropHit,
                     resolvedAt == null ? decisionTime : resolvedAt);
         }
+    }
+
+    private static double durationMinutes(Instant from, Instant to) {
+        if (from == null || to == null) {
+            return Double.NaN;
+        }
+        return Math.max(0.0, Duration.between(from, to).toSeconds() / 60.0);
+    }
+
+    private static double distanceKm(GeoPoint from, GeoPoint to) {
+        if (from == null || to == null) {
+            return Double.NaN;
+        }
+        return Math.max(0.0, from.distanceTo(to) / 1000.0);
     }
 }

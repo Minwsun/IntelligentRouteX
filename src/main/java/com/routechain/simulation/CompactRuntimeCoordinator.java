@@ -6,9 +6,11 @@ import com.routechain.core.CompactDecisionResolution;
 import com.routechain.core.CompactDispatchDecision;
 import com.routechain.core.CompactEvidenceBundle;
 import com.routechain.core.CompactPolicyConfig;
+import com.routechain.core.DecisionLogRecord;
 import com.routechain.core.CompactSelectedPlanEvidence;
 import com.routechain.core.DriftMonitor;
 import com.routechain.core.WeightSnapshot;
+import com.routechain.domain.GeoPoint;
 import com.routechain.domain.Driver;
 import com.routechain.domain.Enums.WeatherProfile;
 import com.routechain.domain.Order;
@@ -61,6 +63,7 @@ public class CompactRuntimeCoordinator {
                 decisionTime,
                 decision,
                 compactCoreAdapter.core().adaptiveWeightEngine().snapshot(),
+                learningRuntime.calibrationRuntime().snapshot(),
                 learningRuntime.latestSnapshotTag(),
                 learningRuntime.rollbackAvailable(),
                 compactCoreAdapter.core().adaptiveWeightEngine().isLearningFrozen());
@@ -70,36 +73,44 @@ public class CompactRuntimeCoordinator {
                                    CompactSelectedPlanEvidence evidence,
                                    WeightSnapshot snapshotBefore,
                                    Instant decisionTime) {
+        DecisionLogRecord calibratedDecisionLog = learningRuntime.calibrationRuntime().calibrateDecisionLog(
+                buildDecisionLogRecord(executablePlan, evidence, snapshotBefore, decisionTime));
         learningRuntime.ledger().recordDecision(
-                executablePlan.getTraceId(),
-                executablePlan.getDriver().getId(),
-                executablePlan.getBundle().bundleId(),
-                evidence.planType(),
-                executablePlan.getOrders().stream().map(Order::getId).toList(),
-                evidence.featureVector(),
-                evidence.scoreBreakdown(),
-                snapshotBefore,
-                decisionTime,
-                executablePlan.getPredictedDeadheadKm(),
-                executablePlan.getCustomerFee(),
-                executablePlan.getLastDropLandingScore(),
-                executablePlan.getExpectedPostCompletionEmptyKm());
+                calibratedDecisionLog.decisionId(),
+                calibratedDecisionLog.driverId(),
+                calibratedDecisionLog.bundleId(),
+                calibratedDecisionLog.planType(),
+                calibratedDecisionLog.orderIds(),
+                calibratedDecisionLog.featureVector(),
+                calibratedDecisionLog.scoreBreakdown(),
+                calibratedDecisionLog.snapshotBefore(),
+                calibratedDecisionLog.decisionTime(),
+                calibratedDecisionLog.predictedEtaMinutes(),
+                calibratedDecisionLog.predictedDeadheadKm(),
+                calibratedDecisionLog.predictedRevenue(),
+                calibratedDecisionLog.predictedLandingScore(),
+                calibratedDecisionLog.predictedPostDropDemandProbability(),
+                calibratedDecisionLog.predictedPostCompletionEmptyKm(),
+                calibratedDecisionLog.predictedNextOrderIdleMinutes(),
+                calibratedDecisionLog.predictedCancelRisk(),
+                calibratedDecisionLog.predictedOnTimeProbability(),
+                calibratedDecisionLog.predictedTripDistanceKm());
     }
 
-    public void recordOrderDelivered(String traceId, String orderId, boolean onTime, double fee) {
-        learningRuntime.ledger().recordOrderDelivered(traceId, orderId, onTime, fee);
+    public void recordOrderDelivered(String traceId, String orderId, boolean onTime, double fee, double actualEtaMinutes) {
+        learningRuntime.ledger().recordOrderDelivered(traceId, orderId, onTime, fee, actualEtaMinutes);
     }
 
     public void recordOrderCancelled(String traceId, String orderId) {
         learningRuntime.ledger().recordOrderCancelled(traceId, orderId);
     }
 
-    public void markDriverIdle(String driverId, long tick, Instant when) {
-        learningRuntime.ledger().markDriverIdle(driverId, tick, when);
+    public void markDriverIdle(String driverId, long tick, Instant when, GeoPoint idleLocation) {
+        learningRuntime.ledger().markDriverIdle(driverId, tick, when, idleLocation);
     }
 
-    public void recordPostDropHit(String driverId, long tick, Instant when) {
-        CompactDecisionResolution resolution = learningRuntime.ledger().recordPostDropHit(driverId, tick, when);
+    public void recordPostDropHit(String driverId, long tick, Instant when, GeoPoint nextPickupLocation) {
+        CompactDecisionResolution resolution = learningRuntime.ledger().recordPostDropHit(driverId, tick, when, nextPickupLocation);
         resolve(resolution, when);
     }
 
@@ -135,6 +146,50 @@ public class CompactRuntimeCoordinator {
         return compactCoreAdapter.core().adaptiveWeightEngine();
     }
 
+    private DecisionLogRecord buildDecisionLogRecord(DispatchPlan executablePlan,
+                                                     CompactSelectedPlanEvidence evidence,
+                                                     WeightSnapshot snapshotBefore,
+                                                     Instant decisionTime) {
+        return new DecisionLogRecord(
+                executablePlan.getTraceId(),
+                executablePlan.getDriver().getId(),
+                executablePlan.getBundle().bundleId(),
+                evidence.planType(),
+                executablePlan.getOrders().stream().map(Order::getId).toList(),
+                evidence.scoreBreakdown().regimeKey(),
+                evidence.featureVector(),
+                evidence.scoreBreakdown(),
+                snapshotBefore,
+                decisionTime,
+                evidence.scoreBreakdown().finalScore(),
+                com.routechain.core.RewardProjection.project(evidence.scoreBreakdown(), evidence.featureVector()),
+                executablePlan.getPredictedTotalMinutes(),
+                executablePlan.getPredictedDeadheadKm(),
+                executablePlan.getCustomerFee(),
+                executablePlan.getLastDropLandingScore(),
+                executablePlan.getPostDropDemandProbability(),
+                executablePlan.getExpectedPostCompletionEmptyKm(),
+                executablePlan.getExpectedNextOrderIdleMinutes(),
+                executablePlan.getCancellationRisk(),
+                executablePlan.getOnTimeProbability(),
+                estimateTripDistanceKm(executablePlan));
+    }
+
+    private double estimateTripDistanceKm(DispatchPlan executablePlan) {
+        if (executablePlan == null || executablePlan.getSequence().isEmpty()) {
+            return 0.0;
+        }
+        double totalMeters = 0.0;
+        GeoPoint cursor = executablePlan.getDriver().getCurrentLocation();
+        for (DispatchPlan.Stop stop : executablePlan.getSequence()) {
+            if (cursor != null) {
+                totalMeters += cursor.distanceTo(stop.location());
+            }
+            cursor = stop.location();
+        }
+        return Math.max(0.0, totalMeters / 1000.0);
+    }
+
     private void resolve(CompactDecisionResolution resolution, Instant resolvedAt) {
         if (resolution == null) {
             return;
@@ -150,6 +205,7 @@ public class CompactRuntimeCoordinator {
                 learningRuntime.latestSnapshotTag(),
                 learningRuntime.rollbackAvailable(),
                 compactCoreAdapter.core().adaptiveWeightEngine().isLearningFrozen(),
+                learningRuntime.calibrationRuntime().snapshot(),
                 assessment);
     }
 }

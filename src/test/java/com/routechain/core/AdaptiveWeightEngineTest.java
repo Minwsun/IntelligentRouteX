@@ -94,16 +94,26 @@ class AdaptiveWeightEngineTest {
                 engineSnapshot(),
                 Instant.parse("2026-04-12T05:00:00Z"),
                 predictedReward,
+                predictedReward,
+                11.0,
                 0.9,
                 42000.0,
                 0.74,
+                0.64,
                 0.6,
+                2.8,
                 phi.cancelRisk(),
-                phi.onTimeProbability());
+                phi.onTimeProbability(),
+                4.2);
         return new ResolvedDecisionSample(
                 decisionLog,
                 new OutcomeVector(0.94, 1.0, 0.90, 0.82, 0.84, 0.88, 0.98),
                 DecisionOutcomeStage.AFTER_POST_DROP_WINDOW,
+                12.2,
+                false,
+                true,
+                0.5,
+                2.0,
                 Instant.parse("2026-04-12T05:10:00Z"));
     }
 

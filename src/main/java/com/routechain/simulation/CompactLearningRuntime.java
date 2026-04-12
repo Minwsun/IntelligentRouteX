@@ -18,6 +18,7 @@ public class CompactLearningRuntime {
     private final CompactDecisionLedger ledger = new CompactDecisionLedger();
     private final WeightSnapshotStore snapshotStore = new WeightSnapshotStore();
     private final DriftMonitor driftMonitor = new DriftMonitor();
+    private final CompactCalibrationRuntime calibrationRuntime = new CompactCalibrationRuntime();
     private final Set<String> appliedDecisionIds = ConcurrentHashMap.newKeySet();
     private volatile String latestSnapshotTag = "snapshot-none";
 
@@ -27,6 +28,7 @@ public class CompactLearningRuntime {
 
     public void reset() {
         ledger.reset();
+        calibrationRuntime.reset();
         appliedDecisionIds.clear();
         latestSnapshotTag = "snapshot-none";
     }
@@ -41,6 +43,10 @@ public class CompactLearningRuntime {
 
     public boolean rollbackAvailable() {
         return snapshotStore.hasLastGood();
+    }
+
+    public CompactCalibrationRuntime calibrationRuntime() {
+        return calibrationRuntime;
     }
 
     public DriftMonitor.DriftAssessment resolveAndApply(CompactDecisionResolution resolution,
@@ -67,6 +73,7 @@ public class CompactLearningRuntime {
             }
         }
 
+        calibrationRuntime.recordResolvedSample(resolution.resolvedSample());
         boolean applied = weightEngine.recordResolvedSample(resolution.resolvedSample());
         if (applied) {
             WeightSnapshot latest = weightEngine.snapshot();

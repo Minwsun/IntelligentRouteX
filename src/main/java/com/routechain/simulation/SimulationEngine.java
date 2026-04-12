@@ -1198,7 +1198,8 @@ public class SimulationEngine {
                     compactRuntimeCoordinator.recordPostDropHit(
                             best.getId(),
                             tickCounter.get(),
-                            decisionTime);
+                            decisionTime,
+                            executablePlan.getSequence().isEmpty() ? null : executablePlan.getSequence().getFirst().location());
                 }
             }
 
@@ -1897,15 +1898,6 @@ public class SimulationEngine {
                             activeOrders.remove(order);
                             eventBus.publish(new OrderDelivered(order.getId()));
                             dbService.saveOrder(order);
-                            if (dispatchMode == DispatchMode.COMPACT
-                                    && order.getDecisionTraceId() != null) {
-                                compactRuntimeCoordinator.recordOrderDelivered(
-                                        order.getDecisionTraceId(),
-                                        order.getId(),
-                                        !order.isLate(),
-                                        order.getQuotedFee());
-                            }
-
                             double etaActual = 0;
                             if (order.getAssignedAt() != null && order.getDeliveredAt() != null) {
                                 etaActual = java.time.Duration.between(
@@ -1914,6 +1906,15 @@ public class SimulationEngine {
                             if (etaActual <= 0) {
                                 double distKm = order.getPickupPoint().distanceTo(order.getDropoffPoint()) / 1000.0;
                                 etaActual = distKm / Math.max(6, driver.getSpeedKmh()) * 60;
+                            }
+                            if (dispatchMode == DispatchMode.COMPACT
+                                    && order.getDecisionTraceId() != null) {
+                                compactRuntimeCoordinator.recordOrderDelivered(
+                                        order.getDecisionTraceId(),
+                                        order.getId(),
+                                        !order.isLate(),
+                                        order.getQuotedFee(),
+                                        etaActual);
                             }
                             if (dispatchMode == DispatchMode.OMEGA) {
                                 omegaAgent.onOrderDelivered(order, driver, etaActual, order.isLate(),
@@ -1964,7 +1965,11 @@ public class SimulationEngine {
                     postDropIdleTickByDriver.put(driver.getId(), tickCounter.get());
                     postDropOpportunityCount++;
                     if (dispatchMode == DispatchMode.COMPACT) {
-                        compactRuntimeCoordinator.markDriverIdle(driver.getId(), tickCounter.get(), simulatedNow);
+                        compactRuntimeCoordinator.markDriverIdle(
+                                driver.getId(),
+                                tickCounter.get(),
+                                simulatedNow,
+                                driver.getCurrentLocation());
                     }
                     miniDispatchRequested = true;
                     eventBus.publish(new DriverStateChanged(driver.getId(),
@@ -2005,7 +2010,8 @@ public class SimulationEngine {
                                         compactRuntimeCoordinator.markDriverIdle(
                                                 driver.getId(),
                                                 tickCounter.get(),
-                                                simulatedNow);
+                                                simulatedNow,
+                                                driver.getCurrentLocation());
                                     }
                                     miniDispatchRequested = true;
                                 }

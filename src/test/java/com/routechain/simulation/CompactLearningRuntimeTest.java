@@ -60,16 +60,26 @@ class CompactLearningRuntimeTest {
                 new AdaptiveWeightEngine().snapshot(),
                 Instant.parse("2026-04-12T06:00:00Z"),
                 predictedReward,
+                predictedReward,
+                12.0,
                 0.8,
                 40000.0,
                 0.70,
+                0.60,
                 0.5,
+                2.2,
                 phi.cancelRisk(),
-                phi.onTimeProbability());
+                phi.onTimeProbability(),
+                4.4);
         ResolvedDecisionSample sample = new ResolvedDecisionSample(
                 decisionLog,
                 new OutcomeVector(0.96, 1.0, 0.90, 0.84, 0.86, 0.90, 0.98),
                 DecisionOutcomeStage.AFTER_POST_DROP_WINDOW,
+                11.0,
+                false,
+                true,
+                0.4,
+                1.8,
                 Instant.parse("2026-04-12T06:10:00Z"));
         return new com.routechain.core.CompactDecisionResolution(
                 decisionId,

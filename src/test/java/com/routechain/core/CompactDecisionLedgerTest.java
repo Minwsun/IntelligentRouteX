@@ -37,26 +37,35 @@ class CompactDecisionLedgerTest {
                 breakdown,
                 snapshotBefore,
                 Instant.parse("2026-04-11T05:00:00Z"),
+                12.0,
                 0.9,
                 42000.0,
                 0.76,
-                0.8);
+                0.68,
+                0.8,
+                2.4,
+                0.08,
+                0.80,
+                4.8);
 
-        ledger.recordOrderDelivered("trace-1", "order-1", true, 42000.0);
-        ledger.markDriverIdle("driver-1", 10L, Instant.parse("2026-04-11T05:10:00Z"));
+        ledger.recordOrderDelivered("trace-1", "order-1", true, 42000.0, 13.0);
+        ledger.markDriverIdle("driver-1", 10L, Instant.parse("2026-04-11T05:10:00Z"), new com.routechain.domain.GeoPoint(10.77, 106.70));
 
         CompactDecisionResolution resolution = ledger.recordPostDropHit(
                 "driver-1",
                 12L,
-                Instant.parse("2026-04-11T05:11:00Z"));
+                Instant.parse("2026-04-11T05:11:00Z"),
+                new com.routechain.domain.GeoPoint(10.775, 106.705));
 
         assertNotNull(resolution);
         assertEquals("trace-1", resolution.decisionLog().decisionId());
         assertEquals(DecisionOutcomeStage.AFTER_POST_DROP_WINDOW, resolution.resolvedSample().outcomeStage());
+        assertEquals(13.0, resolution.resolvedSample().actualEtaMinutes(), 1e-9);
+        assertTrue(resolution.resolvedSample().actualPostCompletionEmptyKm() >= 0.0);
         assertTrue(resolution.postDropHit());
         assertEquals(1.0, resolution.outcomeVector().completion(), 1e-9);
         assertEquals(1.0, resolution.outcomeVector().onTime(), 1e-9);
-        assertNull(ledger.recordPostDropHit("driver-1", 13L, Instant.parse("2026-04-11T05:12:00Z")));
+        assertNull(ledger.recordPostDropHit("driver-1", 13L, Instant.parse("2026-04-11T05:12:00Z"), null));
     }
 
     @Test
@@ -82,12 +91,18 @@ class CompactDecisionLedgerTest {
                 breakdown,
                 snapshotBefore,
                 Instant.parse("2026-04-11T06:00:00Z"),
+                18.0,
                 1.1,
                 38000.0,
                 0.48,
-                2.4);
+                0.24,
+                2.4,
+                6.5,
+                0.12,
+                0.74,
+                6.0);
         ledger.recordOrderCancelled("trace-2", "order-2");
-        ledger.markDriverIdle("driver-2", 20L, Instant.parse("2026-04-11T06:05:00Z"));
+        ledger.markDriverIdle("driver-2", 20L, Instant.parse("2026-04-11T06:05:00Z"), new com.routechain.domain.GeoPoint(10.76, 106.71));
 
         List<CompactDecisionResolution> expired = ledger.expirePostDrop(
                 40L,
@@ -97,5 +112,6 @@ class CompactDecisionLedgerTest {
         assertEquals(1, expired.size());
         assertTrue(expired.get(0).outcomeVector().completion() < 1.0);
         assertTrue(expired.get(0).outcomeVector().postDropQuality() < 1.0);
+        assertTrue(Double.isNaN(expired.get(0).resolvedSample().actualPostCompletionEmptyKm()));
     }
 }

@@ -14,11 +14,16 @@ public record DecisionLogRecord(
         AdaptiveScoreBreakdown scoreBreakdown,
         WeightSnapshot snapshotBefore,
         Instant decisionTime,
-        double predictedReward,
+        double predictedUtilityRaw,
+        double predictedRewardNormalized,
+        double predictedEtaMinutes,
         double predictedDeadheadKm,
         double predictedRevenue,
         double predictedLandingScore,
+        double predictedPostDropDemandProbability,
         double predictedPostCompletionEmptyKm,
+        double predictedNextOrderIdleMinutes,
         double predictedCancelRisk,
-        double predictedOnTimeProbability) {
+        double predictedOnTimeProbability,
+        double predictedTripDistanceKm) {
 }
