@@ -63,6 +63,10 @@ public final class CompactBenchmarkRunner {
                         compact.topExplanations(),
                         compact.planTypeCounts(),
                         compact.routeSourceCounts(),
+                        compact.batchEligibleContexts(),
+                        compact.batchChosenWhenEligibleContexts(),
+                        compact.singleChosenWhenBatchEligibleContexts(),
+                        compact.batchRejectionReasons(),
                         compact.report().bundleSuccessRate(),
                         compact.report().avgObservedBundleSize(),
                         compact.report().bundleThreePlusRate()));
@@ -83,7 +87,15 @@ public final class CompactBenchmarkRunner {
         double compactCompletionVsOmega = mean(cases, c -> c.compact().completionRate() - c.omegaReference().completionRate());
         double compactDeadheadVsOmega = mean(cases, c -> c.compact().deadheadPerCompletedOrderKm() - c.omegaReference().deadheadPerCompletedOrderKm());
         Map<String, Integer> planTypeCounts = sumCounts(cases, CompactBenchmarkCase::compactPlanTypeCounts);
+        Map<String, Double> selectedPlanTypeShare = shareCounts(planTypeCounts);
         Map<String, Integer> routeSourceCounts = sumCounts(cases, CompactBenchmarkCase::routeSourceCounts);
+        int batchEligibleContexts = cases.stream().mapToInt(CompactBenchmarkCase::batchEligibleContexts).sum();
+        int batchChosenWhenEligibleContexts = cases.stream().mapToInt(CompactBenchmarkCase::batchChosenWhenEligibleContexts).sum();
+        int singleChosenWhenBatchEligibleContexts = cases.stream().mapToInt(CompactBenchmarkCase::singleChosenWhenBatchEligibleContexts).sum();
+        double batchChosenWhenEligibleRate = batchEligibleContexts == 0
+                ? 0.0
+                : (batchChosenWhenEligibleContexts * 100.0) / batchEligibleContexts;
+        Map<String, Integer> batchRejectionReasons = sumCounts(cases, CompactBenchmarkCase::batchRejectionReasons);
         double compactBundleSuccessRate = mean(cases, CompactBenchmarkCase::bundleSuccessRate);
         double compactAvgObservedBundleSize = mean(cases, CompactBenchmarkCase::avgObservedBundleSize);
         double compactBundleThreePlusRate = mean(cases, CompactBenchmarkCase::bundleThreePlusRate);
@@ -106,7 +118,13 @@ public final class CompactBenchmarkRunner {
                 compactDeadheadImprovementPct,
                 compactEmptyKmImprovementPct,
                 planTypeCounts,
+                selectedPlanTypeShare,
                 routeSourceCounts,
+                batchEligibleContexts,
+                batchChosenWhenEligibleContexts,
+                singleChosenWhenBatchEligibleContexts,
+                batchChosenWhenEligibleRate,
+                batchRejectionReasons,
                 compactBundleSuccessRate,
                 compactAvgObservedBundleSize,
                 compactBundleThreePlusRate,
@@ -141,6 +159,10 @@ public final class CompactBenchmarkRunner {
                 engine.getCurrentCompactStatus().rollbackAvailable(),
                 planTypeCounts(engine),
                 routeSourceCounts(engine),
+                engine.getCompactBatchEligibleContextCount(),
+                engine.getCompactBatchChosenWhenEligibleCount(),
+                engine.getCompactSingleChosenWhenBatchEligibleCount(),
+                engine.getCompactBatchRejectionReasons(),
                 engine.getLatestCompactEvidence().explanations().stream()
                         .map(CompactDecisionExplanation::summary)
                         .limit(3)
@@ -190,7 +212,13 @@ public final class CompactBenchmarkRunner {
         builder.append("- Empty-km vs baseline: ").append(format(summary.compactEmptyKmDeltaVsBaseline())).append('\n');
         builder.append("- Empty-km improvement vs baseline: ").append(format(summary.compactEmptyKmImprovementPctVsBaseline())).append("%\n");
         builder.append("- Compact plan-type coverage: ").append(summary.compactPlanTypeCounts()).append('\n');
+        builder.append("- Selected plan-type share: ").append(summary.selectedPlanTypeShare()).append('\n');
         builder.append("- Compact route-source coverage: ").append(summary.routeSourceCounts()).append('\n');
+        builder.append("- Batch eligible contexts: ").append(summary.compactBatchEligibleContexts()).append('\n');
+        builder.append("- Batch chosen when eligible: ").append(summary.compactBatchChosenWhenEligibleContexts()).append('\n');
+        builder.append("- Single chosen when batch eligible: ").append(summary.compactSingleChosenWhenBatchEligibleContexts()).append('\n');
+        builder.append("- Batch chosen when eligible rate: ").append(format(summary.compactBatchChosenWhenEligibleRate())).append("%\n");
+        builder.append("- Batch rejection reasons: ").append(summary.compactBatchRejectionReasons()).append('\n');
         builder.append("- Compact bundle success rate: ").append(format(summary.compactBundleSuccessRate())).append("%\n");
         builder.append("- Compact avg observed bundle size: ").append(format(summary.compactAvgObservedBundleSize())).append('\n');
         builder.append("- Compact 3+ bundle rate: ").append(format(summary.compactBundleThreePlusRate())).append("%\n");
@@ -212,8 +240,13 @@ public final class CompactBenchmarkRunner {
                     .append('\n');
             builder.append("  coverage: planTypes=").append(benchmarkCase.compactPlanTypeCounts())
                     .append(" routeSources=").append(benchmarkCase.routeSourceCounts())
+                    .append(" batchEligible=").append(benchmarkCase.batchEligibleContexts())
+                    .append(" batchChosen=").append(benchmarkCase.batchChosenWhenEligibleContexts())
                     .append(" avgBundle=").append(String.format("%.2f", benchmarkCase.avgObservedBundleSize()))
                     .append('\n');
+            if (!benchmarkCase.batchRejectionReasons().isEmpty()) {
+                builder.append("  rejections: ").append(benchmarkCase.batchRejectionReasons()).append('\n');
+            }
             for (String explanation : benchmarkCase.compactTopExplanations()) {
                 builder.append("  top: ").append(explanation).append('\n');
             }
@@ -250,6 +283,10 @@ public final class CompactBenchmarkRunner {
                     .append('\n');
             builder.append("- Compact plan types: ").append(benchmarkCase.compactPlanTypeCounts()).append('\n');
             builder.append("- Route sources: ").append(benchmarkCase.routeSourceCounts()).append('\n');
+            builder.append("- Batch eligible contexts: ").append(benchmarkCase.batchEligibleContexts()).append('\n');
+            builder.append("- Batch chosen when eligible: ").append(benchmarkCase.batchChosenWhenEligibleContexts()).append('\n');
+            builder.append("- Single chosen when batch eligible: ").append(benchmarkCase.singleChosenWhenBatchEligibleContexts()).append('\n');
+            builder.append("- Batch rejection reasons: ").append(benchmarkCase.batchRejectionReasons()).append('\n');
             builder.append("- Bundle success rate: ").append(String.format("%.2f", benchmarkCase.bundleSuccessRate())).append("%\n");
             builder.append("- Avg observed bundle size: ").append(String.format("%.2f", benchmarkCase.avgObservedBundleSize())).append('\n');
             builder.append("- 3+ bundle rate: ").append(String.format("%.2f", benchmarkCase.bundleThreePlusRate())).append("%\n\n");
@@ -322,6 +359,16 @@ public final class CompactBenchmarkRunner {
         return Map.copyOf(counts);
     }
 
+    private static Map<String, Double> shareCounts(Map<String, Integer> counts) {
+        int total = counts.values().stream().mapToInt(Integer::intValue).sum();
+        Map<String, Double> shares = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+            double share = total == 0 ? 0.0 : (entry.getValue() * 100.0) / total;
+            shares.put(entry.getKey(), share);
+        }
+        return Map.copyOf(shares);
+    }
+
     private static Map<String, Integer> sumCounts(List<CompactBenchmarkCase> cases,
                                                   java.util.function.Function<CompactBenchmarkCase, Map<String, Integer>> extractor) {
         Map<String, Integer> total = new LinkedHashMap<>();
@@ -340,6 +387,10 @@ public final class CompactBenchmarkRunner {
             boolean rollbackAvailable,
             Map<String, Integer> planTypeCounts,
             Map<String, Integer> routeSourceCounts,
+            int batchEligibleContexts,
+            int batchChosenWhenEligibleContexts,
+            int singleChosenWhenBatchEligibleContexts,
+            Map<String, Integer> batchRejectionReasons,
             List<String> topExplanations) {
     }
 }

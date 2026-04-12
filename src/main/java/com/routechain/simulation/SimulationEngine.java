@@ -89,6 +89,10 @@ public class SimulationEngine {
     private volatile int prePickupAugmentationCount = 0;
     private final EnumMap<CompactPlanType, Integer> compactSelectedPlanTypeCounts =
             new EnumMap<>(CompactPlanType.class);
+    private volatile int compactBatchEligibleContextCount = 0;
+    private volatile int compactBatchChosenWhenEligibleCount = 0;
+    private volatile int compactSingleChosenWhenBatchEligibleCount = 0;
+    private final Map<String, Integer> compactBatchRejectionReasons = new ConcurrentHashMap<>();
     private volatile double borrowedExecutedDeadheadKm = 0.0;
     private volatile double fallbackExecutedDeadheadKm = 0.0;
     private volatile double waveExecutedDeadheadKm = 0.0;
@@ -245,6 +249,10 @@ public class SimulationEngine {
         holdOnlySelectionCount = 0;
         prePickupAugmentationCount = 0;
         compactSelectedPlanTypeCounts.clear();
+        compactBatchEligibleContextCount = 0;
+        compactBatchChosenWhenEligibleCount = 0;
+        compactSingleChosenWhenBatchEligibleCount = 0;
+        compactBatchRejectionReasons.clear();
         borrowedExecutedDeadheadKm = 0.0;
         fallbackExecutedDeadheadKm = 0.0;
         waveExecutedDeadheadKm = 0.0;
@@ -319,9 +327,14 @@ public class SimulationEngine {
     public Map<CompactPlanType, Integer> getCompactSelectedPlanTypeCounts() {
         return Map.copyOf(compactSelectedPlanTypeCounts);
     }
+    public int getCompactBatchEligibleContextCount() { return compactBatchEligibleContextCount; }
+    public int getCompactBatchChosenWhenEligibleCount() { return compactBatchChosenWhenEligibleCount; }
+    public int getCompactSingleChosenWhenBatchEligibleCount() { return compactSingleChosenWhenBatchEligibleCount; }
+    public Map<String, Integer> getCompactBatchRejectionReasons() { return Map.copyOf(compactBatchRejectionReasons); }
     public CompactDispatchDecision previewCompactDispatch(List<Order> openOrders, List<Driver> availableDrivers) {
         if (openOrders == null || openOrders.isEmpty() || availableDrivers == null || availableDrivers.isEmpty()) {
             return new CompactDispatchDecision(
+                    List.of(),
                     List.of(),
                     List.of(),
                     List.of(),
@@ -1071,6 +1084,21 @@ public class SimulationEngine {
                 evidenceByTrace.put(evidence.traceId(), evidence);
             }
             compactEvidenceByTrace = evidenceByTrace;
+            for (var audit : compactDecision.selectionAudits()) {
+                if (!audit.batchEligible()) {
+                    continue;
+                }
+                compactBatchEligibleContextCount++;
+                if (audit.batchChosen()) {
+                    compactBatchChosenWhenEligibleCount++;
+                } else {
+                    compactSingleChosenWhenBatchEligibleCount++;
+                    String reason = audit.reason() == null || audit.reason().isBlank()
+                            ? "single retained after comparator review"
+                            : audit.reason();
+                    compactBatchRejectionReasons.merge(reason, 1, Integer::sum);
+                }
+            }
         } else {
             OmegaDispatchAgent.DispatchResult result = omegaAgent.dispatch(
                     new ArrayList<>(pending), new ArrayList<>(available),

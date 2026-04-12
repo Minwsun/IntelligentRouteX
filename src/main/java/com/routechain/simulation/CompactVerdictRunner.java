@@ -55,6 +55,15 @@ public final class CompactVerdictRunner {
         if (!noSevereRegressionPass) {
             notes.add("at least one seed has a material regression against baseline");
         }
+        if (summary.compactBatchEligibleContexts() == 0) {
+            notes.add("no batch-eligible contexts were observed in this lane");
+        } else {
+            notes.add("batch chosen when eligible rate="
+                    + String.format("%+.3f%%", summary.compactBatchChosenWhenEligibleRate()));
+            if (!summary.compactBatchRejectionReasons().isEmpty()) {
+                notes.add("batch rejection reasons=" + summary.compactBatchRejectionReasons());
+            }
+        }
 
         boolean overallPass = completionPass
                 && onTimePass
@@ -83,6 +92,7 @@ public final class CompactVerdictRunner {
                 summary.compactDeadheadImprovementPctVsBaseline(),
                 summary.compactPostDropHitDeltaVsBaseline(),
                 summary.compactEmptyKmImprovementPctVsBaseline(),
+                summary.compactBatchChosenWhenEligibleRate(),
                 List.copyOf(notes),
                 summary);
     }
@@ -124,6 +134,7 @@ public final class CompactVerdictRunner {
         builder.append("- Deadhead improvement vs baseline: ").append(String.format("%+.3f%%", verdict.deadheadImprovementPctVsBaseline())).append('\n');
         builder.append("- Post-drop hit delta vs baseline: ").append(String.format("%+.3f pp", verdict.postDropHitDeltaVsBaseline())).append('\n');
         builder.append("- Empty-km improvement vs baseline: ").append(String.format("%+.3f%%", verdict.emptyKmImprovementPctVsBaseline())).append("\n\n");
+        builder.append("- Batch chosen when eligible rate: ").append(String.format("%+.3f%%", verdict.batchChosenWhenEligibleRate())).append("\n\n");
         builder.append("## Notes\n");
         for (String note : verdict.notes()) {
             builder.append("- ").append(note).append('\n');

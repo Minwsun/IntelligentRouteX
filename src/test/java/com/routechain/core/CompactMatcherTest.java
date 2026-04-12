@@ -44,10 +44,14 @@ class CompactMatcherTest {
                 45,
                 Instant.parse("2026-04-11T05:00:00Z"));
 
-        CompactCandidateEvaluation best = evaluation(driverA, List.of(order1), "trace-best", 0.90, CompactPlanType.SINGLE_LOCAL);
-        CompactCandidateEvaluation sameDriverConflict = evaluation(driverA, List.of(order2), "trace-same-driver", 0.80, CompactPlanType.BATCH_2_COMPACT);
-        CompactCandidateEvaluation sameOrderConflict = evaluation(driverB, List.of(order1, order3), "trace-same-order", 0.85, CompactPlanType.WAVE_3_CLEAN);
-        CompactCandidateEvaluation cleanRunnerUp = evaluation(driverB, List.of(order3), "trace-clean", 0.70, CompactPlanType.FALLBACK_LOCAL);
+        CompactCandidateEvaluation best = evaluation(driverA, List.of(order1), "trace-best", 0.90, CompactPlanType.SINGLE_LOCAL,
+                0.24, 0.58, 0.62, 0.60);
+        CompactCandidateEvaluation sameDriverConflict = evaluation(driverA, List.of(order2), "trace-same-driver", 0.80, CompactPlanType.BATCH_2_COMPACT,
+                0.20, 0.61, 0.63, 0.70);
+        CompactCandidateEvaluation sameOrderConflict = evaluation(driverB, List.of(order1, order3), "trace-same-order", 0.85, CompactPlanType.WAVE_3_CLEAN,
+                0.18, 0.64, 0.66, 0.76);
+        CompactCandidateEvaluation cleanRunnerUp = evaluation(driverB, List.of(order3), "trace-clean", 0.70, CompactPlanType.FALLBACK_LOCAL,
+                0.26, 0.55, 0.56, 0.52);
 
         List<CompactCandidateEvaluation> selected = matcher.match(
                 List.of(sameOrderConflict, cleanRunnerUp, best, sameDriverConflict));
@@ -61,11 +65,55 @@ class CompactMatcherTest {
         assertTrue(selected.stream().noneMatch(entry -> "trace-same-order".equals(entry.plan().getTraceId())));
     }
 
+    @Test
+    void shouldPreferBatchWhenScoreGapIsSmallAndEmptyRunImproves() {
+        CompactMatcher matcher = new CompactMatcher();
+        Driver driver = new Driver("driver-pref", "Driver Pref", new GeoPoint(10.77, 106.70), "R1", VehicleType.MOTORBIKE);
+        Order order1 = order("order-a", 10.771, 106.701, 10.781, 106.711);
+        Order order2 = order("order-b", 10.772, 106.702, 10.782, 106.712);
+
+        CompactCandidateEvaluation single = evaluation(
+                driver, List.of(order1), "trace-single", 0.84, CompactPlanType.SINGLE_LOCAL,
+                0.46, 0.58, 0.57, 0.61);
+        CompactCandidateEvaluation batch = evaluation(
+                driver, List.of(order1, order2), "trace-batch", 0.80, CompactPlanType.BATCH_2_COMPACT,
+                0.18, 0.69, 0.66, 0.79);
+
+        List<CompactCandidateEvaluation> selected = matcher.match(List.of(single, batch));
+
+        assertEquals(1, selected.size());
+        assertEquals("trace-batch", selected.getFirst().plan().getTraceId());
+    }
+
+    @Test
+    void shouldKeepSingleWhenBatchLosesByClearUtilityGap() {
+        CompactMatcher matcher = new CompactMatcher();
+        Driver driver = new Driver("driver-gap", "Driver Gap", new GeoPoint(10.77, 106.70), "R1", VehicleType.MOTORBIKE);
+        Order order1 = order("order-c", 10.771, 106.701, 10.781, 106.711);
+        Order order2 = order("order-d", 10.772, 106.702, 10.782, 106.712);
+
+        CompactCandidateEvaluation single = evaluation(
+                driver, List.of(order1), "trace-single-gap", 1.05, CompactPlanType.SINGLE_LOCAL,
+                0.31, 0.61, 0.60, 0.63);
+        CompactCandidateEvaluation batch = evaluation(
+                driver, List.of(order1, order2), "trace-batch-gap", 0.79, CompactPlanType.BATCH_2_COMPACT,
+                0.12, 0.70, 0.67, 0.82);
+
+        List<CompactCandidateEvaluation> selected = matcher.match(List.of(batch, single));
+
+        assertEquals(1, selected.size());
+        assertEquals("trace-single-gap", selected.getFirst().plan().getTraceId());
+    }
+
     private CompactCandidateEvaluation evaluation(Driver driver,
                                                   List<Order> orders,
                                                   String traceId,
                                                   double finalScore,
-                                                  CompactPlanType planType) {
+                                                  CompactPlanType planType,
+                                                  double expectedEmptyKm,
+                                                  double postDropDemand,
+                                                  double landingScore,
+                                                  double bundleEfficiency) {
         DispatchPlan.Bundle bundle = new DispatchPlan.Bundle(
                 "bundle-" + traceId,
                 orders,
@@ -82,7 +130,13 @@ class CompactMatcherTest {
         plan.setTraceId(traceId);
         plan.setTotalScore(finalScore);
         plan.setCompactPlanType(planType);
-        PlanFeatureVector features = new PlanFeatureVector(0.80, 0.20, 0.60, 0.55, 0.58, 0.62, 0.24, 0.10);
+        plan.setExpectedPostCompletionEmptyKm(expectedEmptyKm);
+        plan.setPostDropDemandProbability(postDropDemand);
+        plan.setLastDropLandingScore(landingScore);
+        plan.setDeliveryCorridorScore(Math.max(0.0, landingScore - 0.04));
+        plan.setBundleEfficiency(bundleEfficiency);
+        PlanFeatureVector features = new PlanFeatureVector(
+                0.80, 0.20, bundleEfficiency, 0.55, 0.58, landingScore, expectedEmptyKm, 0.10);
         AdaptiveScoreBreakdown breakdown = AdaptiveScoreBreakdown.of(
                 RegimeKey.CLEAR_NORMAL,
                 finalScore + 0.03,
@@ -91,5 +145,22 @@ class CompactMatcherTest {
                 Map.of("on_time_probability", 0.31, "last_drop_landing", 0.12),
                 Map.of("lambda_empty_after", 0.03));
         return new CompactCandidateEvaluation(plan, features, breakdown, 0.75);
+    }
+
+    private Order order(String id,
+                        double pickupLat,
+                        double pickupLng,
+                        double dropLat,
+                        double dropLng) {
+        return new Order(
+                id,
+                "customer-" + id,
+                "R1",
+                new GeoPoint(pickupLat, pickupLng),
+                new GeoPoint(dropLat, dropLng),
+                "R2",
+                42000,
+                45,
+                Instant.parse("2026-04-11T05:00:00Z"));
     }
 }

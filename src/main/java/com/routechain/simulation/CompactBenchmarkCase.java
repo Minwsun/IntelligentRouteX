@@ -11,6 +11,10 @@ public record CompactBenchmarkCase(
         java.util.List<String> compactTopExplanations,
         java.util.Map<String, Integer> compactPlanTypeCounts,
         java.util.Map<String, Integer> routeSourceCounts,
+        int batchEligibleContexts,
+        int batchChosenWhenEligibleContexts,
+        int singleChosenWhenBatchEligibleContexts,
+        java.util.Map<String, Integer> batchRejectionReasons,
         double bundleSuccessRate,
         double avgObservedBundleSize,
         double bundleThreePlusRate) {

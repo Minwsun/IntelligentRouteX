@@ -76,6 +76,27 @@ class CompactMultiOrderDispatchIntegrationTest {
                         && evaluation.plan().getBundleSize() == 3));
     }
 
+    @Test
+    void shouldPreferBatchTwoWhenSingleAndBatchAreBothFeasible() {
+        CompactDispatchCore core = new CompactDispatchCore();
+
+        CompactDispatchDecision decision = core.dispatch(
+                List.of(
+                        order("ORD-P1", 10.7767, 106.7010, 10.7820, 106.7070),
+                        order("ORD-P2", 10.7768, 106.7011, 10.7821, 106.7071)
+                ),
+                List.of(driver("DRV-P1", 10.7765, 106.7009)),
+                List.of(),
+                12,
+                0.18,
+                WeatherProfile.CLEAR,
+                Instant.parse("2026-04-12T04:15:00Z"));
+
+        assertEquals(CompactPlanType.BATCH_2_COMPACT, decision.selectedPlanEvidence().getFirst().planType());
+        assertTrue(decision.selectionAudits().stream()
+                .anyMatch(audit -> audit.batchEligible() && audit.batchChosen()));
+    }
+
     private List<CompactCandidateEvaluation> viableCandidates(List<Order> orders, Driver driver, Instant decisionTime) {
         CompactCandidateGenerator generator = new CompactCandidateGenerator();
         CompactConstraintGate gate = new CompactConstraintGate();

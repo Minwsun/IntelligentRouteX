@@ -19,6 +19,7 @@ public record CompactVerdictSummary(
         double deadheadImprovementPctVsBaseline,
         double postDropHitDeltaVsBaseline,
         double emptyKmImprovementPctVsBaseline,
+        double batchChosenWhenEligibleRate,
         List<String> notes,
         CompactBenchmarkSummary benchmarkSummary) {
 }

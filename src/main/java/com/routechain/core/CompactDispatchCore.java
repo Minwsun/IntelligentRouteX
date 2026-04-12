@@ -17,10 +17,10 @@ import java.util.stream.Collectors;
 public class CompactDispatchCore {
     private final CompactPolicyConfig policyConfig;
     private final CompactCandidateGenerator candidateGenerator;
-    private final CompactConstraintGate constraintGate = new CompactConstraintGate();
+    private final CompactConstraintGate constraintGate;
     private final CompactUtilityScorer utilityScorer = new CompactUtilityScorer();
     private final AdaptiveWeightEngine adaptiveWeightEngine;
-    private final CompactMatcher matcher = new CompactMatcher();
+    private final CompactMatcher matcher;
     private final DecisionExplainer explainer = new DecisionExplainer();
 
     public CompactDispatchCore() {
@@ -30,7 +30,9 @@ public class CompactDispatchCore {
     public CompactDispatchCore(CompactPolicyConfig policyConfig) {
         this.policyConfig = policyConfig == null ? CompactPolicyConfig.defaults() : policyConfig;
         this.candidateGenerator = new CompactCandidateGenerator(this.policyConfig);
+        this.constraintGate = new CompactConstraintGate();
         this.adaptiveWeightEngine = new AdaptiveWeightEngine(this.policyConfig);
+        this.matcher = new CompactMatcher(this.policyConfig);
     }
 
     public CompactDispatchDecision dispatch(List<Order> openOrders,
@@ -67,6 +69,7 @@ public class CompactDispatchCore {
 
         List<CompactCandidateEvaluation> selected = matcher.match(viable);
         Map<String, List<CompactCandidateEvaluation>> viableByDriver = indexViableByDriver(viable);
+        List<CompactSelectionAudit> selectionAudits = buildSelectionAudits(viableByDriver, selected);
         List<CompactDecisionExplanation> explanations = new ArrayList<>();
         List<CompactSelectedPlanEvidence> selectedEvidence = new ArrayList<>();
         List<DispatchPlan> selectedPlans = new ArrayList<>();
@@ -100,6 +103,7 @@ public class CompactDispatchCore {
                 List.copyOf(selectedPlans),
                 List.copyOf(explanations),
                 List.copyOf(selectedEvidence),
+                List.copyOf(selectionAudits),
                 snapshotBefore,
                 latencyMs);
     }
@@ -122,5 +126,60 @@ public class CompactDispatchCore {
                 Comparator.comparingDouble((CompactCandidateEvaluation evaluation) ->
                         evaluation.plan().getTotalScore()).reversed()));
         return byDriver;
+    }
+
+    private List<CompactSelectionAudit> buildSelectionAudits(Map<String, List<CompactCandidateEvaluation>> viableByDriver,
+                                                             List<CompactCandidateEvaluation> selected) {
+        Map<String, CompactCandidateEvaluation> selectedByDriver = new LinkedHashMap<>();
+        for (CompactCandidateEvaluation evaluation : selected) {
+            selectedByDriver.put(evaluation.plan().getDriver().getId(), evaluation);
+        }
+        List<CompactSelectionAudit> audits = new ArrayList<>();
+        for (Map.Entry<String, List<CompactCandidateEvaluation>> entry : viableByDriver.entrySet()) {
+            String driverId = entry.getKey();
+            List<CompactCandidateEvaluation> candidates = entry.getValue();
+            CompactCandidateEvaluation chosen = selectedByDriver.get(driverId);
+            CompactCandidateEvaluation bestBatch = candidates.stream()
+                    .filter(candidate -> isBatchLike(candidate.plan().getCompactPlanType()))
+                    .findFirst()
+                    .orElse(null);
+            boolean batchEligible = bestBatch != null;
+            boolean batchChosen = chosen != null && isBatchLike(chosen.plan().getCompactPlanType());
+            audits.add(new CompactSelectionAudit(
+                    driverId,
+                    batchEligible,
+                    batchChosen,
+                    chosen == null ? null : chosen.plan().getCompactPlanType(),
+                    chosen == null ? "" : chosen.plan().getTraceId(),
+                    selectionReason(chosen, bestBatch)));
+        }
+        return audits;
+    }
+
+    private String selectionReason(CompactCandidateEvaluation chosen,
+                                   CompactCandidateEvaluation bestBatch) {
+        if (chosen == null) {
+            return bestBatch == null ? "no feasible winner" : "batch lost due to cross-driver conflict";
+        }
+        if (bestBatch == null) {
+            return "no batch candidate passed gate";
+        }
+        if (isBatchLike(chosen.plan().getCompactPlanType())) {
+            return "batch wins on empty-after and continuity";
+        }
+        double scoreGap = chosen.plan().getTotalScore() - bestBatch.plan().getTotalScore();
+        if (scoreGap > policyConfig.batchDominanceTolerance()) {
+            return "single retained due to utility gap";
+        }
+        if (bestBatch.plan().getExpectedPostCompletionEmptyKm() >= chosen.plan().getExpectedPostCompletionEmptyKm()
+                && bestBatch.plan().getPostDropDemandProbability() <= chosen.plan().getPostDropDemandProbability()) {
+            return "single retained due to empty-run weakness";
+        }
+        return "single retained due to SLA risk";
+    }
+
+    private boolean isBatchLike(CompactPlanType planType) {
+        return planType == CompactPlanType.BATCH_2_COMPACT
+                || planType == CompactPlanType.WAVE_3_CLEAN;
     }
 }
