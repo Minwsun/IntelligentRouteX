@@ -33,6 +33,11 @@ public final class BenchmarkCertificationSupport {
 
     private BenchmarkCertificationSupport() {}
 
+    @FunctionalInterface
+    interface GitCommandExecutor {
+        GitCommandResult execute(List<String> command) throws Exception;
+    }
+
     public static boolean matchesScenario(String value, List<String> matchers) {
         if (value == null || value.isBlank() || matchers == null || matchers.isEmpty()) {
             return false;
@@ -105,20 +110,32 @@ public final class BenchmarkCertificationSupport {
     }
 
     public static BenchmarkAuthoritySnapshot collectAuthoritySnapshot(String laneName) {
-        List<String> dirtyTrackedPaths = resolveDirtyTrackedPaths();
+        return collectAuthoritySnapshot(laneName, BenchmarkCertificationSupport::runGitCommand);
+    }
+
+    static BenchmarkAuthoritySnapshot collectAuthoritySnapshot(String laneName, GitCommandExecutor executor) {
+        DirtyTrackedPathsProbe dirtyProbe = resolveDirtyTrackedPaths(executor);
+        List<String> dirtyTrackedPaths = dirtyProbe.dirtyTrackedPaths();
         List<String> dirtyAuthorityPaths = dirtyTrackedPaths.stream()
                 .filter(BenchmarkCertificationSupport::isAuthoritySensitivePath)
                 .toList();
         List<String> notes = new ArrayList<>();
-        if (dirtyTrackedPaths.isEmpty()) {
+        if (dirtyProbe.detectionFailed()) {
+            notes.add("benchmark authority detection failed: git status could not be evaluated");
+        } else if (dirtyTrackedPaths.isEmpty()) {
             notes.add("tracked worktree is clean for benchmark-sensitive files");
         } else {
             notes.add("tracked worktree has " + dirtyTrackedPaths.size() + " dirty path(s)");
         }
-        if (dirtyAuthorityPaths.isEmpty()) {
+        if (dirtyProbe.detectionFailed()) {
+            notes.add("benchmark authority state is unknown: treat this lane as triage-only until git status works");
+        } else if (dirtyAuthorityPaths.isEmpty()) {
             notes.add("benchmark authority paths are clean");
         } else {
             notes.add("benchmark authority paths are dirty: summary/verdict should be read as workspace-sensitive");
+        }
+        if (dirtyProbe.failureDetail() != null && !dirtyProbe.failureDetail().isBlank()) {
+            notes.add("authority detection detail: " + dirtyProbe.failureDetail());
         }
         return new BenchmarkAuthoritySnapshot(
                 BenchmarkSchema.VERSION,
@@ -127,6 +144,7 @@ public final class BenchmarkCertificationSupport {
                 resolveGitRevision(),
                 !dirtyTrackedPaths.isEmpty(),
                 !dirtyAuthorityPaths.isEmpty(),
+                dirtyProbe.detectionFailed(),
                 dirtyTrackedPaths,
                 dirtyAuthorityPaths,
                 notes
@@ -148,17 +166,13 @@ public final class BenchmarkCertificationSupport {
         return sum / values.size();
     }
 
-    private static List<String> resolveDirtyTrackedPaths() {
+    private static DirtyTrackedPathsProbe resolveDirtyTrackedPaths(GitCommandExecutor executor) {
         try {
-            Process process = new ProcessBuilder("git", "status", "--short", "--untracked-files=no")
-                    .redirectErrorStream(true)
-                    .start();
-            byte[] output = process.getInputStream().readAllBytes();
-            int code = process.waitFor();
-            if (code != 0) {
-                return List.of();
+            GitCommandResult result = executor.execute(List.of("git", "status", "--short", "--untracked-files=no"));
+            if (!result.success()) {
+                return new DirtyTrackedPathsProbe(List.of(), true, result.detail());
             }
-            String value = new String(output, StandardCharsets.UTF_8);
+            String value = result.output();
             List<String> dirtyPaths = new ArrayList<>();
             for (String line : value.split("\\R")) {
                 if (line == null || line.isBlank() || line.length() < 4) {
@@ -166,9 +180,9 @@ public final class BenchmarkCertificationSupport {
                 }
                 dirtyPaths.add(line.substring(3).trim().replace('\\', '/'));
             }
-            return dirtyPaths;
+            return new DirtyTrackedPathsProbe(dirtyPaths, false, "");
         } catch (Exception e) {
-            return List.of();
+            return new DirtyTrackedPathsProbe(List.of(), true, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 
@@ -180,5 +194,41 @@ public final class BenchmarkCertificationSupport {
             }
         }
         return false;
+    }
+
+    private static GitCommandResult runGitCommand(List<String> command) throws Exception {
+        Process process = new ProcessBuilder(command)
+                .redirectErrorStream(true)
+                .start();
+        byte[] output = process.getInputStream().readAllBytes();
+        int code = process.waitFor();
+        return new GitCommandResult(code, new String(output, StandardCharsets.UTF_8).trim());
+    }
+
+    record GitCommandResult(int exitCode, String output) {
+        boolean success() {
+            return exitCode == 0;
+        }
+
+        String detail() {
+            if (success()) {
+                return "";
+            }
+            if (output == null || output.isBlank()) {
+                return "git command exited with code " + exitCode;
+            }
+            return "git command exited with code " + exitCode + ": " + output;
+        }
+    }
+
+    record DirtyTrackedPathsProbe(
+            List<String> dirtyTrackedPaths,
+            boolean detectionFailed,
+            String failureDetail
+    ) {
+        DirtyTrackedPathsProbe {
+            dirtyTrackedPaths = dirtyTrackedPaths == null ? List.of() : List.copyOf(dirtyTrackedPaths);
+            failureDetail = failureDetail == null ? "" : failureDetail;
+        }
     }
 }

@@ -520,6 +520,7 @@ class BenchmarkArtifactWriterTest {
                 "abc123",
                 true,
                 true,
+                false,
                 List.of("build.gradle.kts", "src/main/java/com/routechain/ai/OmegaDispatchAgent.java"),
                 List.of("src/main/java/com/routechain/ai/OmegaDispatchAgent.java"),
                 List.of("benchmark authority paths are dirty")
@@ -531,7 +532,8 @@ class BenchmarkArtifactWriterTest {
         assertTrue(Files.exists(root.resolve("certification").resolve("benchmark-authority-smoke.md")));
         String csv = Files.readString(root.resolve("benchmark_authority.csv"));
         String markdown = Files.readString(root.resolve("certification").resolve("benchmark-authority-smoke.md"));
-        assertTrue(csv.contains("authorityDirty"));
+        assertTrue(csv.contains("authorityDetectionFailed"));
+        assertTrue(markdown.contains("Checkpoint status"));
         assertTrue(markdown.contains("Dirty Authority Paths"));
         assertTrue(markdown.contains("OmegaDispatchAgent.java"));
     }

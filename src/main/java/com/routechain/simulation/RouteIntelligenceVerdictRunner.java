@@ -109,7 +109,9 @@ public final class RouteIntelligenceVerdictRunner {
         if (isLegacyUnderperforming(repoSummary)) {
             blockers.add("Omega still underperforms Legacy on at least one major reference delta");
         }
-        if (authoritySnapshot.authorityDirty()) {
+        if (authoritySnapshot.authorityDetectionFailed()) {
+            blockers.add("benchmark authority detection failed: git status could not be evaluated");
+        } else if (authoritySnapshot.authorityDirty()) {
             blockers.add("benchmark authority is dirty: tracked changes exist in benchmark-sensitive paths");
         }
         if (requiresDeepEvidence(laneName) && (publicResearchSummary == null || !publicResearchSummary.overallPass())) {
@@ -132,6 +134,7 @@ public final class RouteIntelligenceVerdictRunner {
             notes.add("batch intelligence overallPass=" + batchSummary.overallPass());
         }
         notes.add("benchmark authority dirty=" + authoritySnapshot.authorityDirty()
+                + " detectionFailed=" + authoritySnapshot.authorityDetectionFailed()
                 + " trackedDirty=" + authoritySnapshot.workspaceDirty());
         notes.add("required components=" + detectedRequiredComponentCount + "/" + requiredComponentCount);
         notes.add("material ablations=" + materialAblationCount + "/" + REQUIRED_ABLATION_POLICIES.size());

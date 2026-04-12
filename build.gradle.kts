@@ -261,7 +261,7 @@ routeAiRegressionSmoke.configure {
 
 val routeAiCertificationSmokeSummary by tasks.registering(JavaExec::class) {
     group = "verification"
-    description = "Summarizes and enforces the absolute smoke route gate with Legacy as reference."
+    description = "Canonical smoke truth summary for the absolute route gate, with benchmark authority metadata."
     mainClass.set("com.routechain.simulation.RouteAiCertificationRunner")
     classpath = sourceSets["main"].runtimeClasspath
     args("smoke")
@@ -315,7 +315,7 @@ val hybridBenchmarkTrackA by tasks.registering(JavaExec::class) {
 
 val repoIntelligenceSmokeSummary by tasks.registering(JavaExec::class) {
     group = "verification"
-    description = "Aggregates the smoke lane into one repo intelligence verdict."
+    description = "Canonical smoke truth summary for the repo intelligence lane."
     mainClass.set("com.routechain.simulation.RepoIntelligenceCertificationRunner")
     classpath = sourceSets["main"].runtimeClasspath
     args("smoke")
@@ -323,7 +323,7 @@ val repoIntelligenceSmokeSummary by tasks.registering(JavaExec::class) {
 
 val repoIntelligenceCertificationSummary by tasks.registering(JavaExec::class) {
     group = "verification"
-    description = "Aggregates the certification lane into one repo intelligence verdict."
+    description = "Canonical certification truth summary for the repo intelligence lane."
     mainClass.set("com.routechain.simulation.RepoIntelligenceCertificationRunner")
     classpath = sourceSets["main"].runtimeClasspath
     args("certification")
@@ -331,7 +331,7 @@ val repoIntelligenceCertificationSummary by tasks.registering(JavaExec::class) {
 
 val repoIntelligenceNightlySummary by tasks.registering(JavaExec::class) {
     group = "verification"
-    description = "Aggregates the nightly lane into one repo intelligence verdict."
+    description = "Canonical nightly truth summary for the repo intelligence lane."
     mainClass.set("com.routechain.simulation.RepoIntelligenceCertificationRunner")
     classpath = sourceSets["main"].runtimeClasspath
     args("nightly")
@@ -355,7 +355,7 @@ val aiInfluenceAblationCertification by tasks.registering(JavaExec::class) {
 
 val routeIntelligenceVerdictSmokeSummary by tasks.registering(JavaExec::class) {
     group = "verification"
-    description = "Writes a smoke-lane verdict for AI presence and route intelligence."
+    description = "Canonical smoke verdict summary for AI presence and route intelligence."
     mainClass.set("com.routechain.simulation.RouteIntelligenceVerdictRunner")
     classpath = sourceSets["main"].runtimeClasspath
     args("smoke")
@@ -371,8 +371,24 @@ val routeIntelligenceDemoProofSummary by tasks.registering(JavaExec::class) {
 
 val routeIntelligenceVerdictCertificationSummary by tasks.registering(JavaExec::class) {
     group = "verification"
-    description = "Writes a certification-lane verdict for AI presence and route intelligence."
+    description = "Canonical certification verdict summary for AI presence and route intelligence."
     mainClass.set("com.routechain.simulation.RouteIntelligenceVerdictRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("certification")
+}
+
+val benchmarkCheckpointSmokeSummary by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Writes the smoke checkpoint pack and classifies it as clean-canonical or triage-only."
+    mainClass.set("com.routechain.simulation.BenchmarkCheckpointRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("smoke")
+}
+
+val benchmarkCheckpointCertificationSummary by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Writes the certification checkpoint pack and classifies it as clean-canonical or triage-only."
+    mainClass.set("com.routechain.simulation.BenchmarkCheckpointRunner")
     classpath = sourceSets["main"].runtimeClasspath
     args("certification")
 }
@@ -548,6 +564,14 @@ tasks.register("routeIntelligenceVerdictSmoke") {
     dependsOn(routeIntelligenceVerdictSmokeSummary)
 }
 
+tasks.register("benchmarkCleanCheckpointSmoke") {
+    group = "verification"
+    description = "Canonical smoke checkpoint workflow: materialize the truth lane, then emit a clean-vs-triage checkpoint pack."
+    dependsOn(cleanBenchmarkArtifacts)
+    dependsOn("routeIntelligenceVerdictSmoke")
+    finalizedBy(benchmarkCheckpointSmokeSummary)
+}
+
 tasks.register("routeIntelligenceVerdictCertification") {
     group = "verification"
     description = "Runs certification evidence and emits a verdict on real AI influence and route intelligence."
@@ -563,9 +587,17 @@ tasks.register("routeIntelligenceVerdictCertification") {
     dependsOn(routeIntelligenceVerdictCertificationSummary)
 }
 
+tasks.register("benchmarkCleanCheckpointCertification") {
+    group = "verification"
+    description = "Canonical certification checkpoint workflow: materialize the truth lane, then emit a clean-vs-triage checkpoint pack."
+    dependsOn(cleanBenchmarkArtifacts)
+    dependsOn("routeIntelligenceVerdictCertification")
+    finalizedBy(benchmarkCheckpointCertificationSummary)
+}
+
 tasks.register("phase31RouteQualityTuning") {
     group = "verification"
-    description = "Runs the narrow Phase 3.1 Omega-first tuning loop with expanded realistic HCMC support."
+    description = "Triage-only Phase 3.1 Omega-first tuning loop with expanded realistic HCMC support."
     dependsOn(cleanBenchmarkArtifacts)
     dependsOn("repoIntelligenceSmoke")
     dependsOn(scenarioBatchCertification)

@@ -81,7 +81,9 @@ public final class RepoIntelligenceCertificationRunner {
                 .map(BenchmarkCertificationScenarioMatrix.ScenarioBucket::scenarioGroup)
                 .collect(Collectors.joining("|")));
         notes.add("route-quality blocker summary is triage-only and uses mean compare deltas; low-support buckets can be noisy");
-        if (authoritySnapshot.authorityDirty()) {
+        if (authoritySnapshot.authorityDetectionFailed()) {
+            notes.add("benchmark authority detection failed: git status could not be evaluated; read this lane as triage-only");
+        } else if (authoritySnapshot.authorityDirty()) {
             notes.add("benchmark authority dirty: tracked changes exist in benchmark-sensitive paths");
         } else if (authoritySnapshot.workspaceDirty()) {
             notes.add("tracked workspace is dirty outside benchmark-sensitive paths");

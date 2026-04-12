@@ -13,6 +13,7 @@ public record BenchmarkAuthoritySnapshot(
         String gitRevision,
         boolean workspaceDirty,
         boolean authorityDirty,
+        boolean authorityDetectionFailed,
         List<String> dirtyTrackedPaths,
         List<String> dirtyAuthorityPaths,
         List<String> notes
@@ -25,5 +26,13 @@ public record BenchmarkAuthoritySnapshot(
         dirtyTrackedPaths = dirtyTrackedPaths == null ? List.of() : List.copyOf(dirtyTrackedPaths);
         dirtyAuthorityPaths = dirtyAuthorityPaths == null ? List.of() : List.copyOf(dirtyAuthorityPaths);
         notes = notes == null ? List.of() : List.copyOf(notes);
+    }
+
+    public boolean triageOnly() {
+        return authorityDirty || authorityDetectionFailed;
+    }
+
+    public boolean cleanCheckpointEligible() {
+        return !authorityDirty && !authorityDetectionFailed;
     }
 }

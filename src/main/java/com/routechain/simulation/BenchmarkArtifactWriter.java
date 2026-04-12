@@ -47,6 +47,7 @@ public final class BenchmarkArtifactWriter {
     private static final Path REPO_CERTIFICATION_CSV = ROOT.resolve("repo_intelligence_certification.csv");
     private static final Path ROUTE_INTELLIGENCE_VERDICT_CSV = ROOT.resolve("route_intelligence_verdict.csv");
     private static final Path BENCHMARK_AUTHORITY_CSV = ROOT.resolve("benchmark_authority.csv");
+    private static final Path BENCHMARK_CHECKPOINT_CSV = ROOT.resolve("benchmark_checkpoint.csv");
     private static final Path PUBLIC_RESEARCH_CSV = ROOT.resolve("public_research_benchmark.csv");
     private static final Path BATCH_INTELLIGENCE_CSV = ROOT.resolve("batch_intelligence_certification.csv");
     private static final Path CITY_TWIN_CSV = CONTROL_ROOM_DIR.resolve("city_twin_cells.csv");
@@ -766,20 +767,68 @@ public final class BenchmarkArtifactWriter {
             );
             appendCsv(
                     BENCHMARK_AUTHORITY_CSV,
-                    "laneName,generatedAt,gitRevision,workspaceDirty,authorityDirty,dirtyTrackedPathCount,dirtyAuthorityPathCount",
+                    "laneName,generatedAt,gitRevision,workspaceDirty,authorityDirty,authorityDetectionFailed,dirtyTrackedPathCount,dirtyAuthorityPathCount",
                     String.format(
-                            "%s,%s,%s,%s,%s,%d,%d",
+                            "%s,%s,%s,%s,%s,%s,%d,%d",
                             safe(snapshot.laneName()),
                             safe(String.valueOf(snapshot.generatedAt())),
                             safe(snapshot.gitRevision()),
                             Boolean.toString(snapshot.workspaceDirty()),
                             Boolean.toString(snapshot.authorityDirty()),
+                            Boolean.toString(snapshot.authorityDetectionFailed()),
                             snapshot.dirtyTrackedPaths().size(),
                             snapshot.dirtyAuthorityPaths().size()
                     )
             );
         } catch (IOException e) {
             throw new IllegalStateException("Unable to write benchmark authority snapshot", e);
+        }
+    }
+
+    public static void writeBenchmarkCheckpointSummary(BenchmarkCheckpointSummary summary) {
+        if (summary == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(CERTIFICATION_DIR);
+            Path jsonPath = CERTIFICATION_DIR.resolve("benchmark-checkpoint-" + safe(summary.laneName()) + ".json");
+            Path markdownPath = CERTIFICATION_DIR.resolve("benchmark-checkpoint-" + safe(summary.laneName()) + ".md");
+            Files.writeString(
+                    jsonPath,
+                    GSON.toJson(summary),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            Files.writeString(
+                    markdownPath,
+                    renderBenchmarkCheckpointMarkdown(summary),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            appendCsv(
+                    BENCHMARK_CHECKPOINT_CSV,
+                    "laneName,generatedAt,gitRevision,checkpointStatus,cleanCheckpoint,triageOnly,routeAiSummaryPresent,repoSummaryPresent,verdictSummaryPresent,blockerSummaryPresent,routeAiVerdict,repoVerdict,routingVerdict",
+                    String.format(
+                            "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s",
+                            safe(summary.laneName()),
+                            safe(String.valueOf(summary.generatedAt())),
+                            safe(summary.gitRevision()),
+                            safe(summary.checkpointStatus()),
+                            Boolean.toString(summary.cleanCheckpoint()),
+                            Boolean.toString(summary.triageOnly()),
+                            Boolean.toString(summary.routeAiSummaryPresent()),
+                            Boolean.toString(summary.repoSummaryPresent()),
+                            Boolean.toString(summary.verdictSummaryPresent()),
+                            Boolean.toString(summary.blockerSummaryPresent()),
+                            safe(summary.routeAiVerdict()),
+                            safe(summary.repoVerdict()),
+                            safe(summary.routingVerdict())
+                    )
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to write benchmark checkpoint summary", e);
         }
     }
 
@@ -1344,6 +1393,14 @@ public final class BenchmarkArtifactWriter {
         builder.append("- Git SHA: ").append(snapshot.gitRevision()).append(System.lineSeparator());
         builder.append("- Workspace dirty: ").append(snapshot.workspaceDirty()).append(System.lineSeparator());
         builder.append("- Authority dirty: ").append(snapshot.authorityDirty()).append(System.lineSeparator());
+        builder.append("- Authority detection failed: ").append(snapshot.authorityDetectionFailed()).append(System.lineSeparator());
+        builder.append("- Checkpoint status: ")
+                .append(snapshot.authorityDetectionFailed()
+                        ? "AUTHORITY_CHECK_FAILED"
+                        : snapshot.authorityDirty()
+                        ? "DIRTY_TRIAGE_ONLY"
+                        : "CLEAN_CANONICAL_CHECKPOINT")
+                .append(System.lineSeparator());
         builder.append("- Dirty tracked paths: ").append(snapshot.dirtyTrackedPaths().size()).append(System.lineSeparator());
         builder.append("- Dirty authority paths: ").append(snapshot.dirtyAuthorityPaths().size()).append(System.lineSeparator());
         if (!snapshot.dirtyAuthorityPaths().isEmpty()) {
@@ -1361,6 +1418,31 @@ public final class BenchmarkArtifactWriter {
         if (!snapshot.notes().isEmpty()) {
             builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
             for (String note : snapshot.notes()) {
+                builder.append("- ").append(note).append(System.lineSeparator());
+            }
+        }
+        return builder.toString();
+    }
+
+    private static String renderBenchmarkCheckpointMarkdown(BenchmarkCheckpointSummary summary) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# Benchmark Checkpoint").append(System.lineSeparator()).append(System.lineSeparator());
+        builder.append("- Lane: ").append(summary.laneName()).append(System.lineSeparator());
+        builder.append("- Generated: ").append(summary.generatedAt()).append(System.lineSeparator());
+        builder.append("- Git SHA: ").append(summary.gitRevision()).append(System.lineSeparator());
+        builder.append("- Checkpoint status: ").append(summary.checkpointStatus()).append(System.lineSeparator());
+        builder.append("- Clean checkpoint: ").append(summary.cleanCheckpoint()).append(System.lineSeparator());
+        builder.append("- Triage only: ").append(summary.triageOnly()).append(System.lineSeparator());
+        builder.append("- Route AI summary present: ").append(summary.routeAiSummaryPresent()).append(System.lineSeparator());
+        builder.append("- Repo summary present: ").append(summary.repoSummaryPresent()).append(System.lineSeparator());
+        builder.append("- Verdict summary present: ").append(summary.verdictSummaryPresent()).append(System.lineSeparator());
+        builder.append("- Blocker summary present: ").append(summary.blockerSummaryPresent()).append(System.lineSeparator());
+        builder.append("- Route AI verdict: ").append(summary.routeAiVerdict()).append(System.lineSeparator());
+        builder.append("- Repo verdict: ").append(summary.repoVerdict()).append(System.lineSeparator());
+        builder.append("- Routing verdict: ").append(summary.routingVerdict()).append(System.lineSeparator());
+        if (!summary.notes().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
+            for (String note : summary.notes()) {
                 builder.append("- ").append(note).append(System.lineSeparator());
             }
         }

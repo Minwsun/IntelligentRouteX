@@ -108,7 +108,9 @@ public final class RouteAiCertificationRunner {
                 + " seeds=" + aggregate.observedSeeds().stream()
                 .map(String::valueOf)
                 .collect(Collectors.joining("|")));
-        if (authoritySnapshot.authorityDirty()) {
+        if (authoritySnapshot.authorityDetectionFailed()) {
+            notes.add("benchmark authority detection failed: git status could not be evaluated; treat this as triage-only");
+        } else if (authoritySnapshot.authorityDirty()) {
             notes.add("benchmark authority dirty: tracked changes exist in benchmark-sensitive paths");
         } else if (authoritySnapshot.workspaceDirty()) {
             notes.add("tracked workspace is dirty outside benchmark-sensitive paths");

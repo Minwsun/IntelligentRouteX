@@ -42,6 +42,7 @@ The artifact records:
 
 - whether the tracked workspace is dirty
 - whether benchmark-sensitive paths are dirty
+- whether authority detection failed and the lane must be read as triage-only
 - which tracked paths are dirty
 - which of those paths are benchmark-sensitive
 
@@ -54,12 +55,39 @@ The artifact records:
 - `authorityDirty = true`
   - benchmark is still useful for triage
   - do not treat the lane as a clean canonical checkpoint without first reconciling the dirty benchmark-sensitive files
+- `authorityDetectionFailed = true`
+  - benchmark authority could not be evaluated
+  - do not read the lane as clean, even if dirty path lists are empty
+  - treat the pack as triage-only until `git status --short --untracked-files=no` is working again
+
+## Checkpoint pack
+
+Use these tasks when you want one explicit checkpoint pack instead of reading loose summaries:
+
+- `benchmarkCleanCheckpointSmoke`
+- `benchmarkCleanCheckpointCertification`
+
+Each task emits:
+
+- `build/routechain-apex/benchmarks/certification/benchmark-checkpoint-<lane>.json`
+- `build/routechain-apex/benchmarks/certification/benchmark-checkpoint-<lane>.md`
+
+Checkpoint status is interpreted as:
+
+- `CLEAN_CANONICAL_CHECKPOINT`
+  - authority detection succeeded
+  - benchmark-sensitive tracked files are clean
+- `DIRTY_TRIAGE_ONLY`
+  - benchmark-sensitive tracked files are dirty
+- `AUTHORITY_CHECK_FAILED`
+  - authority detection itself failed, so the checkpoint must not be treated as clean
 
 ## Task rules
 
 - Summary tasks should prefer `dependsOn` for required evidence materialization.
 - `mustRunAfter` is ordering only. It is not enough when a direct summary task run would otherwise read missing or stale artifacts.
 - If a lane intentionally reads triage artifacts, the artifact must say so explicitly.
+- Tuning tasks must say they are triage-only. Canonical checkpoint tasks must say they are canonical.
 
 ## Truthfulness rules
 
