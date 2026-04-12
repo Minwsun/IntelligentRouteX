@@ -1,6 +1,8 @@
 package com.routechain.simulation;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -8,6 +10,12 @@ import java.util.Locale;
  * Shared helpers for certification runners and summaries.
  */
 public final class BenchmarkCertificationSupport {
+    private static final List<String> BENCHMARK_AUTHORITY_PREFIXES = List.of(
+            "build.gradle.kts",
+            "src/main/java/com/routechain/simulation/",
+            "src/main/java/com/routechain/ai/",
+            "src/main/java/com/routechain/infra/PlatformRuntimeBootstrap.java"
+    );
     private static final List<String> NON_CURRENT_OMEGA_MARKERS = List.of(
             "legacy",
             "omega-no-",
@@ -96,6 +104,35 @@ public final class BenchmarkCertificationSupport {
         }
     }
 
+    public static BenchmarkAuthoritySnapshot collectAuthoritySnapshot(String laneName) {
+        List<String> dirtyTrackedPaths = resolveDirtyTrackedPaths();
+        List<String> dirtyAuthorityPaths = dirtyTrackedPaths.stream()
+                .filter(BenchmarkCertificationSupport::isAuthoritySensitivePath)
+                .toList();
+        List<String> notes = new ArrayList<>();
+        if (dirtyTrackedPaths.isEmpty()) {
+            notes.add("tracked worktree is clean for benchmark-sensitive files");
+        } else {
+            notes.add("tracked worktree has " + dirtyTrackedPaths.size() + " dirty path(s)");
+        }
+        if (dirtyAuthorityPaths.isEmpty()) {
+            notes.add("benchmark authority paths are clean");
+        } else {
+            notes.add("benchmark authority paths are dirty: summary/verdict should be read as workspace-sensitive");
+        }
+        return new BenchmarkAuthoritySnapshot(
+                BenchmarkSchema.VERSION,
+                laneName,
+                Instant.now(),
+                resolveGitRevision(),
+                !dirtyTrackedPaths.isEmpty(),
+                !dirtyAuthorityPaths.isEmpty(),
+                dirtyTrackedPaths,
+                dirtyAuthorityPaths,
+                notes
+        );
+    }
+
     public static String normalize(String value) {
         return value == null ? "" : value.toLowerCase(Locale.ROOT);
     }
@@ -109,5 +146,39 @@ public final class BenchmarkCertificationSupport {
             sum += value;
         }
         return sum / values.size();
+    }
+
+    private static List<String> resolveDirtyTrackedPaths() {
+        try {
+            Process process = new ProcessBuilder("git", "status", "--short", "--untracked-files=no")
+                    .redirectErrorStream(true)
+                    .start();
+            byte[] output = process.getInputStream().readAllBytes();
+            int code = process.waitFor();
+            if (code != 0) {
+                return List.of();
+            }
+            String value = new String(output, StandardCharsets.UTF_8);
+            List<String> dirtyPaths = new ArrayList<>();
+            for (String line : value.split("\\R")) {
+                if (line == null || line.isBlank() || line.length() < 4) {
+                    continue;
+                }
+                dirtyPaths.add(line.substring(3).trim().replace('\\', '/'));
+            }
+            return dirtyPaths;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    private static boolean isAuthoritySensitivePath(String path) {
+        String normalized = path == null ? "" : path.replace('\\', '/');
+        for (String prefix : BENCHMARK_AUTHORITY_PREFIXES) {
+            if (normalized.equals(prefix) || normalized.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

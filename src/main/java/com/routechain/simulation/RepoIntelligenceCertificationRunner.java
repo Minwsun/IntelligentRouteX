@@ -46,6 +46,7 @@ public final class RepoIntelligenceCertificationRunner {
         MemoryGcSummary soakSummary = readOptionalJson(MEMORY_GC_JSON, MemoryGcSummary.class);
         List<RunReport> runs = readJsonDirectory(RUNS_DIR, RunReport.class);
         List<ReplayCompareResult> compares = readJsonDirectory(COMPARES_DIR, ReplayCompareResult.class);
+        BenchmarkAuthoritySnapshot authoritySnapshot = BenchmarkCertificationSupport.collectAuthoritySnapshot(laneName);
         List<ScenarioGroupCertificationResult> scenarioGroups = evaluateScenarioGroups(lane, baseline, runs);
         RouteQualityBlockerSummary blockerSummary = buildRouteQualityBlockerSummary(laneName, compares);
 
@@ -79,6 +80,12 @@ public final class RepoIntelligenceCertificationRunner {
                 + " groups=" + lane.scenarioBuckets().stream()
                 .map(BenchmarkCertificationScenarioMatrix.ScenarioBucket::scenarioGroup)
                 .collect(Collectors.joining("|")));
+        notes.add("route-quality blocker summary is triage-only and uses mean compare deltas; low-support buckets can be noisy");
+        if (authoritySnapshot.authorityDirty()) {
+            notes.add("benchmark authority dirty: tracked changes exist in benchmark-sensitive paths");
+        } else if (authoritySnapshot.workspaceDirty()) {
+            notes.add("tracked workspace is dirty outside benchmark-sensitive paths");
+        }
         if (legacyReference.warning()) {
             notes.add("legacy warning: consecutive underperformance count="
                     + legacyReference.consecutiveUnderperformCount());
@@ -109,6 +116,7 @@ public final class RepoIntelligenceCertificationRunner {
                 notes
         );
 
+        BenchmarkArtifactWriter.writeBenchmarkAuthoritySnapshot(authoritySnapshot);
         BenchmarkArtifactWriter.writeRouteQualityBlockerSummary(blockerSummary);
         BenchmarkArtifactWriter.writeRepoIntelligenceCertificationSummary(summary);
         System.out.println("[RepoIntelligence] lane=" + laneName
@@ -445,7 +453,8 @@ public final class RepoIntelligenceCertificationRunner {
                 buckets,
                 List.of(
                         "mini-matrix buckets use certification compares when present",
-                        "off-peak and heavy-rain-lunch checkpoints use realistic-hcmc compares"
+                        "off-peak and heavy-rain-lunch checkpoints use realistic-hcmc compares",
+                        "aggregation uses mean compare deltas and is intended for triage, not support-weighted gate decisions"
                 )
         );
     }
@@ -520,6 +529,7 @@ public final class RepoIntelligenceCertificationRunner {
         if (compares.size() < 2) {
             notes.add("insufficient support: fewer than 2 compare samples");
         }
+        notes.add("aggregation=mean_of_case_deltas support_sensitive=true");
         notes.add("gain=" + String.format("%.2f", gain)
                 + " completion=" + String.format("%+.2f", completion)
                 + " deadhead=" + String.format("%+.2f", deadhead)

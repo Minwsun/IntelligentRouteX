@@ -42,6 +42,7 @@ public final class RouteAiCertificationRunner {
         ReplayCompareResult compare = readLatestCompare(primaryBucket);
         CsvRow stageRow = readLatestRunStageRow();
         ScenarioAggregate aggregate = aggregate(primaryBucket, readRunReports());
+        BenchmarkAuthoritySnapshot authoritySnapshot = BenchmarkCertificationSupport.collectAuthoritySnapshot(laneName);
 
         boolean routeRegressionPass = true;
         boolean dispatchP95Pass = runtime.measurementValid()
@@ -107,6 +108,11 @@ public final class RouteAiCertificationRunner {
                 + " seeds=" + aggregate.observedSeeds().stream()
                 .map(String::valueOf)
                 .collect(Collectors.joining("|")));
+        if (authoritySnapshot.authorityDirty()) {
+            notes.add("benchmark authority dirty: tracked changes exist in benchmark-sensitive paths");
+        } else if (authoritySnapshot.workspaceDirty()) {
+            notes.add("tracked workspace is dirty outside benchmark-sensitive paths");
+        }
 
         RouteAiCertificationSummary summary = new RouteAiCertificationSummary(
                 BenchmarkSchema.VERSION,
@@ -136,6 +142,7 @@ public final class RouteAiCertificationRunner {
                 notes
         );
 
+        BenchmarkArtifactWriter.writeBenchmarkAuthoritySnapshot(authoritySnapshot);
         BenchmarkArtifactWriter.writeRouteAiCertificationSummary(summary);
         System.out.println("[RouteAiCertification] lane=" + laneName
                 + " verdict=" + (summary.overallPass() ? "PASS" : "FAIL")

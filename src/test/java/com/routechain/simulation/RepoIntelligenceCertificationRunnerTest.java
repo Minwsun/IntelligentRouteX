@@ -77,7 +77,11 @@ class RepoIntelligenceCertificationRunnerTest {
         assertTrue(markdownContent.contains("Repo Intelligence Certification"));
         assertTrue(markdownContent.contains("Correctness"));
         assertTrue(markdownContent.contains("Route Quality Blockers"));
+        assertTrue(markdownContent.contains("triage-only"));
         assertTrue(Files.exists(root.resolve("certification").resolve("route-quality-blockers-smoke.json")));
+        assertTrue(Files.exists(root.resolve("certification").resolve("benchmark-authority-smoke.json")));
+        String blockerMarkdown = Files.readString(root.resolve("certification").resolve("route-quality-blockers-smoke.md"));
+        assertTrue(blockerMarkdown.contains("support_sensitive=true"));
         assertTrue(Files.readString(root.resolve("repo_intelligence_certification.csv")).contains("repo-intelligence-smoke"));
     }
 

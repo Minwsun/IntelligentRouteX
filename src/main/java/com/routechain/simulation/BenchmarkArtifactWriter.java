@@ -46,6 +46,7 @@ public final class BenchmarkArtifactWriter {
     private static final Path CERTIFICATION_CSV = ROOT.resolve("route_ai_certification.csv");
     private static final Path REPO_CERTIFICATION_CSV = ROOT.resolve("repo_intelligence_certification.csv");
     private static final Path ROUTE_INTELLIGENCE_VERDICT_CSV = ROOT.resolve("route_intelligence_verdict.csv");
+    private static final Path BENCHMARK_AUTHORITY_CSV = ROOT.resolve("benchmark_authority.csv");
     private static final Path PUBLIC_RESEARCH_CSV = ROOT.resolve("public_research_benchmark.csv");
     private static final Path BATCH_INTELLIGENCE_CSV = ROOT.resolve("batch_intelligence_certification.csv");
     private static final Path CITY_TWIN_CSV = CONTROL_ROOM_DIR.resolve("city_twin_cells.csv");
@@ -741,6 +742,47 @@ public final class BenchmarkArtifactWriter {
         }
     }
 
+    public static void writeBenchmarkAuthoritySnapshot(BenchmarkAuthoritySnapshot snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(CERTIFICATION_DIR);
+            Path jsonPath = CERTIFICATION_DIR.resolve("benchmark-authority-" + safe(snapshot.laneName()) + ".json");
+            Path markdownPath = CERTIFICATION_DIR.resolve("benchmark-authority-" + safe(snapshot.laneName()) + ".md");
+            Files.writeString(
+                    jsonPath,
+                    GSON.toJson(snapshot),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            Files.writeString(
+                    markdownPath,
+                    renderBenchmarkAuthorityMarkdown(snapshot),
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+            appendCsv(
+                    BENCHMARK_AUTHORITY_CSV,
+                    "laneName,generatedAt,gitRevision,workspaceDirty,authorityDirty,dirtyTrackedPathCount,dirtyAuthorityPathCount",
+                    String.format(
+                            "%s,%s,%s,%s,%s,%d,%d",
+                            safe(snapshot.laneName()),
+                            safe(String.valueOf(snapshot.generatedAt())),
+                            safe(snapshot.gitRevision()),
+                            Boolean.toString(snapshot.workspaceDirty()),
+                            Boolean.toString(snapshot.authorityDirty()),
+                            snapshot.dirtyTrackedPaths().size(),
+                            snapshot.dirtyAuthorityPaths().size()
+                    )
+            );
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to write benchmark authority snapshot", e);
+        }
+    }
+
     public static void writeControlRoomFrame(ControlRoomFrame frame) {
         if (frame == null) {
             return;
@@ -1288,6 +1330,37 @@ public final class BenchmarkArtifactWriter {
         if (!summary.notes().isEmpty()) {
             builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
             for (String note : summary.notes()) {
+                builder.append("- ").append(note).append(System.lineSeparator());
+            }
+        }
+        return builder.toString();
+    }
+
+    private static String renderBenchmarkAuthorityMarkdown(BenchmarkAuthoritySnapshot snapshot) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# Benchmark Authority").append(System.lineSeparator()).append(System.lineSeparator());
+        builder.append("- Lane: ").append(snapshot.laneName()).append(System.lineSeparator());
+        builder.append("- Generated: ").append(snapshot.generatedAt()).append(System.lineSeparator());
+        builder.append("- Git SHA: ").append(snapshot.gitRevision()).append(System.lineSeparator());
+        builder.append("- Workspace dirty: ").append(snapshot.workspaceDirty()).append(System.lineSeparator());
+        builder.append("- Authority dirty: ").append(snapshot.authorityDirty()).append(System.lineSeparator());
+        builder.append("- Dirty tracked paths: ").append(snapshot.dirtyTrackedPaths().size()).append(System.lineSeparator());
+        builder.append("- Dirty authority paths: ").append(snapshot.dirtyAuthorityPaths().size()).append(System.lineSeparator());
+        if (!snapshot.dirtyAuthorityPaths().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Dirty Authority Paths").append(System.lineSeparator());
+            for (String path : snapshot.dirtyAuthorityPaths()) {
+                builder.append("- ").append(path).append(System.lineSeparator());
+            }
+        }
+        if (!snapshot.dirtyTrackedPaths().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Dirty Tracked Paths").append(System.lineSeparator());
+            for (String path : snapshot.dirtyTrackedPaths()) {
+                builder.append("- ").append(path).append(System.lineSeparator());
+            }
+        }
+        if (!snapshot.notes().isEmpty()) {
+            builder.append(System.lineSeparator()).append("## Notes").append(System.lineSeparator());
+            for (String note : snapshot.notes()) {
                 builder.append("- ").append(note).append(System.lineSeparator());
             }
         }

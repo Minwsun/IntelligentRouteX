@@ -297,6 +297,14 @@ val scenarioBatchRealisticHcmc by tasks.registering(JavaExec::class) {
     args("realistic-hcmc", "1", "42")
 }
 
+val scenarioBatchRealisticHcmcTuning by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Runs an expanded HCMC realistic batch for Phase 3.1 tuning triage."
+    mainClass.set("com.routechain.simulation.ScenarioBatchRunner")
+    classpath = sourceSets["main"].runtimeClasspath
+    args("realistic-hcmc", "3", "42")
+}
+
 val hybridBenchmarkTrackA by tasks.registering(JavaExec::class) {
     group = "verification"
     description = "Runs the production-realism Track A hybrid benchmark."
@@ -383,6 +391,9 @@ tasks.named("counterfactualArenaSmoke") {
 }
 
 routeAiCertificationSmokeSummary.configure {
+    dependsOn(routeAiRegressionSmoke)
+    dependsOn("performanceBenchmarkSmoke")
+    dependsOn("counterfactualArenaSmoke")
     mustRunAfter("test")
     mustRunAfter("counterfactualArenaSmoke")
     mustRunAfter(cleanBenchmarkArtifacts)
@@ -407,10 +418,16 @@ hybridBenchmarkTrackA.configure {
 }
 
 repoIntelligenceSmokeSummary.configure {
+    dependsOn("routeAiCertificationSmoke")
+    dependsOn("microDispatchBenchmark")
     mustRunAfter(routeAiCertificationSmokeSummary)
 }
 
 repoIntelligenceCertificationSummary.configure {
+    dependsOn("repoIntelligenceSmoke")
+    dependsOn(scenarioBatchCertification)
+    dependsOn(hybridBenchmarkTrackA)
+    dependsOn(scenarioBatchRealisticHcmc)
     mustRunAfter(hybridBenchmarkTrackA)
     mustRunAfter(scenarioBatchRealisticHcmc)
 }
@@ -444,6 +461,8 @@ aiInfluenceAblationCertification.configure {
 }
 
 routeIntelligenceVerdictSmokeSummary.configure {
+    dependsOn("repoIntelligenceSmoke")
+    dependsOn(aiInfluenceAblationSmoke)
     mustRunAfter("test")
     mustRunAfter(aiInfluenceAblationSmoke)
     mustRunAfter("counterfactualArenaSmoke")
@@ -456,6 +475,11 @@ routeIntelligenceDemoProofSummary.configure {
 }
 
 routeIntelligenceVerdictCertificationSummary.configure {
+    dependsOn("repoIntelligenceCertification")
+    dependsOn(scenarioBatchRealisticHcmc)
+    dependsOn(publicResearchBenchmarkCertificationSummary)
+    dependsOn(batchIntelligenceCertificationSummary)
+    dependsOn(aiInfluenceAblationCertification)
     mustRunAfter("test")
     mustRunAfter(aiInfluenceAblationCertification)
     mustRunAfter(hybridBenchmarkTrackA)
@@ -537,6 +561,16 @@ tasks.register("routeIntelligenceVerdictCertification") {
     dependsOn(batchIntelligenceCertificationSummary)
     dependsOn(aiInfluenceAblationCertification)
     dependsOn(routeIntelligenceVerdictCertificationSummary)
+}
+
+tasks.register("phase31RouteQualityTuning") {
+    group = "verification"
+    description = "Runs the narrow Phase 3.1 Omega-first tuning loop with expanded realistic HCMC support."
+    dependsOn(cleanBenchmarkArtifacts)
+    dependsOn("repoIntelligenceSmoke")
+    dependsOn(scenarioBatchCertification)
+    dependsOn(scenarioBatchRealisticHcmcTuning)
+    dependsOn(repoIntelligenceCertificationSummary)
 }
 
 tasks.register("routeIntelligenceDemoProof") {

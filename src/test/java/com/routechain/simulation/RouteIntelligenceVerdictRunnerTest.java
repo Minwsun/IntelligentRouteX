@@ -140,6 +140,7 @@ class RouteIntelligenceVerdictRunnerTest {
         assertTrue(jsonContent.contains("\"aiVerdict\": \"YES\""));
         assertTrue(jsonContent.contains("\"routingVerdict\": \"PARTIAL\""));
         assertTrue(markdownContent.contains("Claim Readiness: INTERNAL_ONLY"));
+        assertTrue(Files.exists(root.resolve("certification").resolve("benchmark-authority-smoke.json")));
     }
 
     private void writeAblation(String mode,

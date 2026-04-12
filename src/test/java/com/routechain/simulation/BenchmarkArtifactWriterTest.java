@@ -313,8 +313,10 @@ class BenchmarkArtifactWriterTest {
         assertTrue(Files.exists(root.resolve("certification").resolve("repo-intelligence-smoke.json")));
         assertTrue(Files.exists(root.resolve("certification").resolve("repo-intelligence-smoke.md")));
         String csv = Files.readString(root.resolve("repo_intelligence_certification.csv"));
+        String markdown = Files.readString(root.resolve("certification").resolve("repo-intelligence-smoke.md"));
         assertTrue(csv.contains("repo-intelligence-smoke"));
         assertTrue(csv.contains("legacyUnderperforming"));
+        assertTrue(markdown.contains("Route Quality Blockers"));
     }
 
     @Test
@@ -504,6 +506,34 @@ class BenchmarkArtifactWriterTest {
         assertTrue(markdown.contains("AI And Route Intelligence Verdict"));
         assertTrue(markdown.contains("Architecture Evidence"));
         assertTrue(markdown.contains("Ablation Evidence"));
+    }
+
+    @Test
+    void shouldPersistBenchmarkAuthorityArtifacts() throws IOException {
+        Path root = Path.of("build", "routechain-apex", "benchmarks");
+        deleteRecursively(root);
+
+        BenchmarkAuthoritySnapshot snapshot = new BenchmarkAuthoritySnapshot(
+                BenchmarkSchema.VERSION,
+                "smoke",
+                Instant.parse("2026-04-12T13:00:00Z"),
+                "abc123",
+                true,
+                true,
+                List.of("build.gradle.kts", "src/main/java/com/routechain/ai/OmegaDispatchAgent.java"),
+                List.of("src/main/java/com/routechain/ai/OmegaDispatchAgent.java"),
+                List.of("benchmark authority paths are dirty")
+        );
+
+        BenchmarkArtifactWriter.writeBenchmarkAuthoritySnapshot(snapshot);
+
+        assertTrue(Files.exists(root.resolve("certification").resolve("benchmark-authority-smoke.json")));
+        assertTrue(Files.exists(root.resolve("certification").resolve("benchmark-authority-smoke.md")));
+        String csv = Files.readString(root.resolve("benchmark_authority.csv"));
+        String markdown = Files.readString(root.resolve("certification").resolve("benchmark-authority-smoke.md"));
+        assertTrue(csv.contains("authorityDirty"));
+        assertTrue(markdown.contains("Dirty Authority Paths"));
+        assertTrue(markdown.contains("OmegaDispatchAgent.java"));
     }
 
     @Test
