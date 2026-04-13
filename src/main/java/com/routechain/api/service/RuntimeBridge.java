@@ -1,15 +1,20 @@
 package com.routechain.api.service;
 
 import com.routechain.api.dto.DriverActiveTaskView;
+import com.routechain.api.dto.DriverRealtimeSnapshot;
 import com.routechain.api.dto.LiveMapSnapshot;
 import com.routechain.api.dto.MapPointView;
+import com.routechain.api.dto.MerchantOrderView;
 import com.routechain.api.dto.NearbyDriverView;
 import com.routechain.api.dto.OrderLifecycleEventView;
 import com.routechain.api.dto.OrderLifecycleStage;
 import com.routechain.api.dto.OrderOfferSnapshot;
+import com.routechain.api.dto.OpsOrderMonitorView;
+import com.routechain.api.dto.OpsRealtimeSnapshot;
 import com.routechain.api.dto.RoutePreviewSourceView;
 import com.routechain.api.dto.RouteSourceView;
 import com.routechain.api.dto.TripTrackingView;
+import com.routechain.api.dto.UserRealtimeSnapshot;
 import com.routechain.backend.offer.OfferBrokerService;
 import com.routechain.backend.offer.DriverOfferBatch;
 import com.routechain.backend.offer.DriverSessionState;
@@ -221,6 +226,43 @@ public class RuntimeBridge {
         );
     }
 
+    public UserRealtimeSnapshot userRealtimeSnapshot(String customerId) {
+        TripTrackingView activeTrip = activeTripForCustomer(customerId).orElse(null);
+        return new UserRealtimeSnapshot(
+                customerId,
+                activeTrip,
+                userMapSnapshot(customerId, activeTrip == null ? null : activeTrip.orderId())
+        );
+    }
+
+    public DriverRealtimeSnapshot driverRealtimeSnapshot(String driverId) {
+        return new DriverRealtimeSnapshot(
+                driverId,
+                driverOffers(driverId),
+                activeTask(driverId).orElse(null),
+                driverMapSnapshot(driverId)
+        );
+    }
+
+    public OpsRealtimeSnapshot opsRealtimeSnapshot() {
+        List<OpsOrderMonitorView> activeOrders = orderRepository.allOrders().stream()
+                .sorted(Comparator.comparing(Order::getCreatedAt).reversed())
+                .map(this::toOpsOrderMonitorView)
+                .toList();
+        return new OpsRealtimeSnapshot(activeOrders);
+    }
+
+    public List<MerchantOrderView> merchantOrders(String merchantId) {
+        if (merchantId == null || merchantId.isBlank()) {
+            return List.of();
+        }
+        return orderRepository.allOrders().stream()
+                .filter(order -> merchantId.equals(order.getMerchantId()))
+                .sorted(Comparator.comparing(Order::getCreatedAt).reversed())
+                .map(this::toMerchantOrderView)
+                .toList();
+    }
+
     private TripTrackingView toTripTrackingView(Order order) {
         Driver runtimeDriver = runtimeDriver(order.getAssignedDriverId());
         DriverSessionState assignedSession = order.getAssignedDriverId() == null
@@ -303,6 +345,37 @@ public class RuntimeBridge {
                 iso(order.getArrivedPickupAt()),
                 iso(order.getPickedUpAt()),
                 iso(order.getArrivedDropoffAt())
+        );
+    }
+
+    private OpsOrderMonitorView toOpsOrderMonitorView(Order order) {
+        OrderLifecycleProjection projection = lifecycleProjection(order.getId());
+        return new OpsOrderMonitorView(
+                order.getId(),
+                order.getCustomerId(),
+                order.getMerchantId(),
+                order.getStatus().name(),
+                OrderLifecycleViewMapper.stageFor(projection),
+                order.getAssignedDriverId(),
+                projection.offerSnapshot(),
+                iso(order.getCreatedAt()),
+                latestLifecycleTimestamp(order, projection)
+        );
+    }
+
+    private MerchantOrderView toMerchantOrderView(Order order) {
+        OrderLifecycleProjection projection = lifecycleProjection(order.getId());
+        return new MerchantOrderView(
+                order.getMerchantId(),
+                order.getId(),
+                order.getCustomerId(),
+                order.getStatus().name(),
+                OrderLifecycleViewMapper.stageFor(projection),
+                order.getAssignedDriverId(),
+                projection.offerSnapshot(),
+                order.getQuotedFee(),
+                iso(order.getCreatedAt()),
+                latestLifecycleTimestamp(order, projection)
         );
     }
 
@@ -600,5 +673,36 @@ public class RuntimeBridge {
 
     private String iso(Instant instant) {
         return instant == null ? null : instant.toString();
+    }
+
+    private String latestLifecycleTimestamp(Order order, OrderLifecycleProjection projection) {
+        if (projection != null && !projection.lifecycleHistory().isEmpty()) {
+            String recordedAt = projection.lifecycleHistory().getLast().recordedAt();
+            if (recordedAt != null && !recordedAt.isBlank()) {
+                return recordedAt;
+            }
+        }
+        if (order.getDeliveredAt() != null) {
+            return iso(order.getDeliveredAt());
+        }
+        if (order.getFailedAt() != null) {
+            return iso(order.getFailedAt());
+        }
+        if (order.getCancelledAt() != null) {
+            return iso(order.getCancelledAt());
+        }
+        if (order.getArrivedDropoffAt() != null) {
+            return iso(order.getArrivedDropoffAt());
+        }
+        if (order.getPickedUpAt() != null) {
+            return iso(order.getPickedUpAt());
+        }
+        if (order.getArrivedPickupAt() != null) {
+            return iso(order.getArrivedPickupAt());
+        }
+        if (order.getAssignedAt() != null) {
+            return iso(order.getAssignedAt());
+        }
+        return iso(order.getCreatedAt());
     }
 }
