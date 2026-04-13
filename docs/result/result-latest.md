@@ -3,8 +3,8 @@ doc_id: "canonical.result"
 doc_kind: "canonical_result"
 canonical: true
 priority: 100
-updated_at: "2026-04-13T17:54:56+07:00"
-git_sha: "f93ab2c"
+updated_at: "2026-04-13T21:37:05+07:00"
+git_sha: "8da2807"
 tags: ["benchmark", "result", "verdict", "evidence"]
 depends_on: []
 bootstrap: true

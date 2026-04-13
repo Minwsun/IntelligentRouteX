@@ -2,7 +2,7 @@
 
 - Status: `accepted`
 - Date: `2026-04-09`
-- Git SHA: `f93ab2c`
+- Git SHA: `8da2807`
 
 ## Decision
 

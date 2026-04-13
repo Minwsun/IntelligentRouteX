@@ -84,7 +84,7 @@ SOURCE_DOC_SPECS: list[dict[str, Any]] = [
         "doc_kind": "temporary_plan",
         "canonical": False,
         "priority": 95,
-        "tags": ["next-step", "dispatch-authority", "benchmark-first", "route-core", "phase-plan"],
+        "tags": ["next-step", "product-complete", "dispatch-authority", "benchmark-first", "route-core", "phase-plan"],
         "depends_on": ["canonical.summarize", "canonical.result", "working.order-lifecycle-facts-checkpoint"],
         "bootstrap": True,
         "topic": "active-plan",
@@ -685,7 +685,9 @@ def derive_current_state(
             "multi module split",
         ]
     acceptance_lines = extract_bullets_under_heading(nextstep_body, "4. Acceptance criteria")
-    if "Track D - dispatch authority va dispatch intelligence" in nextstep_body:
+    if "product dispatch platform day du" in nextstep_body:
+        next_milestone = "Chot D1 + D2 + D3 de mo batching, landing, va 4 product surfaces tren cung authority path."
+    elif "Track D - dispatch authority va dispatch intelligence" in nextstep_body:
         next_milestone = "Dung Track D de chot realtime authority sach trong khi Track R giu clean checkpoint discipline."
     else:
         next_milestone = acceptance_lines[1] if len(acceptance_lines) > 1 else "Dua Routing Verdict len YES with caveat."
@@ -748,6 +750,73 @@ def derive_open_loops(
     result_path: str,
     nextstep_path: str,
 ) -> list[dict[str, Any]]:
+    if "product dispatch platform day du" in nextstep_body and "Track R - route truth gate doc lap" in nextstep_body:
+        return [
+            {
+                "id": "loop-01-authority-gate-for-product-complete",
+                "title": "Authority gate for product-complete",
+                "status": "open",
+                "impact": "high",
+                "owner_scope": "dispatch_backbone",
+                "evidence_refs": [nextstep_path, result_path, summarize_path],
+                "next_action": "Chot D1 + D2 + D3 de customer, shipper, merchant, va ops cung doc mot authority path va bind truc tiep vao authority API.",
+                "acceptance": [
+                    "REST va websocket cho cung entity ra cung stage va timeline",
+                    "single-order create -> offer -> lock -> pickup -> dropoff replay on dinh tu mot authority path",
+                    "khong day workaround business xuong client",
+                ],
+                "updated_at": updated_at,
+                "git_sha": git_sha,
+            },
+            {
+                "id": "loop-02-business-core-batching-and-landing",
+                "title": "Business core: batching and landing",
+                "status": "open",
+                "impact": "high",
+                "owner_scope": "dispatch_intelligence",
+                "evidence_refs": [nextstep_path, result_path, summarize_path],
+                "next_action": "Mo D4 batching v1 roi D5 landing engine tren fact/projection shapes rieng, sau do moi noi D6 big data + AI dispatch integration.",
+                "acceptance": [
+                    "bundle co lifecycle facts va snapshots rieng",
+                    "landing recommendation phat ra tu authority source",
+                    "online/offline dung cung event schema va feature semantics",
+                ],
+                "updated_at": updated_at,
+                "git_sha": git_sha,
+            },
+            {
+                "id": "loop-03-product-surfaces-and-launch",
+                "title": "Product surfaces and launch path",
+                "status": "open",
+                "impact": "high",
+                "owner_scope": "product_surface",
+                "evidence_refs": [nextstep_path, result_path, summarize_path],
+                "next_action": "Mo customer app, shipper app, merchant app, ops console, roi closed beta, production hardening, va launch gate.",
+                "acceptance": [
+                    "4 surfaces chay end-to-end tren cung authority API",
+                    "closed beta co replay-vs-live compare va rollback path",
+                    "launch gate khong mau thuan narrative voi canonical route docs",
+                ],
+                "updated_at": updated_at,
+                "git_sha": git_sha,
+            },
+            {
+                "id": "loop-04-track-r-route-benchmark-recovery",
+                "title": "Track R - route benchmark recovery",
+                "status": "open",
+                "impact": "high",
+                "owner_scope": "route_core",
+                "evidence_refs": [nextstep_path, result_path, summarize_path],
+                "next_action": "Giu clean checkpoint discipline va day HEAVY_RAIN -> NIGHT_OFF_PEAK -> MORNING_OFF_PEAK -> DEMAND_SPIKE -> gate recovery -> public-proof readiness.",
+                "acceptance": [
+                    "baseline chi duoc promote khi CLEAN_CANONICAL_CHECKPOINT",
+                    "product completion khong tu dong nang canonical route claim",
+                    "Routing Verdict chi doi khi Track R co proof moi",
+                ],
+                "updated_at": updated_at,
+                "git_sha": git_sha,
+            },
+        ]
     if "Track D - dispatch authority va dispatch intelligence" in nextstep_body and "Track R - route benchmark-governed recovery" in nextstep_body:
         return [
             {

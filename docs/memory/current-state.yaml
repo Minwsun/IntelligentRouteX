@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-04-13T17:54:56+07:00",
-  "git_sha": "f93ab2c",
+  "generated_at": "2026-04-13T21:37:05+07:00",
+  "git_sha": "8da2807",
   "workspace_dirty": true,
   "current_goal": "mặc định tìm cách ghép đơn một cách thông minh để tối ưu chi phí toàn hệ giao nhận, nhưng chỉ giữ batch khi utility tổng của khách hàng, tài xế và marketplace tốt hơn so với giao tách lẻ.",
   "current_verdict": {
@@ -19,7 +19,7 @@
     "Android demo",
     "multi module split"
   ],
-  "next_milestone": "Dung Track D de chot realtime authority sach trong khi Track R giu clean checkpoint discipline.",
+  "next_milestone": "Chot D1 + D2 + D3 de mo batching, landing, va 4 product surfaces tren cung authority path.",
   "truth_layer_guard": "openPickupDemand chỉ dùng cho demand pickup còn mở; committedPickupPressure giữ riêng áp lực pickup đã commit và phải được bảo vệ như regression guard.",
   "primary_runbook_command": "powershell -ExecutionPolicy Bypass -File scripts/run_backend_demo.ps1 -RepoRoot E:\\Code _Project\\IntelligentRouteX",
   "bootstrap_order": [

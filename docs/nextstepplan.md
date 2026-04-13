@@ -3,146 +3,141 @@ doc_id: "working.nextstepplan"
 doc_kind: "temporary_plan"
 canonical: false
 priority: 95
-updated_at: "2026-04-13T17:54:56+07:00"
-git_sha: "f93ab2c"
-tags: ["next-step", "dispatch-authority", "benchmark-first", "route-core", "phase-plan"]
+updated_at: "2026-04-13T21:37:05+07:00"
+git_sha: "8da2807"
+tags: ["next-step", "product-complete", "dispatch-authority", "benchmark-first", "route-core", "phase-plan"]
 depends_on: ["canonical.summarize", "canonical.result", "working.order-lifecycle-facts-checkpoint"]
 bootstrap: true
 ---
 
-# Ke hoach buoc tiep theo: tach 2 track giua dispatch authority va route benchmark recovery
+# Ke hoach hoan thien he thong: product dispatch platform day du tren hai track
 
 - Thoi gian chot ke hoach: `2026-04-13` (Asia/Saigon)
 - Base SHA: `HEAD`
-- Vai tro cua file: implementation brief tam thoi de repo khong tiep tuc tron hai huong phat trien khac nhau vao cung mot phase mo ho
+- Vai tro cua file: implementation brief tam thoi de dua repo tu dispatch backbone + route proof dang do sang mot platform delivery dung duoc end-to-end
 
-## 1. Trang thai thuc te cua repo hien tai
+## 1. Dich hoan thien da khoa
 
-Repo hien tai khong con dung o `7bfc8e2`.
+Muc tieu chot cua repo la hoan thien IntelligentRouteX thanh mot product dispatch platform day du, trong do:
 
-Dispatch backbone da di qua ba moc lien tiep:
-
-- `236bce7`: order lifecycle truth cho app-facing read models
-- `7bfc8e2`: single-order offer / accept-lock truth
-- `66740ae`: append-only lifecycle facts + fact-derived projection authority
-
-Trong khi do, docs canonical route van phan anh benchmark state o moc `53d7480`:
-
-- `AI Verdict = YES`
-- `Routing Verdict = PARTIAL`
-- `Claim Readiness = INTERNAL_ONLY`
+- `dispatch brain` la san pham loi
+- customer app, shipper app, merchant app, va ops console cung doc tren mot authority path
+- backend van la modular monolith trong chinh repo nay
+- route canonical claim van do benchmark-governed track quan ly rieng
 
 Dieu nay co nghia:
 
-- code dispatch dang tien nhanh hon docs canonical
-- docs canonical van dung cho route verdict
-- repo can mot working roadmap moi de giai thich ro hai track dang song song
+- product-complete khong doi route canonical verdict thoat `PARTIAL` moi duoc mo
+- nhung moi claim canonical ve route van chi duoc nang qua `Track R`
 
-## 2. Nguyen tac tong cho ca repo
+## 2. Nguyen tac tong cho hai track
 
-Hai track chinh bi khoa nhu sau:
-
-### Track D - dispatch authority va dispatch intelligence
+### Track D/P - dispatch va product completion
 
 Muc tieu:
 
-- customer, shipper, ops cung doc mot truth source
-- single-order hoan chinh truoc
-- batching va landing chi mo sau khi authority da sach
+- hoan thien authority backbone
+- mo rong thanh batching, landing, va app/product surfaces
+- dua he thong thanh mot platform delivery dung duoc end-to-end
 
-### Track R - benchmark-governed route recovery
+### Track R - route benchmark-governed recovery
 
 Muc tieu:
 
 - giu clean checkpoint va promotion discipline
-- dung benchmark evidence de day route core vuot khoi `PARTIAL`
+- day route core vuot khoi `Routing Verdict = PARTIAL`
+- hoan tat public-proof readiness ma khong pha benchmark trung thuc
 
 Rule tong:
 
-- khong mo Android lon truoc khi `Track D` dat realtime authority sach
-- khong doi canonical claim theo tien do dispatch
-- khong de `Track D` pha benchmark discipline cua `Track R`
-- canonical docs chi doi khi route checkpoint canonical doi that
-- working checkpoint docs duoc phep tang de ghi nhan tien do dispatch truth
+- khong doi canonical route claim theo tien do product
+- khong de product track pha benchmark discipline cua route track
+- route-sensitive changes van phai qua canonical re-check truoc khi promote
+- working docs duoc phep phan anh dispatch/product tien nhanh hon canonical route docs
 
-## 3. Track D - dispatch authority backbone
+## 3. Track D/P - authority backbone truoc, product sau
 
 ### Phase D1 - realtime authority read models
 
 Viec phai lam:
 
-- dung `OrderLifecycleProjection` tu `66740ae` lam authority input duy nhat cho realtime
-- refactor `RealtimeStreamService` de day:
+- giu `OrderLifecycleProjection` la authority read path duy nhat cho realtime
+- refactor `RealtimeStreamService` de chi day:
   - event envelope
   - projection snapshot moi nhat
-- dung projector rieng cho:
+- thong nhat authority cho:
   - customer order timeline
   - shipper offer inbox + active task
-  - ops order/offer monitor
-- giam dan bootstrap chong cheo tu `RuntimeBridge`, raw `Order`, va raw offer state
+  - merchant prep/order timeline
+  - ops order/offer monitor timeline
+- loai bo bootstrap chong cheo tu `RuntimeBridge`, raw `Order`, raw offer state, va cac path read model rieng le
 
 Definition of done:
 
-- customer, shipper, ops cung nhin cung mot authority path
-- cung mot order khong con ba cach dien giai khac nhau giua REST va websocket
+- customer, shipper, merchant, va ops deu nhin cung mot authority path
+- cung mot entity khong con dien giai khac nhau giua REST va websocket
 
 ### Phase D2 - single-order dispatch completion
 
 Viec phai lam:
 
 - giu scope chi cho `single-order`
-- hoan tat semantics cho:
+- hoan tat semantics:
   - first accept wins
   - late accept = lost
   - reservation expiry
-  - re-offer retry ceiling
   - explicit batch close reason
+  - guarded re-offer
 - giu `OfferReservation` la lock authority; `Order.assignedDriverId` chi la projection
-- mo rong snapshot cho app:
+- chot snapshot authority de app bind truc tiep:
   - customer thay `searching / offered / locked / executing / completed`
   - shipper thay `offer stage / wave / expiresAt / reservationVersion`
-  - ops thay `waiting reason / active wave / lock owner / close reason`
+  - merchant thay order/prep readiness dung authority state
+  - ops thay waiting reason / active wave / lock owner / close reason
 
 Definition of done:
 
-- create -> offer -> lock -> pickup -> dropoff replay va realtime deu on dinh tu authority path moi
+- create -> offer -> lock -> pickup -> dropoff replay va realtime deu on dinh tu mot authority path
 
 ### Phase D3 - dispatch-facing API hardening
 
 Viec phai lam:
 
-- giu wire contract gan nhu cu, chi them field doc neu can
+- giu wire contract gan nhu cu, chi them field doc duoc khi can
 - chot contracts cho:
   - user order snapshot
   - trip tracking snapshot
   - driver offers snapshot
   - driver active task snapshot
-- chua mo Android module lon o phase nay
+  - merchant order/prep snapshot
+  - ops order/offer monitor snapshot
+- khong day business workaround xuong client
 
 Definition of done:
 
-- REST + realtime du on dinh de customer app va shipper app bind truc tiep ma khong can business workaround o client
+- authority API du on dinh de ca 4 product surfaces bind truc tiep
 
-## 4. Track D - dispatch intelligence sau authority
+## 4. Track D/P - business core sau authority
 
 ### Phase D4 - batching v1
 
 Dieu kien mo:
 
-- chi sau `D1` va `D2`
+- chi sau `D1`, `D2`, `D3`
 
 Viec phai lam:
 
 - them bundle truth rieng:
   - candidate generation
   - scoring
-  - assignment lock
-  - multi-stop lifecycle facts
-- khong reuse single-order lifecycle mot cach mo ho
+  - assignment lock cho multi-stop
+  - bundle lifecycle facts
+  - bundle execution snapshots
+- khong reuse mo ho lifecycle cua single-order cho bundle
 
 Definition of done:
 
-- bundle lane thang single-order tren mot vai KPI utility ma khong lam gay completion hoac on-time
+- bundle lane thang single-order tren utility that ma khong gay completion hoac on-time
 
 ### Phase D5 - landing engine
 
@@ -153,7 +148,9 @@ Viec phai lam:
   - hotspot utility
   - idle-to-next score
   - reposition recommendation
-- gan authority facts cho post-drop outcome va landing recommendation outcome
+- gan authority facts cho:
+  - post-drop outcome
+  - landing recommendation outcome
 
 Definition of done:
 
@@ -162,9 +159,13 @@ Definition of done:
 
 ### Phase D6 - big data + AI cho dispatch
 
+Dieu kien mo:
+
+- chi sau khi single-order, batching, va landing deu co authority path ro
+
 Viec phai lam:
 
-- sau batching va landing moi noi:
+- noi event spine va online/offline feature flow:
   - Kafka/Flink
   - Redis online features
   - ClickHouse KPI/compare
@@ -182,98 +183,136 @@ Definition of done:
 - online/offline dung cung event schema va feature semantics
 - model delta duoc chung minh tren dispatch benchmark that, khong chi offline
 
-## 5. Track R - route benchmark-governed recovery
+## 5. Track D/P - product surfaces va production path
 
-### Phase R1 - clean checkpoint + baseline registry active
+### Phase P1 - customer app
 
 Viec phai lam:
 
-- giu nguyen route benchmark workflow dang khoa:
-  - `benchmarkCleanCheckpointSmoke`
-  - `benchmarkCleanCheckpointCertification`
-  - baseline promotion chi khi `CLEAN_CANONICAL_CHECKPOINT`
-- khong route-tune tren dirty authority state
+- auth
+- browse merchant/menu
+- cart + COD checkout
+- create order
+- live tracking timeline
+- order history
+- notifications
 
-Definition of done:
+### Phase P2 - shipper app
 
-- smoke + certification clean
-- baseline registry active
-- promotion eligible
+Viec phai lam:
 
-### Phase R2 - heavy rain / off-peak / gate recovery
+- online/offline
+- offer inbox
+- accept/reject
+- active task
+- pickup/drop confirmations
+- bundle stop list
+- hotspot suggestion
+- earnings/task history
 
-Thu tu bucket giu nguyen:
+### Phase P3 - merchant app
 
-1. `HEAVY_RAIN`
-2. `NIGHT_OFF_PEAK`
-3. `MORNING_OFF_PEAK`
-4. `DEMAND_SPIKE`
-5. gate recovery
+Viec phai lam:
 
-Moi vong van theo loop benchmark-governed:
+- merchant auth
+- order inbox
+- prep status
+- ready-for-pickup
+- basic menu/availability status
 
-- clean baseline
-- isolated triage
-- compare
-- canonical re-check
-- promote hoac reject
+### Phase P4 - ops console
 
-Definition of done:
+Viec phai lam:
 
-- `Routing Verdict` tien len khoi `PARTIAL` bang clean checkpoint that, khong phai triage narrative
+- live demand/supply map
+- order queue + offer failures
+- lock/assignment monitor
+- bundle diagnostics
+- hotspot/landing view
+- experiment flags
+- incident panel
 
-## 6. Diem giao nhau giua hai track
+Direction khoa:
 
-`Track D` duoc phep tien nhanh neu:
+- Android van theo `Java + XML + Fragments + ViewModel/LiveData + Navigation`
+- app chi lam orchestration + presentation
+- backend van la modular monolith hien tai
 
-- khong sua canonical route claim
-- khong lam ban benchmark-sensitive paths khi can clean checkpoint
-- khong pha smoke/certification lane hien co
+### Phase P5 - closed beta, hardening, launch gate
 
-`Track R` duoc uu tien neu thay doi dung vao:
+Closed beta chi mo sau khi:
 
-- `src/main/java/com/routechain/ai/**`
-- `src/main/java/com/routechain/simulation/**`
-- `src/main/java/com/routechain/infra/PlatformRuntimeBootstrap.java`
-- `build.gradle.kts`
+- single-order flow stable
+- batching v1 stable
+- landing recommendation stable
+- customer/shipper/merchant/ops deu bind duoc vao authority API that
 
-Neu mot slice dispatch can cham vao cac path benchmark-sensitive tren, no phai qua route canonical re-check truoc khi promote.
+Hardening gom:
 
-Android chi duoc mo sau khi:
+- auth/roles
+- idempotency/retry
+- offline mode cho shipper
+- push reliability
+- crash reporting
+- abuse/fraud basics
+- deploy smoke
+- rollback
+- runbook
 
-- `D1` xong
-- `D2` xong
-- va `Track R` it nhat van giu canonical checkpoint rule, khong can cho route verdict thoat `PARTIAL`
+Launch gate chi chot khi:
+
+- 4 product surfaces chay end-to-end
+- dispatch authority khong mo ho
+- route canonical docs va product docs khong mau thuan narrative
+
+## 6. Track R - route truth gate doc lap
+
+Track R giu nguyen benchmark discipline:
+
+1. clean checkpoint + baseline registry
+2. `HEAVY_RAIN`
+3. `NIGHT_OFF_PEAK`
+4. `MORNING_OFF_PEAK`
+5. `DEMAND_SPIKE`
+6. gate recovery
+7. public research dataset readiness
+
+Rule bi khoa:
+
+- khong downgrade benchmark discipline chi vi product track tien nhanh
+- moi thay doi cham benchmark-sensitive files van phai canonical re-check truoc khi promote
+- product completion khong tu dong nang canonical route claim
 
 ## 7. Thu tu commit-slice khuyen nghi
 
 1. `D1.1` realtime authority refactor cho `RealtimeStreamService`
-2. `D1.2` ops/customer/shipper projection snapshots thong nhat
+2. `D1.2` customer/shipper/merchant/ops projection snapshots thong nhat
 3. `D2.1` reservation expiry + lost semantics
 4. `D2.2` single-order dispatch completion tests + API stabilization
-5. `D4.1` batching authority facts + bundle snapshots
-6. `D5.1` landing recommendation facts + read models
-7. `R1` clean checkpoint that neu chua co
-8. `R2` heavy-rain loop
-9. `R3` night-off-peak loop
-10. `D6` big data + AI integration cho dispatch
-11. customer app
-12. shipper app
-13. ops console
-14. route gate recovery sau
-15. closed beta
-16. production hardening
+5. `D3` authority API hardening cho 4 surfaces
+6. `D4.1` batching authority facts + bundle snapshots
+7. `D5.1` landing recommendation facts + read models
+8. `D6` big data + AI integration cho dispatch
+9. `P1` customer app
+10. `P2` shipper app
+11. `P3` merchant app
+12. `P4` ops console
+13. `P5` closed beta
+14. production hardening
+15. launch gate
+16. route claim promotion chi khi `Track R` du proof
 
 ## 8. Acceptance va canh bao narrative
 
-Acceptance cho working roadmap moi:
+Acceptance cho roadmap nay:
 
-- file nay phai noi ro repo dang co hai track
-- `Track R` van giu precedence cho canonical verdict
-- `Track D` duoc xac nhan la product-backbone program rieng, khong bi coi la scope creep
-- docs canonical khong duoc silently bien dispatch progress thanh canonical route progress
+- repo co mot lo trinh ro tu dispatch backbone den product-complete
+- `Track R` van giu precedence cho canonical route verdict
+- customer, shipper, merchant, va ops deu nam trong cung mot authority program
+- docs canonical khong duoc silently bien tien do product thanh tien do canonical route
 
 Canh bao:
 
-- memory pack va canonical docs hien van cham hon code dispatch backbone
-- vi vay moi thay doi docs canonical sau nay phai can duoc update co kiem soat, khong copy narrative tu working checkpoints mot cach tu dong
+- canonical route docs hien van phan anh benchmark round tai `53d7480`
+- vi vay route claim chi duoc doi khi `Track R` co clean checkpoint va proof moi
+- product track co the tien nhanh hon, nhung phai giu ro boundary voi route canonical claim

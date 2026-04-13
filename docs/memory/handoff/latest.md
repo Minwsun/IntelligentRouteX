@@ -1,7 +1,7 @@
 # AI session handoff
 
-- Generated at: `2026-04-13T17:54:56+07:00`
-- Git SHA: `f93ab2c`
+- Generated at: `2026-04-13T21:37:05+07:00`
+- Git SHA: `8da2807`
 
 ## Current goal
 
@@ -22,8 +22,10 @@ mặc định tìm cách ghép đơn một cách thông minh để tối ưu chi
 
 ## Active workstreams
 
-- Track D - dispatch authority backbone: D1.1 refactor RealtimeStreamService de customer, shipper, va ops cung doc mot authority path tu OrderLifecycleProjection.
-- Track R - route benchmark recovery: Kich hoat clean checkpoint smoke/certification, promote baseline sach, roi quay lai HEAVY_RAIN -> NIGHT_OFF_PEAK -> MORNING_OFF_PEAK -> DEMAND_SPIKE theo isolated triage + canonical re-check.
+- Authority gate for product-complete: Chot D1 + D2 + D3 de customer, shipper, merchant, va ops cung doc mot authority path va bind truc tiep vao authority API.
+- Business core: batching and landing: Mo D4 batching v1 roi D5 landing engine tren fact/projection shapes rieng, sau do moi noi D6 big data + AI dispatch integration.
+- Product surfaces and launch path: Mo customer app, shipper app, merchant app, ops console, roi closed beta, production hardening, va launch gate.
+- Track R - route benchmark recovery: Giu clean checkpoint discipline va day HEAVY_RAIN -> NIGHT_OFF_PEAK -> MORNING_OFF_PEAK -> DEMAND_SPIKE -> gate recovery -> public-proof readiness.
 
 ## Deferred work
 
