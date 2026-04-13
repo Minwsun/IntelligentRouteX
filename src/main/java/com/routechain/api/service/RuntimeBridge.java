@@ -4,6 +4,8 @@ import com.routechain.api.dto.DriverActiveTaskView;
 import com.routechain.api.dto.LiveMapSnapshot;
 import com.routechain.api.dto.MapPointView;
 import com.routechain.api.dto.NearbyDriverView;
+import com.routechain.api.dto.OrderLifecycleEventView;
+import com.routechain.api.dto.OrderLifecycleStage;
 import com.routechain.api.dto.RoutePreviewSourceView;
 import com.routechain.api.dto.RouteSourceView;
 import com.routechain.api.dto.TripTrackingView;
@@ -219,15 +221,18 @@ public class RuntimeBridge {
         RoutePayload routePayload = routePayload(order, assignedSession, runtimeDriver);
         DriverOfferBatch batch = offerStateStore.latestBatchForOrder(order.getId()).orElse(null);
         NearbyDriverView assignedDriver = assignedDriverView(order, assignedSession, runtimeDriver);
+        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(order, batch != null);
+        List<OrderLifecycleEventView> lifecycleHistory = OrderLifecycleViewMapper.historyView(orderRepository.historyForOrder(order.getId()));
         return new TripTrackingView(
                 order.getId(),
                 order.getCustomerId(),
                 order.getStatus().name(),
+                lifecycleStage,
                 order.getServiceType(),
                 order.getQuotedFee(),
                 order.getAssignedDriverId(),
                 batch == null ? "" : batch.offerBatchId(),
-                humanStage(order.getStatus()),
+                OrderLifecycleViewMapper.legacyStageToken(lifecycleStage),
                 estimateEtaMinutes(order, assignedSession),
                 point("pickup", order.getPickupPoint()),
                 point("dropoff", order.getDropoffPoint()),
@@ -240,7 +245,16 @@ public class RuntimeBridge {
                 routePayload.activeRouteSource(),
                 routePayload.activeRouteGeneratedAt(),
                 routePayload.remainingRoutePreviewPolyline(),
-                routePayload.remainingRoutePreviewSource()
+                routePayload.remainingRoutePreviewSource(),
+                iso(order.getCreatedAt()),
+                iso(order.getAssignedAt()),
+                iso(order.getArrivedPickupAt()),
+                iso(order.getPickedUpAt()),
+                iso(order.getArrivedDropoffAt()),
+                iso(order.getDeliveredAt()),
+                iso(order.getCancelledAt()),
+                iso(order.getFailedAt()),
+                lifecycleHistory
         );
     }
 
@@ -248,11 +262,13 @@ public class RuntimeBridge {
         DriverSessionState session = driverFleetRepository.findDriverSession(driverId).orElse(null);
         Driver runtimeDriver = runtimeDriver(driverId);
         RoutePayload routePayload = routePayload(order, session, runtimeDriver);
+        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(order, true);
         return new DriverActiveTaskView(
                 driverId,
                 "task-" + order.getId(),
                 order.getId(),
                 order.getStatus().name(),
+                lifecycleStage,
                 order.getServiceType(),
                 order.getCustomerId(),
                 estimateEtaMinutes(order, session),
@@ -269,7 +285,11 @@ public class RuntimeBridge {
                 routePayload.activeRouteSource(),
                 routePayload.activeRouteGeneratedAt(),
                 routePayload.remainingRoutePreviewPolyline(),
-                routePayload.remainingRoutePreviewSource()
+                routePayload.remainingRoutePreviewSource(),
+                iso(order.getAssignedAt()),
+                iso(order.getArrivedPickupAt()),
+                iso(order.getPickedUpAt()),
+                iso(order.getArrivedDropoffAt())
         );
     }
 
@@ -500,20 +520,6 @@ public class RuntimeBridge {
         return Math.max(3.0, Math.min((double) order.getPromisedEtaMinutes(), km / 18.0 * 60.0));
     }
 
-    private String humanStage(Enums.OrderStatus status) {
-        return switch (status) {
-            case CONFIRMED, PENDING_ASSIGNMENT -> "searching";
-            case ASSIGNED, PICKUP_EN_ROUTE -> "driver_en_route";
-            case PICKED_UP -> "picked_up";
-            case DROPOFF_EN_ROUTE -> "delivering";
-            case DELIVERED -> "completed";
-            case CANCELLED -> "cancelled";
-            case FAILED -> "failed";
-            case EXPIRED -> "expired";
-            case QUOTED -> "quoted";
-        };
-    }
-
     private boolean isTerminal(Enums.OrderStatus status) {
         return status == Enums.OrderStatus.DELIVERED
                 || status == Enums.OrderStatus.CANCELLED
@@ -570,5 +576,9 @@ public class RuntimeBridge {
             List<MapPointView> remainingRoutePreviewPolyline,
             RoutePreviewSourceView remainingRoutePreviewSource,
             MapPointView runtimeDriverLocation) {
+    }
+
+    private String iso(Instant instant) {
+        return instant == null ? null : instant.toString();
     }
 }

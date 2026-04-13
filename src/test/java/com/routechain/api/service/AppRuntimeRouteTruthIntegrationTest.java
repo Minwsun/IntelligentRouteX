@@ -1,6 +1,7 @@
 package com.routechain.api.service;
 
 import com.routechain.api.dto.DriverLoginRequest;
+import com.routechain.api.dto.OrderLifecycleStage;
 import com.routechain.api.dto.DriverTaskStatusUpdate;
 import com.routechain.api.dto.RoutePreviewSourceView;
 import com.routechain.api.dto.RouteSourceView;
@@ -124,11 +125,14 @@ class AppRuntimeRouteTruthIntegrationTest {
         assertEquals("2026-04-12T02:05:00Z", activeTask.routeGeneratedAt());
         assertNotNull(trackingView.runtimeDriverLocation());
         assertNotNull(activeTask.runtimeDriverLocation());
+        assertEquals(OrderLifecycleStage.ACCEPTED, trackingView.lifecycleStage());
+        assertEquals(OrderLifecycleStage.ACCEPTED, activeTask.lifecycleStage());
 
         driverOperationsService.updateTaskStatus("drv-app-route", "task-" + orderId, new DriverTaskStatusUpdate("PICKED_UP"));
         Optional<TripTrackingView> postPickupTracking = runtimeBridge.tripTracking(orderId);
         assertTrue(postPickupTracking.isPresent());
         assertEquals("PICKED_UP", postPickupTracking.get().status());
+        assertEquals(OrderLifecycleStage.PICKED_UP, postPickupTracking.get().lifecycleStage());
         assertEquals(RoutePreviewSourceView.NONE, postPickupTracking.get().remainingRoutePreviewSource());
     }
 

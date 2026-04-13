@@ -167,15 +167,28 @@ public class DriverOperationsService {
                 }
             }
             Instant now = Instant.now();
-            String status = request.status().trim().toUpperCase();
+            String status = normalizeTaskStatus(request.status());
+            String historyStatus = status;
             switch (status) {
                 case "PICKUP_EN_ROUTE" -> order.markPickupStarted(now);
+                case "ARRIVED_PICKUP" -> order.markArrivedPickup(now);
                 case "PICKED_UP" -> {
                     order.markPickedUp(now);
                     eventPublisher.publish("task.status_changed.v1", "ORDER", order.getId(), new Events.OrderPickedUp(order.getId()));
                 }
                 case "DROPOFF_EN_ROUTE" -> order.markDropoffStarted(now);
+                case "ARRIVED_DROPOFF" -> order.markArrivedDropoff(now);
                 case "DELIVERED" -> {
+                    order.markDelivered(now);
+                    eventPublisher.publish("task.status_changed.v1", "ORDER", order.getId(), new Events.OrderDelivered(order.getId()));
+                    driverFleetRepository.findDriverSession(driverId).ifPresent(existing -> {
+                        DriverSessionState released = existing.withAvailability(true).withActiveOffer("");
+                        driverFleetRepository.saveDriverSession(released);
+                        runtimeBridge.syncDriverSession(released);
+                    });
+                }
+                case "DROPPED_OFF" -> {
+                    historyStatus = "DELIVERED";
                     order.markDelivered(now);
                     eventPublisher.publish("task.status_changed.v1", "ORDER", order.getId(), new Events.OrderDelivered(order.getId()));
                     driverFleetRepository.findDriverSession(driverId).ifPresent(existing -> {
@@ -198,7 +211,7 @@ public class DriverOperationsService {
             }
             runtimeBridge.syncTaskStatus(order.getId(), driverId, order.getStatus(), now);
             orderRepository.saveOrder(order);
-            orderRepository.appendStatusHistory(statusHistory(order.getId(), order.getStatus().name(), status.toLowerCase(), now));
+            orderRepository.appendStatusHistory(statusHistory(order.getId(), historyStatus, status.toLowerCase(), now));
             return order;
         });
     }
@@ -224,5 +237,15 @@ public class DriverOperationsService {
                 sessionState.available(),
                 driverPresenceTtl
         );
+    }
+
+    private String normalizeTaskStatus(String status) {
+        if (status == null || status.isBlank()) {
+            return "";
+        }
+        return status.trim()
+                .toUpperCase(java.util.Locale.ROOT)
+                .replace('-', '_')
+                .replace(' ', '_');
     }
 }

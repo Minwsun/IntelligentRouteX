@@ -7,6 +7,7 @@ public record DriverActiveTaskView(
         String taskId,
         String orderId,
         String status,
+        OrderLifecycleStage lifecycleStage,
         String serviceTier,
         String customerId,
         Double etaMinutes,
@@ -21,5 +22,9 @@ public record DriverActiveTaskView(
         RouteSourceView activeRouteSource,
         String activeRouteGeneratedAt,
         List<MapPointView> remainingRoutePreviewPolyline,
-        RoutePreviewSourceView remainingRoutePreviewSource
+        RoutePreviewSourceView remainingRoutePreviewSource,
+        String assignedAt,
+        String arrivedPickupAt,
+        String pickedUpAt,
+        String arrivedDropoffAt
 ) {}

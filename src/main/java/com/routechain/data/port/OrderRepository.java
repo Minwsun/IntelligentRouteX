@@ -4,6 +4,7 @@ import com.routechain.data.model.OrderStatusHistoryRecord;
 import com.routechain.domain.Order;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 public interface OrderRepository {
@@ -11,4 +12,5 @@ public interface OrderRepository {
     Optional<Order> findOrder(String orderId);
     Collection<Order> allOrders();
     void appendStatusHistory(OrderStatusHistoryRecord historyRecord);
+    List<OrderStatusHistoryRecord> historyForOrder(String orderId);
 }

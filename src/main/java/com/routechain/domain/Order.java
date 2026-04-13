@@ -26,8 +26,10 @@ public class Order {
     private volatile Instant confirmedAt;
     private volatile Instant assignedAt;
     private volatile Instant pickupStartedAt;
+    private volatile Instant arrivedPickupAt;
     private volatile Instant pickedUpAt;
     private volatile Instant dropoffStartedAt;
+    private volatile Instant arrivedDropoffAt;
     private volatile Instant deliveredAt;
     private volatile Instant cancelledAt;
     private volatile Instant failedAt;
@@ -104,8 +106,10 @@ public class Order {
     public Instant getConfirmedAt() { return confirmedAt; }
     public Instant getAssignedAt() { return assignedAt; }
     public Instant getPickupStartedAt() { return pickupStartedAt; }
+    public Instant getArrivedPickupAt() { return arrivedPickupAt; }
     public Instant getPickedUpAt() { return pickedUpAt; }
     public Instant getDropoffStartedAt() { return dropoffStartedAt; }
+    public Instant getArrivedDropoffAt() { return arrivedDropoffAt; }
     public Instant getDeliveredAt() { return deliveredAt; }
     public Instant getCancelledAt() { return cancelledAt; }
     public Instant getFailedAt() { return failedAt; }
@@ -154,6 +158,22 @@ public class Order {
         markPickedUp(Instant.now());
     }
 
+    public void markArrivedPickup() {
+        markArrivedPickup(Instant.now());
+    }
+
+    public void markArrivedPickup(Instant arrivedPickupAt) {
+        if (this.pickupStartedAt == null) {
+            this.pickupStartedAt = arrivedPickupAt;
+        }
+        this.arrivedPickupAt = arrivedPickupAt;
+        if (this.status != OrderStatus.PICKED_UP
+                && this.status != OrderStatus.DROPOFF_EN_ROUTE
+                && this.status != OrderStatus.DELIVERED) {
+            this.status = OrderStatus.PICKUP_EN_ROUTE;
+        }
+    }
+
     public void markPickedUp(Instant pickedUpAt) {
         this.pickedUpAt = pickedUpAt;
         this.status = OrderStatus.PICKED_UP;
@@ -166,6 +186,20 @@ public class Order {
     public void markDropoffStarted(Instant dropoffStartedAt) {
         this.dropoffStartedAt = dropoffStartedAt;
         this.status = OrderStatus.DROPOFF_EN_ROUTE;
+    }
+
+    public void markArrivedDropoff() {
+        markArrivedDropoff(Instant.now());
+    }
+
+    public void markArrivedDropoff(Instant arrivedDropoffAt) {
+        if (this.dropoffStartedAt == null) {
+            this.dropoffStartedAt = arrivedDropoffAt;
+        }
+        this.arrivedDropoffAt = arrivedDropoffAt;
+        if (this.status != OrderStatus.DELIVERED) {
+            this.status = OrderStatus.DROPOFF_EN_ROUTE;
+        }
     }
 
     public void markDelivered() {

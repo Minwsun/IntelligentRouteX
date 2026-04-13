@@ -77,8 +77,10 @@ public class JdbcOperationalPersistenceAdapter implements OperationalStore,
                 .addValue("confirmedAt", ts(order.getConfirmedAt()))
                 .addValue("assignedAt", ts(order.getAssignedAt()))
                 .addValue("pickupStartedAt", ts(order.getPickupStartedAt()))
+                .addValue("arrivedPickupAt", ts(order.getArrivedPickupAt()))
                 .addValue("pickedUpAt", ts(order.getPickedUpAt()))
                 .addValue("dropoffStartedAt", ts(order.getDropoffStartedAt()))
+                .addValue("arrivedDropoffAt", ts(order.getArrivedDropoffAt()))
                 .addValue("deliveredAt", ts(order.getDeliveredAt()))
                 .addValue("cancelledAt", ts(order.getCancelledAt()))
                 .addValue("failedAt", ts(order.getFailedAt()))
@@ -91,17 +93,18 @@ public class JdbcOperationalPersistenceAdapter implements OperationalStore,
                     pickup_region_id, dropoff_region_id, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
                     pickup_geom, dropoff_geom, quoted_fee, actual_fee, promised_eta_minutes, status,
                     assigned_driver_public_id, correlation_id, decision_trace_id, created_at, confirmed_at,
-                    assigned_at, pickup_started_at, picked_up_at, dropoff_started_at, delivered_at, cancelled_at,
-                    failed_at, cancellation_reason, failure_reason, updated_at
+                    assigned_at, pickup_started_at, arrived_pickup_at, picked_up_at, dropoff_started_at,
+                    arrived_dropoff_at, delivered_at, cancelled_at, failed_at, cancellation_reason,
+                    failure_reason, updated_at
                 ) VALUES (
                     :id, :publicId, :customerPublicId, :merchantPublicId, :serviceTier,
                     :pickupRegionId, :dropoffRegionId, :pickupLat, :pickupLng, :dropoffLat, :dropoffLng,
                     ST_SetSRID(ST_MakePoint(:pickupLng, :pickupLat), 4326),
                     ST_SetSRID(ST_MakePoint(:dropoffLng, :dropoffLat), 4326),
                     :quotedFee, :actualFee, :promisedEtaMinutes, :status, :assignedDriverPublicId, :correlationId,
-                    :decisionTraceId, :createdAt, :confirmedAt, :assignedAt, :pickupStartedAt, :pickedUpAt,
-                    :dropoffStartedAt, :deliveredAt, :cancelledAt, :failedAt, :cancellationReason, :failureReason,
-                    :updatedAt
+                    :decisionTraceId, :createdAt, :confirmedAt, :assignedAt, :pickupStartedAt, :arrivedPickupAt,
+                    :pickedUpAt, :dropoffStartedAt, :arrivedDropoffAt, :deliveredAt, :cancelledAt, :failedAt,
+                    :cancellationReason, :failureReason, :updatedAt
                 )
                 ON CONFLICT (public_id) DO UPDATE SET
                     customer_public_id = EXCLUDED.customer_public_id,
@@ -124,8 +127,10 @@ public class JdbcOperationalPersistenceAdapter implements OperationalStore,
                     confirmed_at = EXCLUDED.confirmed_at,
                     assigned_at = EXCLUDED.assigned_at,
                     pickup_started_at = EXCLUDED.pickup_started_at,
+                    arrived_pickup_at = EXCLUDED.arrived_pickup_at,
                     picked_up_at = EXCLUDED.picked_up_at,
                     dropoff_started_at = EXCLUDED.dropoff_started_at,
+                    arrived_dropoff_at = EXCLUDED.arrived_dropoff_at,
                     delivered_at = EXCLUDED.delivered_at,
                     cancelled_at = EXCLUDED.cancelled_at,
                     failed_at = EXCLUDED.failed_at,
@@ -142,8 +147,9 @@ public class JdbcOperationalPersistenceAdapter implements OperationalStore,
                         SELECT public_id, customer_public_id, merchant_public_id, service_tier,
                                pickup_region_id, dropoff_region_id, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng,
                                quoted_fee, actual_fee, promised_eta_minutes, status, assigned_driver_public_id,
-                               decision_trace_id, created_at, assigned_at, pickup_started_at, picked_up_at,
-                               dropoff_started_at, delivered_at, cancelled_at, failed_at, cancellation_reason, failure_reason
+                               decision_trace_id, created_at, assigned_at, pickup_started_at, arrived_pickup_at,
+                               picked_up_at, dropoff_started_at, arrived_dropoff_at, delivered_at, cancelled_at,
+                               failed_at, cancellation_reason, failure_reason
                           FROM orders
                          WHERE public_id = :orderId
                         """,
@@ -173,11 +179,17 @@ public class JdbcOperationalPersistenceAdapter implements OperationalStore,
                     if (rs.getTimestamp("pickup_started_at") != null) {
                         order.markPickupStarted(instant(rs.getTimestamp("pickup_started_at")));
                     }
+                    if (rs.getTimestamp("arrived_pickup_at") != null) {
+                        order.markArrivedPickup(instant(rs.getTimestamp("arrived_pickup_at")));
+                    }
                     if (rs.getTimestamp("picked_up_at") != null) {
                         order.markPickedUp(instant(rs.getTimestamp("picked_up_at")));
                     }
                     if (rs.getTimestamp("dropoff_started_at") != null) {
                         order.markDropoffStarted(instant(rs.getTimestamp("dropoff_started_at")));
+                    }
+                    if (rs.getTimestamp("arrived_dropoff_at") != null) {
+                        order.markArrivedDropoff(instant(rs.getTimestamp("arrived_dropoff_at")));
                     }
                     if (rs.getTimestamp("delivered_at") != null) {
                         order.markDelivered(instant(rs.getTimestamp("delivered_at")));
@@ -222,6 +234,22 @@ public class JdbcOperationalPersistenceAdapter implements OperationalStore,
                 .addValue("status", historyRecord.status())
                 .addValue("reason", historyRecord.reason())
                 .addValue("recordedAt", ts(historyRecord.recordedAt())));
+    }
+
+    @Override
+    public List<OrderStatusHistoryRecord> historyForOrder(String orderId) {
+        return jdbc.query("""
+                        SELECT order_public_id, status, reason, recorded_at
+                          FROM order_status_history
+                         WHERE order_public_id = :orderId
+                      ORDER BY recorded_at ASC, public_id ASC
+                        """,
+                new MapSqlParameterSource("orderId", orderId),
+                (rs, rowNum) -> new OrderStatusHistoryRecord(
+                        rs.getString("order_public_id"),
+                        rs.getString("status"),
+                        rs.getString("reason"),
+                        instant(rs.getTimestamp("recorded_at"))));
     }
 
     @Override

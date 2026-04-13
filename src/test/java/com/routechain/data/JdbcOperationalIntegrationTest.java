@@ -3,6 +3,7 @@ package com.routechain.data;
 import com.routechain.api.RouteChainApiApplication;
 import com.routechain.api.dto.UserOrderRequest;
 import com.routechain.api.dto.DriverTaskStatusUpdate;
+import com.routechain.api.dto.OrderLifecycleStage;
 import com.routechain.api.dto.WalletBalanceView;
 import com.routechain.api.dto.WalletTransactionView;
 import com.routechain.api.service.DriverOperationsService;
@@ -148,10 +149,11 @@ class JdbcOperationalIntegrationTest {
         assertEquals(created, replayed);
         assertNotNull(created.orderId());
         assertFalse(created.offerBatchId().isBlank());
+        assertEquals(OrderLifecycleStage.OFFERED, created.lifecycleStage());
         assertTrue(orderRepository.findOrder(created.orderId()).isPresent());
         assertEquals(1, count("orders"));
         assertEquals(1, count("idempotency_records"));
-        assertEquals(1, count("order_status_history"));
+        assertEquals(2, count("order_status_history"));
         assertTrue(count("offer_batches") >= 1);
         assertTrue(count("driver_offers") >= 1);
         assertTrue(outboxRepository.recent(10).stream().anyMatch(event -> "order.created.v1".equals(event.topicKey())));
@@ -196,7 +198,7 @@ class JdbcOperationalIntegrationTest {
         assertEquals(1, count("order_reservations"));
         assertEquals(1, count("idempotency_records", "scope = :scope", Map.of("scope", "driver.accept_offer")));
         assertEquals(2, count("offer_decisions"));
-        assertEquals(2, count("order_status_history"));
+        assertEquals(3, count("order_status_history"));
         assertEquals(DriverOfferStatus.LOST,
                 driverOperationsService.offers("drv-b").stream()
                         .filter(view -> view.offerId().equals(lostOfferId))
@@ -231,8 +233,9 @@ class JdbcOperationalIntegrationTest {
 
         assertEquals(cancelled, replayed);
         assertEquals("CANCELLED", cancelled.status());
+        assertEquals(OrderLifecycleStage.CANCELLED, cancelled.lifecycleStage());
         assertEquals("changed_plan", orderRepository.findOrder(created.orderId()).orElseThrow().getCancellationReason());
-        assertEquals(2, count("order_status_history"));
+        assertEquals(3, count("order_status_history"));
         assertEquals(1, count("idempotency_records", "scope = :scope", Map.of("scope", "user.cancel_order")));
         assertTrue(outboxRepository.recent(10).stream().anyMatch(event -> "order.status_changed.v1".equals(event.topicKey())));
     }
@@ -279,7 +282,7 @@ class JdbcOperationalIntegrationTest {
             assertEquals("CANCELLED", orderRepository.findOrder(created.orderId()).orElseThrow().getStatus().name());
             assertEquals("changed_plan", orderRepository.findOrder(created.orderId()).orElseThrow().getCancellationReason());
             assertEquals(1, count("idempotency_records", "scope = :scope", Map.of("scope", "user.cancel_order")));
-            assertEquals(2, count("order_status_history"));
+            assertEquals(3, count("order_status_history"));
             assertEquals(3, count("outbox_events"));
         } finally {
             executor.shutdownNow();
@@ -314,14 +317,24 @@ class JdbcOperationalIntegrationTest {
         assertTrue(driverOperationsService.updateTaskStatus("drv-task", "task-" + created.orderId(),
                 new DriverTaskStatusUpdate("pickup_en_route")).isPresent());
         assertTrue(driverOperationsService.updateTaskStatus("drv-task", "task-" + created.orderId(),
+                new DriverTaskStatusUpdate("arrived_pickup")).isPresent());
+        assertTrue(driverOperationsService.updateTaskStatus("drv-task", "task-" + created.orderId(),
                 new DriverTaskStatusUpdate("picked_up")).isPresent());
         assertTrue(driverOperationsService.updateTaskStatus("drv-task", "task-" + created.orderId(),
-                new DriverTaskStatusUpdate("dropoff_en_route")).isPresent());
+                new DriverTaskStatusUpdate("arrived_dropoff")).isPresent());
         assertTrue(driverOperationsService.updateTaskStatus("drv-task", "task-" + created.orderId(),
                 new DriverTaskStatusUpdate("delivered")).isPresent());
 
-        assertEquals("DELIVERED", orderRepository.findOrder(created.orderId()).orElseThrow().getStatus().name());
-        assertEquals(6, count("order_status_history"));
+        var persistedOrder = orderRepository.findOrder(created.orderId()).orElseThrow();
+        assertEquals("DELIVERED", persistedOrder.getStatus().name());
+        assertNotNull(persistedOrder.getArrivedPickupAt());
+        assertNotNull(persistedOrder.getArrivedDropoffAt());
+        assertEquals(8, count("order_status_history"));
+        assertEquals(
+                List.of("CONFIRMED", "OFFERED", "ASSIGNED", "PICKUP_EN_ROUTE", "ARRIVED_PICKUP", "PICKED_UP", "ARRIVED_DROPOFF", "DELIVERED"),
+                orderRepository.historyForOrder(created.orderId()).stream()
+                        .map(record -> record.status())
+                        .toList());
         assertTrue(outboxRepository.recent(20).stream().anyMatch(event -> "task.status_changed.v1".equals(event.topicKey())));
     }
 
@@ -453,7 +466,7 @@ class JdbcOperationalIntegrationTest {
         assertEquals(first, replayed);
         assertEquals(DriverOfferStatus.ACCEPTED, first.status());
         assertEquals(1, count("idempotency_records", "scope = :scope", Map.of("scope", "driver.accept_offer")));
-        assertEquals(2, count("order_status_history"));
+        assertEquals(3, count("order_status_history"));
         assertEquals(4, count("outbox_events"));
         assertEquals("drv-repeat", orderRepository.findOrder(created.orderId()).orElseThrow().getAssignedDriverId());
     }
@@ -500,7 +513,7 @@ class JdbcOperationalIntegrationTest {
             assertEquals(1, count("orders"));
             assertEquals(1, count("idempotency_records"));
             assertEquals(1, count("offer_batches"));
-            assertEquals(1, count("order_status_history"));
+            assertEquals(2, count("order_status_history"));
             assertEquals(2, count("outbox_events"));
         } finally {
             executor.shutdownNow();

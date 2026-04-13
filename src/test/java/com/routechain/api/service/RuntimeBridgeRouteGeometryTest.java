@@ -1,6 +1,7 @@
 package com.routechain.api.service;
 
 import com.routechain.api.dto.DriverActiveTaskView;
+import com.routechain.api.dto.OrderLifecycleStage;
 import com.routechain.api.dto.RoutePreviewSourceView;
 import com.routechain.api.dto.RouteSourceView;
 import com.routechain.api.dto.TripTrackingView;
@@ -92,6 +93,7 @@ class RuntimeBridgeRouteGeometryTest {
         assertEquals(2, tracking.remainingRoutePreviewPolyline().size());
         assertEquals(10.7765, tracking.runtimeDriverLocation().lat(), 1e-6);
         assertNotNull(tracking.routeGeneratedAt());
+        assertEquals(OrderLifecycleStage.ACCEPTED, tracking.lifecycleStage());
     }
 
     @Test
@@ -137,5 +139,6 @@ class RuntimeBridgeRouteGeometryTest {
         assertEquals(RoutePreviewSourceView.RUNTIME_PREVIEW, activeTask.remainingRoutePreviewSource());
         assertEquals(2, activeTask.remainingRoutePreviewPolyline().size());
         assertNotNull(activeTask.routeGeneratedAt());
+        assertEquals(OrderLifecycleStage.ACCEPTED, activeTask.lifecycleStage());
     }
 }

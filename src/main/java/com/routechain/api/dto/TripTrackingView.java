@@ -6,6 +6,7 @@ public record TripTrackingView(
         String orderId,
         String customerId,
         String status,
+        OrderLifecycleStage lifecycleStage,
         String serviceTier,
         double quotedFee,
         String assignedDriverId,
@@ -23,5 +24,14 @@ public record TripTrackingView(
         RouteSourceView activeRouteSource,
         String activeRouteGeneratedAt,
         List<MapPointView> remainingRoutePreviewPolyline,
-        RoutePreviewSourceView remainingRoutePreviewSource
+        RoutePreviewSourceView remainingRoutePreviewSource,
+        String createdAt,
+        String assignedAt,
+        String arrivedPickupAt,
+        String pickedUpAt,
+        String arrivedDropoffAt,
+        String droppedOffAt,
+        String cancelledAt,
+        String failedAt,
+        List<OrderLifecycleEventView> lifecycleHistory
 ) {}

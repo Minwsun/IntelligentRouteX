@@ -4,6 +4,8 @@ import com.routechain.api.dto.UserOrderRequest;
 import com.routechain.api.dto.UserOrderResponse;
 import com.routechain.api.dto.UserQuoteRequest;
 import com.routechain.api.dto.UserQuoteResponse;
+import com.routechain.api.dto.OrderLifecycleEventView;
+import com.routechain.api.dto.OrderLifecycleStage;
 import com.routechain.backend.offer.DriverOfferBatch;
 import com.routechain.data.model.OrderStatusHistoryRecord;
 import com.routechain.data.model.QuoteRecord;
@@ -19,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -102,6 +105,9 @@ public class UserOrderingService {
                     eventPublisher.publish("order.created.v1", "ORDER", order.getId(), new Events.OrderCreated(order));
 
                     DriverOfferBatch batch = runtimeBridge.dispatchOrder(order);
+                    if (batch != null) {
+                        orderRepository.appendStatusHistory(statusHistory(order.getId(), "OFFERED", "offers_published", now));
+                    }
                     return toResponse(order, batch == null ? "" : batch.offerBatchId());
                 }
         );
@@ -136,14 +142,27 @@ public class UserOrderingService {
     }
 
     private UserOrderResponse toResponse(Order order, String offerBatchId) {
+        boolean hasOfferBatch = offerBatchId != null && !offerBatchId.isBlank();
+        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(order, hasOfferBatch);
+        List<OrderLifecycleEventView> lifecycleHistory = OrderLifecycleViewMapper.historyView(orderRepository.historyForOrder(order.getId()));
         return new UserOrderResponse(
                 order.getId(),
                 order.getCustomerId(),
                 order.getServiceType(),
                 order.getStatus().name(),
+                lifecycleStage,
                 order.getQuotedFee(),
                 order.getAssignedDriverId(),
-                offerBatchId
+                offerBatchId,
+                iso(order.getCreatedAt()),
+                iso(order.getAssignedAt()),
+                iso(order.getArrivedPickupAt()),
+                iso(order.getPickedUpAt()),
+                iso(order.getArrivedDropoffAt()),
+                iso(order.getDeliveredAt()),
+                iso(order.getCancelledAt()),
+                iso(order.getFailedAt()),
+                lifecycleHistory
         );
     }
 
@@ -160,5 +179,9 @@ public class UserOrderingService {
                 reason,
                 recordedAt
         );
+    }
+
+    private String iso(Instant instant) {
+        return instant == null ? null : instant.toString();
     }
 }

@@ -137,6 +137,17 @@ public class InMemoryOperationalStore implements OperationalStore,
     }
 
     @Override
+    public List<OrderStatusHistoryRecord> historyForOrder(String orderId) {
+        if (orderId == null || orderId.isBlank()) {
+            return List.of();
+        }
+        return orderStatusHistory.stream()
+                .filter(record -> orderId.equals(record.orderId()))
+                .sorted(java.util.Comparator.comparing(OrderStatusHistoryRecord::recordedAt))
+                .toList();
+    }
+
+    @Override
     public void recordDriverLocation(String driverId, GeoPoint location, Instant recordedAt) {
         // Driver session is the authoritative live view; snapshots are not queried in memory mode.
         driverSessionsByDriverId.computeIfPresent(driverId, (ignored, existing) ->
