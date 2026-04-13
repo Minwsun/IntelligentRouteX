@@ -8,15 +8,13 @@ import com.routechain.api.dto.OrderLifecycleEventView;
 import com.routechain.api.dto.OrderLifecycleStage;
 import com.routechain.api.dto.OrderOfferSnapshot;
 import com.routechain.backend.offer.DriverOfferBatch;
-import com.routechain.backend.offer.OfferReservation;
-import com.routechain.backend.offer.OfferDecision;
-import com.routechain.backend.offer.DriverOfferRecord;
-import com.routechain.data.model.OrderStatusHistoryRecord;
 import com.routechain.data.model.QuoteRecord;
+import com.routechain.data.model.OrderLifecycleFactType;
 import com.routechain.data.port.OfferStateStore;
 import com.routechain.data.port.OrderRepository;
 import com.routechain.data.port.QuoteRepository;
 import com.routechain.data.service.IdempotencyService;
+import com.routechain.data.service.OrderLifecycleFactService;
 import com.routechain.data.service.OperationalEventPublisher;
 import com.routechain.domain.GeoPoint;
 import com.routechain.domain.Order;
@@ -36,6 +34,7 @@ public class UserOrderingService {
     private final OfferStateStore offerStateStore;
     private final RuntimeBridge runtimeBridge;
     private final IdempotencyService idempotencyService;
+    private final OrderLifecycleFactService lifecycleFactService;
     private final OperationalEventPublisher eventPublisher;
 
     public UserOrderingService(OrderRepository orderRepository,
@@ -43,12 +42,14 @@ public class UserOrderingService {
                                OfferStateStore offerStateStore,
                                RuntimeBridge runtimeBridge,
                                IdempotencyService idempotencyService,
+                               OrderLifecycleFactService lifecycleFactService,
                                OperationalEventPublisher eventPublisher) {
         this.orderRepository = orderRepository;
         this.quoteRepository = quoteRepository;
         this.offerStateStore = offerStateStore;
         this.runtimeBridge = runtimeBridge;
         this.idempotencyService = idempotencyService;
+        this.lifecycleFactService = lifecycleFactService;
         this.eventPublisher = eventPublisher;
     }
 
@@ -106,11 +107,38 @@ public class UserOrderingService {
                     order.setMerchantId(request.merchantId());
                     orderRepository.saveOrder(order);
                     orderRepository.appendStatusHistory(statusHistory(order.getId(), order.getStatus().name(), "order_created", now));
+                    lifecycleFactService.append(
+                            order.getId(),
+                            OrderLifecycleFactType.ORDER_CREATED,
+                            "USER",
+                            request.customerId(),
+                            idempotencyKey,
+                            now,
+                            java.util.Map.of(
+                                    "customerId", request.customerId(),
+                                    "serviceTier", request.serviceTier(),
+                                    "merchantId", request.merchantId(),
+                                    "pickupRegionId", request.pickupRegionId(),
+                                    "dropoffRegionId", request.dropoffRegionId())
+                    );
                     eventPublisher.publish("order.created.v1", "ORDER", order.getId(), new Events.OrderCreated(order));
 
                     DriverOfferBatch batch = runtimeBridge.dispatchOrder(order);
                     if (batch != null) {
                         orderRepository.appendStatusHistory(statusHistory(order.getId(), "OFFERED", "offers_published", now));
+                        lifecycleFactService.append(
+                                order.getId(),
+                                OrderLifecycleFactType.OFFERS_PUBLISHED,
+                                "SYSTEM",
+                                "user-ordering-service",
+                                idempotencyKey,
+                                now,
+                                java.util.Map.of(
+                                        "offerBatchId", batch.offerBatchId(),
+                                        "wave", batch.wave(),
+                                        "fanout", batch.fanout(),
+                                        "previousBatchId", batch.previousBatchId())
+                        );
                     }
                     return toResponse(order, batch == null ? "" : batch.offerBatchId());
                 }
@@ -137,6 +165,15 @@ public class UserOrderingService {
                         runtimeBridge.cancelOrder(order, resolvedReason, now);
                         orderRepository.saveOrder(order);
                         orderRepository.appendStatusHistory(statusHistory(order.getId(), order.getStatus().name(), resolvedReason, now));
+                        lifecycleFactService.append(
+                                order.getId(),
+                                OrderLifecycleFactType.CANCELLED,
+                                "USER",
+                                order.getCustomerId(),
+                                idempotencyKey,
+                                now,
+                                java.util.Map.of("reason", resolvedReason)
+                        );
                         eventPublisher.publish("order.status_changed.v1", "ORDER", order.getId(),
                                 new Events.OrderCancelled(order.getId(), order.getCancellationReason()));
                         return toResponse(order, latestOfferBatch(order.getId()));
@@ -146,14 +183,15 @@ public class UserOrderingService {
     }
 
     private UserOrderResponse toResponse(Order order, String offerBatchId) {
-        OrderOfferSnapshot offerSnapshot = OrderOfferViewMapper.snapshot(
-                offerStateStore.batchesForOrder(order.getId()),
-                offerStateStore.offersForOrder(order.getId()),
-                offerStateStore.decisionsForOrder(order.getId()),
-                offerStateStore.findReservation(order.getId()).orElse(null),
-                order.getAssignedDriverId());
-        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(order, offerSnapshot);
-        List<OrderLifecycleEventView> lifecycleHistory = OrderLifecycleViewMapper.historyView(orderRepository.historyForOrder(order.getId()));
+        OrderLifecycleProjection projection = Optional.ofNullable(runtimeBridge.lifecycleProjection(order.getId()))
+                .orElse(new OrderLifecycleProjection(
+                        OrderLifecycleStage.CREATED,
+                        List.of(),
+                        OrderOfferViewMapper.emptySnapshot()
+                ));
+        OrderOfferSnapshot offerSnapshot = projection.offerSnapshot();
+        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(projection);
+        List<OrderLifecycleEventView> lifecycleHistory = OrderLifecycleViewMapper.historyView(projection);
         return new UserOrderResponse(
                 order.getId(),
                 order.getCustomerId(),
@@ -182,8 +220,8 @@ public class UserOrderingService {
                 .orElse("");
     }
 
-    private OrderStatusHistoryRecord statusHistory(String orderId, String status, String reason, Instant recordedAt) {
-        return new OrderStatusHistoryRecord(
+    private com.routechain.data.model.OrderStatusHistoryRecord statusHistory(String orderId, String status, String reason, Instant recordedAt) {
+        return new com.routechain.data.model.OrderStatusHistoryRecord(
                 orderId,
                 status,
                 reason,

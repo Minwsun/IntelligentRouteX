@@ -4,8 +4,10 @@ import com.routechain.api.store.InMemoryOperationalStore;
 import com.routechain.api.service.OrderOfferViewMapper;
 import com.routechain.data.memory.InMemoryOfferRuntimeStore;
 import com.routechain.data.memory.InMemoryOfferStateStore;
+import com.routechain.data.model.OrderLifecycleFactType;
 import com.routechain.data.port.OfferRuntimeStore;
 import com.routechain.data.port.OfferStateStore;
+import com.routechain.data.service.OrderLifecycleFactService;
 import com.routechain.data.service.OperationalEventPublisher;
 import com.routechain.infra.Events;
 
@@ -29,24 +31,32 @@ public class OfferBrokerService {
     private final OfferStateStore stateStore;
     private final OfferRuntimeStore runtimeStore;
     private final OperationalEventPublisher eventPublisher;
+    private final OrderLifecycleFactService lifecycleFactService;
     private final Duration declineCooldown;
     private final Duration expiryCooldown;
 
     public OfferBrokerService() {
+        this(new InMemoryOperationalStore());
+    }
+
+    private OfferBrokerService(InMemoryOperationalStore operationalStore) {
         this(
                 new InMemoryOfferStateStore(),
                 new InMemoryOfferRuntimeStore(),
-                new OperationalEventPublisher(new InMemoryOperationalStore()),
+                new OrderLifecycleFactService(operationalStore),
+                new OperationalEventPublisher(operationalStore),
                 DEFAULT_DECLINE_COOLDOWN,
                 DEFAULT_EXPIRY_COOLDOWN
         );
     }
 
     public OfferBrokerService(OfferStateStore stateStore,
+                              OrderLifecycleFactService lifecycleFactService,
                               OperationalEventPublisher eventPublisher) {
         this(
                 stateStore,
                 new InMemoryOfferRuntimeStore(),
+                lifecycleFactService,
                 eventPublisher,
                 DEFAULT_DECLINE_COOLDOWN,
                 DEFAULT_EXPIRY_COOLDOWN
@@ -55,11 +65,13 @@ public class OfferBrokerService {
 
     public OfferBrokerService(OfferStateStore stateStore,
                               OfferRuntimeStore runtimeStore,
+                              OrderLifecycleFactService lifecycleFactService,
                               OperationalEventPublisher eventPublisher,
                               Duration declineCooldown,
                               Duration expiryCooldown) {
         this.stateStore = stateStore;
         this.runtimeStore = runtimeStore;
+        this.lifecycleFactService = lifecycleFactService;
         this.eventPublisher = eventPublisher;
         this.declineCooldown = normalizeCooldown(declineCooldown, DEFAULT_DECLINE_COOLDOWN);
         this.expiryCooldown = normalizeCooldown(expiryCooldown, DEFAULT_EXPIRY_COOLDOWN);
@@ -141,6 +153,33 @@ public class OfferBrokerService {
                 ranked
         );
         stateStore.saveBatch(batch);
+        lifecycleFactService.append(
+                batch.orderId(),
+                OrderLifecycleFactType.OFFER_BATCH_CREATED,
+                "SYSTEM",
+                "offer-broker-service",
+                createdAt,
+                Map.of(
+                        "offerBatchId", batch.offerBatchId(),
+                        "wave", batch.wave(),
+                        "previousBatchId", batch.previousBatchId(),
+                        "fanout", batch.fanout(),
+                        "expiresAt", batch.expiresAt().toString())
+        );
+        if (batch.wave() > 1) {
+            lifecycleFactService.append(
+                    batch.orderId(),
+                    OrderLifecycleFactType.ORDER_REOFFERED,
+                    "SYSTEM",
+                    "offer-broker-service",
+                    createdAt,
+                    Map.of(
+                            "previousBatchId", batch.previousBatchId(),
+                            "nextBatchId", batch.offerBatchId(),
+                            "wave", batch.wave(),
+                            "reason", "reoffer_wave_created")
+            );
+        }
         eventPublisher.publish(
                 "offer.created.v1",
                 "ORDER",
@@ -227,6 +266,11 @@ public class OfferBrokerService {
             markLost(entry.offerBatchId(), offerId, "offer-lost");
             OfferDecision decision = new OfferDecision(offerId, entry.offerBatchId(), entry.orderId(), driverId, DriverOfferStatus.LOST, "offer-lost", now, existing.reservationVersion());
             stateStore.saveDecision(decision);
+            appendOfferFact(OrderLifecycleFactType.OFFER_LOST, entry, now, Map.of(
+                    "offerId", entry.offerId(),
+                    "offerBatchId", entry.offerBatchId(),
+                    "driverId", driverId,
+                    "reason", "offer-lost"));
             closeBatchIfResolved(entry.offerBatchId(), now, "accepted_elsewhere");
             return decision;
         }
@@ -247,6 +291,28 @@ public class OfferBrokerService {
         stateStore.saveOffer(entry.withStatus(DriverOfferStatus.ACCEPTED));
         runtimeStore.clearOffer(offerId);
         markLost(entry.offerBatchId(), offerId, "offer-lost");
+        appendOfferFact(OrderLifecycleFactType.OFFER_ACCEPTED, entry, now, Map.of(
+                "offerId", entry.offerId(),
+                "offerBatchId", entry.offerBatchId(),
+                "driverId", driverId,
+                "reservationVersion", reservationVersion,
+                "expiresAt", entry.expiresAt().toString(),
+                "reason", "accepted"));
+        lifecycleFactService.append(
+                entry.orderId(),
+                OrderLifecycleFactType.ASSIGNMENT_LOCKED,
+                "SYSTEM",
+                "offer-broker-service",
+                now,
+                Map.of(
+                        "reservationId", reservation.reservationId(),
+                        "offerId", entry.offerId(),
+                        "offerBatchId", entry.offerBatchId(),
+                        "driverId", driverId,
+                        "reservationVersion", reservationVersion,
+                        "status", reservation.status(),
+                        "expiresAt", reservation.expiresAt().toString())
+        );
         eventPublisher.publish(
                 "offer.resolved.v1",
                 "ORDER",
@@ -289,6 +355,11 @@ public class OfferBrokerService {
         OfferDecision decision = new OfferDecision(offerId, entry.offerBatchId(), entry.orderId(), driverId, DriverOfferStatus.DECLINED,
                 resolvedReason, now, 0);
         stateStore.saveDecision(decision);
+        appendOfferFact(OrderLifecycleFactType.OFFER_DECLINED, entry, now, Map.of(
+                "offerId", entry.offerId(),
+                "offerBatchId", entry.offerBatchId(),
+                "driverId", driverId,
+                "reason", resolvedReason));
         closeBatchIfResolved(entry.offerBatchId(), now, "declined");
         return decision;
     }
@@ -330,6 +401,11 @@ public class OfferBrokerService {
                         Instant.now(),
                         0
                 ));
+                appendOfferFact(OrderLifecycleFactType.OFFER_LOST, pending, Instant.now(), Map.of(
+                        "offerId", pending.offerId(),
+                        "offerBatchId", pending.offerBatchId(),
+                        "driverId", pending.driverId(),
+                        "reason", reason));
             }
         }
     }
@@ -374,6 +450,11 @@ public class OfferBrokerService {
                 now,
                 0
         ));
+        appendOfferFact(OrderLifecycleFactType.OFFER_EXPIRED, entry, now, Map.of(
+                "offerId", entry.offerId(),
+                "offerBatchId", entry.offerBatchId(),
+                "driverId", entry.driverId(),
+                "reason", "offer-expired"));
         closeBatchIfResolved(entry.offerBatchId(), now, "expired");
     }
 
@@ -389,11 +470,36 @@ public class OfferBrokerService {
         }
         DriverOfferBatch closed = batch.close(now, reason);
         stateStore.saveBatch(closed);
+        lifecycleFactService.append(
+                closed.orderId(),
+                OrderLifecycleFactType.OFFER_BATCH_CLOSED,
+                "SYSTEM",
+                "offer-broker-service",
+                now,
+                Map.of(
+                        "offerBatchId", closed.offerBatchId(),
+                        "wave", closed.wave(),
+                        "closeReason", closed.closeReason())
+        );
         eventPublisher.publish(
                 "offer.batch_closed.v1",
                 "ORDER",
                 closed.orderId(),
                 new Events.OfferBatchClosed(closed.offerBatchId(), closed.orderId(), closed.wave(), closed.closeReason(), closed.closedAt()));
+    }
+
+    private void appendOfferFact(OrderLifecycleFactType factType,
+                                 DriverOfferRecord offer,
+                                 Instant recordedAt,
+                                 Map<String, Object> payload) {
+        lifecycleFactService.append(
+                offer.orderId(),
+                factType,
+                "DRIVER",
+                offer.driverId(),
+                recordedAt,
+                payload
+        );
     }
 
     private Duration normalizeCooldown(Duration value, Duration fallback) {

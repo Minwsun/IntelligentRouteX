@@ -7,6 +7,7 @@ import com.routechain.backend.offer.DriverOfferBatch;
 import com.routechain.backend.offer.DriverOfferCandidate;
 import com.routechain.data.memory.InMemoryOfferStateStore;
 import com.routechain.data.service.IdempotencyService;
+import com.routechain.data.service.OrderLifecycleFactService;
 import com.routechain.data.service.OperationalEventPublisher;
 import com.routechain.domain.Order;
 import org.junit.jupiter.api.AfterEach;
@@ -54,6 +55,7 @@ class UserOrderingServiceTest {
                 offerStateStore,
                 runtimeBridge,
                 new IdempotencyService(store, new RouteChainRuntimeProperties()),
+                new OrderLifecycleFactService(store),
                 eventPublisher
         );
 
@@ -110,6 +112,7 @@ class UserOrderingServiceTest {
                 offerStateStore,
                 runtimeBridge,
                 new IdempotencyService(store, new RouteChainRuntimeProperties()),
+                new OrderLifecycleFactService(store),
                 eventPublisher
         );
 

@@ -111,6 +111,7 @@ class JdbcOperationalIntegrationTest {
                     offer_batches,
                     driver_locations,
                     driver_sessions,
+                    order_lifecycle_facts,
                     order_status_history,
                     orders,
                     quotes,
@@ -154,6 +155,7 @@ class JdbcOperationalIntegrationTest {
         assertEquals(1, count("orders"));
         assertEquals(1, count("idempotency_records"));
         assertEquals(2, count("order_status_history"));
+        assertEquals(3, count("order_lifecycle_facts"));
         assertTrue(count("offer_batches") >= 1);
         assertTrue(count("driver_offers") >= 1);
         assertTrue(outboxRepository.recent(10).stream().anyMatch(event -> "order.created.v1".equals(event.topicKey())));
@@ -199,6 +201,7 @@ class JdbcOperationalIntegrationTest {
         assertEquals(1, count("idempotency_records", "scope = :scope", Map.of("scope", "driver.accept_offer")));
         assertEquals(2, count("offer_decisions"));
         assertEquals(3, count("order_status_history"));
+        assertEquals(7, count("order_lifecycle_facts"));
         assertEquals(DriverOfferStatus.LOST,
                 driverOperationsService.offers("drv-b").stream()
                         .filter(view -> view.offerId().equals(lostOfferId))
@@ -236,6 +239,7 @@ class JdbcOperationalIntegrationTest {
         assertEquals(OrderLifecycleStage.CANCELLED, cancelled.lifecycleStage());
         assertEquals("changed_plan", orderRepository.findOrder(created.orderId()).orElseThrow().getCancellationReason());
         assertEquals(3, count("order_status_history"));
+        assertEquals(4, count("order_lifecycle_facts"));
         assertEquals(1, count("idempotency_records", "scope = :scope", Map.of("scope", "user.cancel_order")));
         assertTrue(outboxRepository.recent(10).stream().anyMatch(event -> "order.status_changed.v1".equals(event.topicKey())));
     }
@@ -283,6 +287,7 @@ class JdbcOperationalIntegrationTest {
             assertEquals("changed_plan", orderRepository.findOrder(created.orderId()).orElseThrow().getCancellationReason());
             assertEquals(1, count("idempotency_records", "scope = :scope", Map.of("scope", "user.cancel_order")));
             assertEquals(3, count("order_status_history"));
+            assertEquals(4, count("order_lifecycle_facts"));
             assertEquals(3, count("outbox_events"));
         } finally {
             executor.shutdownNow();
@@ -330,6 +335,7 @@ class JdbcOperationalIntegrationTest {
         assertNotNull(persistedOrder.getArrivedPickupAt());
         assertNotNull(persistedOrder.getArrivedDropoffAt());
         assertEquals(8, count("order_status_history"));
+        assertEquals(11, count("order_lifecycle_facts"));
         assertEquals(
                 List.of("CONFIRMED", "OFFERED", "ASSIGNED", "PICKUP_EN_ROUTE", "ARRIVED_PICKUP", "PICKED_UP", "ARRIVED_DROPOFF", "DELIVERED"),
                 orderRepository.historyForOrder(created.orderId()).stream()
@@ -467,6 +473,7 @@ class JdbcOperationalIntegrationTest {
         assertEquals(DriverOfferStatus.ACCEPTED, first.status());
         assertEquals(1, count("idempotency_records", "scope = :scope", Map.of("scope", "driver.accept_offer")));
         assertEquals(3, count("order_status_history"));
+        assertEquals(7, count("order_lifecycle_facts"));
         assertEquals(4, count("outbox_events"));
         assertEquals("drv-repeat", orderRepository.findOrder(created.orderId()).orElseThrow().getAssignedDriverId());
     }
@@ -514,6 +521,7 @@ class JdbcOperationalIntegrationTest {
             assertEquals(1, count("idempotency_records"));
             assertEquals(1, count("offer_batches"));
             assertEquals(2, count("order_status_history"));
+            assertEquals(3, count("order_lifecycle_facts"));
             assertEquals(2, count("outbox_events"));
         } finally {
             executor.shutdownNow();

@@ -3,6 +3,7 @@ package com.routechain.api.store;
 import com.routechain.backend.offer.DriverSessionState;
 import com.routechain.config.RouteChainRuntimeProperties;
 import com.routechain.data.model.IdempotencyRecord;
+import com.routechain.data.model.OrderLifecycleFact;
 import com.routechain.data.model.OrderStatusHistoryRecord;
 import com.routechain.data.model.OutboxEventRecord;
 import com.routechain.data.model.QuoteRecord;
@@ -11,6 +12,7 @@ import com.routechain.data.model.WalletTransactionRecord;
 import com.routechain.data.port.DriverFleetRepository;
 import com.routechain.data.port.IdempotencyRepository;
 import com.routechain.data.port.OrderRepository;
+import com.routechain.data.port.OrderLifecycleFactRepository;
 import com.routechain.data.port.OutboxRepository;
 import com.routechain.data.port.QuoteRepository;
 import com.routechain.data.port.WalletRepository;
@@ -36,6 +38,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 @ConditionalOnProperty(prefix = "routechain.persistence.jdbc", name = "enabled", havingValue = "false", matchIfMissing = true)
 public class InMemoryOperationalStore implements OperationalStore,
         OrderRepository,
+        OrderLifecycleFactRepository,
         QuoteRepository,
         DriverFleetRepository,
         WalletRepository,
@@ -52,6 +55,7 @@ public class InMemoryOperationalStore implements OperationalStore,
     private final Map<String, Instant> idempotencyClaimsByCompositeKey = new ConcurrentHashMap<>();
     private final List<OutboxEventRecord> outboxEvents = new CopyOnWriteArrayList<>();
     private final List<OrderStatusHistoryRecord> orderStatusHistory = new CopyOnWriteArrayList<>();
+    private final List<OrderLifecycleFact> orderLifecycleFacts = new CopyOnWriteArrayList<>();
 
     public InMemoryOperationalStore() {
         this(Duration.ofSeconds(5));
@@ -144,6 +148,35 @@ public class InMemoryOperationalStore implements OperationalStore,
         return orderStatusHistory.stream()
                 .filter(record -> orderId.equals(record.orderId()))
                 .sorted(java.util.Comparator.comparing(OrderStatusHistoryRecord::recordedAt))
+                .toList();
+    }
+
+    @Override
+    public void append(OrderLifecycleFact fact) {
+        orderLifecycleFacts.add(fact);
+    }
+
+    @Override
+    public List<OrderLifecycleFact> factsForOrder(String orderId) {
+        if (orderId == null || orderId.isBlank()) {
+            return List.of();
+        }
+        return orderLifecycleFacts.stream()
+                .filter(fact -> orderId.equals(fact.orderId()))
+                .sorted(java.util.Comparator
+                        .comparing(OrderLifecycleFact::recordedAt)
+                        .thenComparing(OrderLifecycleFact::factId))
+                .toList();
+    }
+
+    @Override
+    public List<OrderLifecycleFact> recentFacts(int limit) {
+        return orderLifecycleFacts.stream()
+                .sorted(java.util.Comparator
+                        .comparing(OrderLifecycleFact::recordedAt)
+                        .thenComparing(OrderLifecycleFact::factId)
+                        .reversed())
+                .limit(Math.max(1, limit))
                 .toList();
     }
 

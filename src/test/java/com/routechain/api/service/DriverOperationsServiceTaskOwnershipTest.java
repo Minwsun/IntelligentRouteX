@@ -7,6 +7,7 @@ import com.routechain.data.config.RouteChainPersistenceProperties;
 import com.routechain.data.memory.InMemoryOfferStateStore;
 import com.routechain.data.port.DriverPresenceStore;
 import com.routechain.data.service.IdempotencyService;
+import com.routechain.data.service.OrderLifecycleFactService;
 import com.routechain.data.service.OperationalEventPublisher;
 import com.routechain.domain.GeoPoint;
 import com.routechain.domain.Order;
@@ -41,10 +42,11 @@ class DriverOperationsServiceTaskOwnershipTest {
                 store,
                 mock(DriverPresenceStore.class),
                 store,
-                new OfferBrokerService(new InMemoryOfferStateStore(), new OperationalEventPublisher(store)),
+                new OfferBrokerService(new InMemoryOfferStateStore(), new OrderLifecycleFactService(store), new OperationalEventPublisher(store)),
                 mock(RuntimeBridge.class),
                 mock(OpsArtifactService.class),
                 new IdempotencyService(store, new com.routechain.config.RouteChainRuntimeProperties()),
+                new OrderLifecycleFactService(store),
                 new OperationalEventPublisher(store),
                 new RouteChainPersistenceProperties()
         );

@@ -9,11 +9,13 @@ import com.routechain.backend.offer.DriverSessionState;
 import com.routechain.backend.offer.OfferBrokerService;
 import com.routechain.backend.offer.OfferDecision;
 import com.routechain.data.config.RouteChainPersistenceProperties;
+import com.routechain.data.model.OrderLifecycleFactType;
 import com.routechain.data.model.OrderStatusHistoryRecord;
 import com.routechain.data.port.DriverFleetRepository;
 import com.routechain.data.port.DriverPresenceStore;
 import com.routechain.data.port.OrderRepository;
 import com.routechain.data.service.IdempotencyService;
+import com.routechain.data.service.OrderLifecycleFactService;
 import com.routechain.data.service.OperationalEventPublisher;
 import com.routechain.domain.GeoPoint;
 import com.routechain.domain.Order;
@@ -35,6 +37,7 @@ public class DriverOperationsService {
     private final RuntimeBridge runtimeBridge;
     private final OpsArtifactService opsArtifactService;
     private final IdempotencyService idempotencyService;
+    private final OrderLifecycleFactService lifecycleFactService;
     private final OperationalEventPublisher eventPublisher;
     private final Duration driverPresenceTtl;
 
@@ -45,6 +48,7 @@ public class DriverOperationsService {
                                    RuntimeBridge runtimeBridge,
                                    OpsArtifactService opsArtifactService,
                                    IdempotencyService idempotencyService,
+                                   OrderLifecycleFactService lifecycleFactService,
                                    OperationalEventPublisher eventPublisher,
                                    RouteChainPersistenceProperties persistenceProperties) {
         this.driverFleetRepository = driverFleetRepository;
@@ -54,6 +58,7 @@ public class DriverOperationsService {
         this.runtimeBridge = runtimeBridge;
         this.opsArtifactService = opsArtifactService;
         this.idempotencyService = idempotencyService;
+        this.lifecycleFactService = lifecycleFactService;
         this.eventPublisher = eventPublisher;
         this.driverPresenceTtl = persistenceProperties.getRedis().getDriverPresenceTtl();
     }
@@ -171,15 +176,23 @@ public class DriverOperationsService {
             String historyStatus = status;
             switch (status) {
                 case "PICKUP_EN_ROUTE" -> order.markPickupStarted(now);
-                case "ARRIVED_PICKUP" -> order.markArrivedPickup(now);
+                case "ARRIVED_PICKUP" -> {
+                    order.markArrivedPickup(now);
+                    appendLifecycleFact(order.getId(), "ARRIVED_PICKUP", driverId, now, java.util.Map.of("rawStatus", status));
+                }
                 case "PICKED_UP" -> {
                     order.markPickedUp(now);
+                    appendLifecycleFact(order.getId(), "PICKED_UP", driverId, now, java.util.Map.of("rawStatus", status));
                     eventPublisher.publish("task.status_changed.v1", "ORDER", order.getId(), new Events.OrderPickedUp(order.getId()));
                 }
                 case "DROPOFF_EN_ROUTE" -> order.markDropoffStarted(now);
-                case "ARRIVED_DROPOFF" -> order.markArrivedDropoff(now);
+                case "ARRIVED_DROPOFF" -> {
+                    order.markArrivedDropoff(now);
+                    appendLifecycleFact(order.getId(), "ARRIVED_DROPOFF", driverId, now, java.util.Map.of("rawStatus", status));
+                }
                 case "DELIVERED" -> {
                     order.markDelivered(now);
+                    appendLifecycleFact(order.getId(), "DROPPED_OFF", driverId, now, java.util.Map.of("rawStatus", status));
                     eventPublisher.publish("task.status_changed.v1", "ORDER", order.getId(), new Events.OrderDelivered(order.getId()));
                     driverFleetRepository.findDriverSession(driverId).ifPresent(existing -> {
                         DriverSessionState released = existing.withAvailability(true).withActiveOffer("");
@@ -190,6 +203,7 @@ public class DriverOperationsService {
                 case "DROPPED_OFF" -> {
                     historyStatus = "DELIVERED";
                     order.markDelivered(now);
+                    appendLifecycleFact(order.getId(), "DROPPED_OFF", driverId, now, java.util.Map.of("rawStatus", status));
                     eventPublisher.publish("task.status_changed.v1", "ORDER", order.getId(), new Events.OrderDelivered(order.getId()));
                     driverFleetRepository.findDriverSession(driverId).ifPresent(existing -> {
                         DriverSessionState released = existing.withAvailability(true).withActiveOffer("");
@@ -199,6 +213,7 @@ public class DriverOperationsService {
                 }
                 case "FAILED" -> {
                     order.markFailed("driver_reported_failure", now);
+                    appendLifecycleFact(order.getId(), "FAILED", driverId, now, java.util.Map.of("reason", order.getFailureReason(), "rawStatus", status));
                     eventPublisher.publish("task.status_changed.v1", "ORDER", order.getId(), new Events.OrderFailed(order.getId(), order.getFailureReason()));
                     driverFleetRepository.findDriverSession(driverId).ifPresent(existing -> {
                         DriverSessionState released = existing.withAvailability(true).withActiveOffer("");
@@ -226,6 +241,17 @@ public class DriverOperationsService {
                 status,
                 reason,
                 recordedAt
+        );
+    }
+
+    private void appendLifecycleFact(String orderId, String factType, String driverId, Instant recordedAt, java.util.Map<String, Object> payload) {
+        lifecycleFactService.append(
+                orderId,
+                OrderLifecycleFactType.valueOf(factType),
+                "DRIVER",
+                driverId,
+                recordedAt,
+                payload
         );
     }
 

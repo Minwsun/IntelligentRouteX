@@ -16,6 +16,7 @@ import com.routechain.data.config.RouteChainPersistenceProperties;
 import com.routechain.data.memory.InMemoryOfferStateStore;
 import com.routechain.data.port.DriverPresenceStore;
 import com.routechain.data.service.IdempotencyService;
+import com.routechain.data.service.OrderLifecycleFactService;
 import com.routechain.data.service.OperationalEventPublisher;
 import com.routechain.domain.Driver;
 import com.routechain.infra.EventBus;
@@ -50,20 +51,23 @@ class AppRuntimeRouteTruthIntegrationTest {
         InMemoryOperationalStore store = new InMemoryOperationalStore();
         InMemoryOfferStateStore offerStateStore = new InMemoryOfferStateStore();
         OperationalEventPublisher eventPublisher = new OperationalEventPublisher(store);
-        OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, eventPublisher);
+        OrderLifecycleFactService lifecycleFactService = new OrderLifecycleFactService(store);
+        OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, lifecycleFactService, eventPublisher);
         DispatchOrchestratorService orchestratorService = new DispatchOrchestratorService(store, store, offerStateStore, offerBrokerService);
         RuntimeBridge runtimeBridge = new RuntimeBridge(
                 store,
                 store,
                 offerStateStore,
                 offerBrokerService,
-                orchestratorService);
+                orchestratorService,
+                new OrderLifecycleProjectionService(store, store, offerStateStore));
         UserOrderingService userOrderingService = new UserOrderingService(
                 store,
                 store,
                 offerStateStore,
                 runtimeBridge,
                 new IdempotencyService(store, new RouteChainRuntimeProperties()),
+                lifecycleFactService,
                 eventPublisher);
         DriverOperationsService driverOperationsService = new DriverOperationsService(
                 store,
@@ -73,6 +77,7 @@ class AppRuntimeRouteTruthIntegrationTest {
                 runtimeBridge,
                 Mockito.mock(OpsArtifactService.class),
                 new IdempotencyService(store, new RouteChainRuntimeProperties()),
+                lifecycleFactService,
                 eventPublisher,
                 new RouteChainPersistenceProperties());
 

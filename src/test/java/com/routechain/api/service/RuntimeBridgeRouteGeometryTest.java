@@ -6,6 +6,7 @@ import com.routechain.api.dto.RoutePreviewSourceView;
 import com.routechain.api.dto.RouteSourceView;
 import com.routechain.api.dto.TripTrackingView;
 import com.routechain.api.store.InMemoryOperationalStore;
+import com.routechain.data.service.OrderLifecycleFactService;
 import com.routechain.backend.offer.DriverSessionState;
 import com.routechain.data.memory.InMemoryOfferStateStore;
 import com.routechain.domain.Driver;
@@ -35,12 +36,14 @@ class RuntimeBridgeRouteGeometryTest {
     @Test
     void tripTrackingShouldUseRuntimeGeometryWhenDriverHasLiveWaypoints() {
         InMemoryOperationalStore store = new InMemoryOperationalStore();
+        InMemoryOfferStateStore offerStateStore = new InMemoryOfferStateStore();
         RuntimeBridge bridge = new RuntimeBridge(
                 store,
                 store,
-                new InMemoryOfferStateStore(),
+                offerStateStore,
                 org.mockito.Mockito.mock(com.routechain.backend.offer.OfferBrokerService.class),
-                org.mockito.Mockito.mock(DispatchOrchestratorService.class));
+                org.mockito.Mockito.mock(DispatchOrchestratorService.class),
+                new OrderLifecycleProjectionService(store, store, offerStateStore));
 
         SimulationEngine engine = RouteCoreRuntime.liveEngine();
         engine.reset();
@@ -81,6 +84,13 @@ class RuntimeBridgeRouteGeometryTest {
         order.setServiceType("instant");
         order.assignDriver(runtimeDriver.getId(), Instant.parse("2026-04-12T03:01:00Z"));
         store.saveOrder(order);
+        new OrderLifecycleFactService(store).append(
+                order.getId(),
+                com.routechain.data.model.OrderLifecycleFactType.ASSIGNMENT_LOCKED,
+                "SYSTEM",
+                "test",
+                Instant.parse("2026-04-12T03:01:00Z"),
+                java.util.Map.of("driverId", runtimeDriver.getId(), "offerId", "offer-1", "offerBatchId", "batch-1", "reservationVersion", 1L, "status", "ACCEPTED"));
 
         TripTrackingView tracking = bridge.tripTracking(order.getId()).orElseThrow();
 
@@ -99,12 +109,14 @@ class RuntimeBridgeRouteGeometryTest {
     @Test
     void activeTaskShouldFallBackAndLabelApproximateRouteWhenRuntimeGeometryIsMissing() {
         InMemoryOperationalStore store = new InMemoryOperationalStore();
+        InMemoryOfferStateStore offerStateStore = new InMemoryOfferStateStore();
         RuntimeBridge bridge = new RuntimeBridge(
                 store,
                 store,
-                new InMemoryOfferStateStore(),
+                offerStateStore,
                 org.mockito.Mockito.mock(com.routechain.backend.offer.OfferBrokerService.class),
-                org.mockito.Mockito.mock(DispatchOrchestratorService.class));
+                org.mockito.Mockito.mock(DispatchOrchestratorService.class),
+                new OrderLifecycleProjectionService(store, store, offerStateStore));
 
         store.saveDriverSession(new DriverSessionState(
                 "drv-fallback",
@@ -129,6 +141,13 @@ class RuntimeBridgeRouteGeometryTest {
         order.assignDriver("drv-fallback", Instant.parse("2026-04-12T03:11:00Z"));
         order.markPickupStarted(Instant.parse("2026-04-12T03:12:00Z"));
         store.saveOrder(order);
+        new OrderLifecycleFactService(store).append(
+                order.getId(),
+                com.routechain.data.model.OrderLifecycleFactType.ASSIGNMENT_LOCKED,
+                "SYSTEM",
+                "test",
+                Instant.parse("2026-04-12T03:11:00Z"),
+                java.util.Map.of("driverId", "drv-fallback", "offerId", "offer-1", "offerBatchId", "batch-1", "reservationVersion", 1L, "status", "ACCEPTED"));
 
         DriverActiveTaskView activeTask = bridge.activeTask("drv-fallback").orElseThrow();
 

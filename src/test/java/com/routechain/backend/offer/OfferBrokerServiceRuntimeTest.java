@@ -3,6 +3,7 @@ package com.routechain.backend.offer;
 import com.routechain.api.store.InMemoryOperationalStore;
 import com.routechain.data.memory.InMemoryOfferRuntimeStore;
 import com.routechain.data.memory.InMemoryOfferStateStore;
+import com.routechain.data.service.OrderLifecycleFactService;
 import com.routechain.data.service.OperationalEventPublisher;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,7 @@ class OfferBrokerServiceRuntimeTest {
         OfferBrokerService broker = new OfferBrokerService(
                 stateStore,
                 runtimeStore,
+                new OrderLifecycleFactService(new InMemoryOperationalStore()),
                 new OperationalEventPublisher(new InMemoryOperationalStore()),
                 Duration.ofSeconds(30),
                 Duration.ofSeconds(45)
@@ -51,6 +53,7 @@ class OfferBrokerServiceRuntimeTest {
         OfferBrokerService broker = new OfferBrokerService(
                 stateStore,
                 runtimeStore,
+                new OrderLifecycleFactService(new InMemoryOperationalStore()),
                 new OperationalEventPublisher(new InMemoryOperationalStore()),
                 Duration.ofSeconds(30),
                 Duration.ofSeconds(45)
@@ -78,6 +81,7 @@ class OfferBrokerServiceRuntimeTest {
         OfferBrokerService broker = new OfferBrokerService(
                 stateStore,
                 runtimeStore,
+                new OrderLifecycleFactService(new InMemoryOperationalStore()),
                 new OperationalEventPublisher(new InMemoryOperationalStore()),
                 Duration.ofSeconds(30),
                 Duration.ofSeconds(45)

@@ -90,6 +90,7 @@ class JdbcRedisDriverPresenceIntegrationTest {
                     offer_batches,
                     driver_locations,
                     driver_sessions,
+                    order_lifecycle_facts,
                     order_status_history,
                     orders,
                     quotes,

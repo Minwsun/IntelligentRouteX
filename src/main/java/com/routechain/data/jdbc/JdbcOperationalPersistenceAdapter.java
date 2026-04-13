@@ -3,6 +3,8 @@ package com.routechain.data.jdbc;
 import com.routechain.api.store.OperationalStore;
 import com.routechain.backend.offer.DriverSessionState;
 import com.routechain.data.model.IdempotencyRecord;
+import com.routechain.data.model.OrderLifecycleFact;
+import com.routechain.data.model.OrderLifecycleFactType;
 import com.routechain.data.model.OrderStatusHistoryRecord;
 import com.routechain.data.model.OutboxEventRecord;
 import com.routechain.data.model.QuoteRecord;
@@ -11,6 +13,7 @@ import com.routechain.data.model.WalletTransactionRecord;
 import com.routechain.data.port.DriverFleetRepository;
 import com.routechain.data.port.IdempotencyRepository;
 import com.routechain.data.port.OrderRepository;
+import com.routechain.data.port.OrderLifecycleFactRepository;
 import com.routechain.data.port.OutboxRepository;
 import com.routechain.data.port.QuoteRepository;
 import com.routechain.data.port.WalletRepository;
@@ -34,6 +37,7 @@ import java.util.UUID;
  */
 public class JdbcOperationalPersistenceAdapter implements OperationalStore,
         OrderRepository,
+        OrderLifecycleFactRepository,
         QuoteRepository,
         DriverFleetRepository,
         WalletRepository,
@@ -250,6 +254,77 @@ public class JdbcOperationalPersistenceAdapter implements OperationalStore,
                         rs.getString("status"),
                         rs.getString("reason"),
                         instant(rs.getTimestamp("recorded_at"))));
+    }
+
+    @Override
+    public void append(OrderLifecycleFact fact) {
+        jdbc.update("""
+                INSERT INTO order_lifecycle_facts (
+                    id, public_id, order_id, order_public_id, fact_type, actor_type, actor_public_id,
+                    idempotency_key, correlation_id, payload_json, recorded_at, created_at
+                ) VALUES (
+                    :id, :publicId, :orderId, :orderPublicId, :factType, :actorType, :actorPublicId,
+                    :idempotencyKey, :correlationId, CAST(:payloadJson AS jsonb), :recordedAt, :createdAt
+                )
+                ON CONFLICT (public_id) DO NOTHING
+                """,
+                new MapSqlParameterSource()
+                        .addValue("id", UUID.nameUUIDFromBytes(("order-lifecycle-fact:" + fact.factId()).getBytes()))
+                        .addValue("publicId", fact.factId())
+                        .addValue("orderId", uuidRef("order", fact.orderId()))
+                        .addValue("orderPublicId", fact.orderId())
+                        .addValue("factType", fact.factType().name())
+                        .addValue("actorType", fact.actorType())
+                        .addValue("actorPublicId", blankToNull(fact.actorId()))
+                        .addValue("idempotencyKey", blankToNull(fact.idempotencyKey()))
+                        .addValue("correlationId", blankToNull(fact.correlationId()))
+                        .addValue("payloadJson", fact.payloadJson())
+                        .addValue("recordedAt", ts(fact.recordedAt()))
+                        .addValue("createdAt", ts(Instant.now())));
+    }
+
+    @Override
+    public List<OrderLifecycleFact> factsForOrder(String orderId) {
+        return jdbc.query("""
+                        SELECT public_id, order_public_id, fact_type, recorded_at, actor_type,
+                               actor_public_id, idempotency_key, correlation_id, payload_json
+                          FROM order_lifecycle_facts
+                         WHERE order_public_id = :orderId
+                      ORDER BY recorded_at ASC, public_id ASC
+                        """,
+                new MapSqlParameterSource("orderId", orderId),
+                (rs, rowNum) -> new OrderLifecycleFact(
+                        rs.getString("public_id"),
+                        rs.getString("order_public_id"),
+                        OrderLifecycleFactType.valueOf(rs.getString("fact_type")),
+                        instant(rs.getTimestamp("recorded_at")),
+                        rs.getString("actor_type"),
+                        rs.getString("actor_public_id"),
+                        rs.getString("idempotency_key"),
+                        rs.getString("correlation_id"),
+                        rs.getString("payload_json")));
+    }
+
+    @Override
+    public List<OrderLifecycleFact> recentFacts(int limit) {
+        return jdbc.query("""
+                        SELECT public_id, order_public_id, fact_type, recorded_at, actor_type,
+                               actor_public_id, idempotency_key, correlation_id, payload_json
+                          FROM order_lifecycle_facts
+                      ORDER BY recorded_at DESC, public_id DESC
+                         LIMIT :limit
+                        """,
+                new MapSqlParameterSource("limit", Math.max(1, limit)),
+                (rs, rowNum) -> new OrderLifecycleFact(
+                        rs.getString("public_id"),
+                        rs.getString("order_public_id"),
+                        OrderLifecycleFactType.valueOf(rs.getString("fact_type")),
+                        instant(rs.getTimestamp("recorded_at")),
+                        rs.getString("actor_type"),
+                        rs.getString("actor_public_id"),
+                        rs.getString("idempotency_key"),
+                        rs.getString("correlation_id"),
+                        rs.getString("payload_json")));
     }
 
     @Override

@@ -39,17 +39,20 @@ public class RuntimeBridge {
     private final OfferStateStore offerStateStore;
     private final OfferBrokerService offerBrokerService;
     private final DispatchOrchestratorService dispatchOrchestratorService;
+    private final OrderLifecycleProjectionService lifecycleProjectionService;
 
     public RuntimeBridge(OrderRepository orderRepository,
                          DriverFleetRepository driverFleetRepository,
                          OfferStateStore offerStateStore,
                          OfferBrokerService offerBrokerService,
-                         DispatchOrchestratorService dispatchOrchestratorService) {
+                         DispatchOrchestratorService dispatchOrchestratorService,
+                         OrderLifecycleProjectionService lifecycleProjectionService) {
         this.orderRepository = orderRepository;
         this.driverFleetRepository = driverFleetRepository;
         this.offerStateStore = offerStateStore;
         this.offerBrokerService = offerBrokerService;
         this.dispatchOrchestratorService = dispatchOrchestratorService;
+        this.lifecycleProjectionService = lifecycleProjectionService;
     }
 
     public DriverOfferBatch dispatchOrder(Order order) {
@@ -123,7 +126,7 @@ public class RuntimeBridge {
     public Optional<TripTrackingView> activeTripForCustomer(String customerId) {
         return orderRepository.allOrders().stream()
                 .filter(order -> customerId.equals(order.getCustomerId()))
-                .filter(order -> !isTerminal(order.getStatus()))
+                .filter(order -> !isTerminal(lifecycleProjection(order.getId()).lifecycleStage()))
                 .max(Comparator.comparing(Order::getCreatedAt))
                 .map(this::toTripTrackingView);
     }
@@ -131,13 +134,17 @@ public class RuntimeBridge {
     public Optional<DriverActiveTaskView> activeTask(String driverId) {
         return orderRepository.allOrders().stream()
                 .filter(order -> driverId.equals(order.getAssignedDriverId()))
-                .filter(order -> !isTerminal(order.getStatus()))
+                .filter(order -> !isTerminal(lifecycleProjection(order.getId()).lifecycleStage()))
                 .max(Comparator.comparing(Order::getCreatedAt))
                 .map(order -> toDriverActiveTaskView(driverId, order));
     }
 
     public List<OfferBrokerService.OfferView> driverOffers(String driverId) {
         return offerBrokerService.offersForDriver(driverId);
+    }
+
+    public OrderLifecycleProjection lifecycleProjection(String orderId) {
+        return lifecycleProjectionService.project(orderId);
     }
 
     public List<NearbyDriverView> nearbyDrivers(double lat, double lng, int limit) {
@@ -222,14 +229,10 @@ public class RuntimeBridge {
         RoutePayload routePayload = routePayload(order, assignedSession, runtimeDriver);
         DriverOfferBatch batch = offerStateStore.latestBatchForOrder(order.getId()).orElse(null);
         NearbyDriverView assignedDriver = assignedDriverView(order, assignedSession, runtimeDriver);
-        OrderOfferSnapshot offerSnapshot = OrderOfferViewMapper.snapshot(
-                offerStateStore.batchesForOrder(order.getId()),
-                offerStateStore.offersForOrder(order.getId()),
-                offerStateStore.decisionsForOrder(order.getId()),
-                offerStateStore.findReservation(order.getId()).orElse(null),
-                order.getAssignedDriverId());
-        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(order, offerSnapshot);
-        List<OrderLifecycleEventView> lifecycleHistory = OrderLifecycleViewMapper.historyView(orderRepository.historyForOrder(order.getId()));
+        OrderLifecycleProjection projection = lifecycleProjection(order.getId());
+        OrderOfferSnapshot offerSnapshot = projection.offerSnapshot();
+        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(projection);
+        List<OrderLifecycleEventView> lifecycleHistory = OrderLifecycleViewMapper.historyView(projection);
         return new TripTrackingView(
                 order.getId(),
                 order.getCustomerId(),
@@ -270,13 +273,9 @@ public class RuntimeBridge {
         DriverSessionState session = driverFleetRepository.findDriverSession(driverId).orElse(null);
         Driver runtimeDriver = runtimeDriver(driverId);
         RoutePayload routePayload = routePayload(order, session, runtimeDriver);
-        OrderOfferSnapshot offerSnapshot = OrderOfferViewMapper.snapshot(
-                offerStateStore.batchesForOrder(order.getId()),
-                offerStateStore.offersForOrder(order.getId()),
-                offerStateStore.decisionsForOrder(order.getId()),
-                offerStateStore.findReservation(order.getId()).orElse(null),
-                order.getAssignedDriverId());
-        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(order, offerSnapshot);
+        OrderLifecycleProjection projection = lifecycleProjection(order.getId());
+        OrderOfferSnapshot offerSnapshot = projection.offerSnapshot();
+        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(projection);
         return new DriverActiveTaskView(
                 driverId,
                 "task-" + order.getId(),
@@ -539,6 +538,13 @@ public class RuntimeBridge {
                 || status == Enums.OrderStatus.CANCELLED
                 || status == Enums.OrderStatus.FAILED
                 || status == Enums.OrderStatus.EXPIRED;
+    }
+
+    private boolean isTerminal(OrderLifecycleStage stage) {
+        return stage == OrderLifecycleStage.DROPPED_OFF
+                || stage == OrderLifecycleStage.CANCELLED
+                || stage == OrderLifecycleStage.FAILED
+                || stage == OrderLifecycleStage.EXPIRED;
     }
 
     private void ensureCompactRuntimeMode() {

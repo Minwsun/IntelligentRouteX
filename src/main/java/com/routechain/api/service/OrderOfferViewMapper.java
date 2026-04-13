@@ -18,6 +18,20 @@ public final class OrderOfferViewMapper {
     private OrderOfferViewMapper() {
     }
 
+    public static OrderOfferSnapshot emptySnapshot() {
+        return new OrderOfferSnapshot(
+                OrderOfferStage.NONE,
+                "",
+                0,
+                0,
+                false,
+                false,
+                "",
+                null,
+                null
+        );
+    }
+
     public static OrderOfferSnapshot snapshot(List<DriverOfferBatch> batches,
                                               List<DriverOfferRecord> offers,
                                               List<OfferDecision> decisions,

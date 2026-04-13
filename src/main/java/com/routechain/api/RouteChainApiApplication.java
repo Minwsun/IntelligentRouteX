@@ -4,6 +4,7 @@ import com.routechain.config.RouteChainRuntimeProperties;
 import com.routechain.backend.offer.OfferBrokerService;
 import com.routechain.data.port.OfferRuntimeStore;
 import com.routechain.data.port.OfferStateStore;
+import com.routechain.data.service.OrderLifecycleFactService;
 import com.routechain.data.service.OperationalEventPublisher;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -35,11 +36,13 @@ public class RouteChainApiApplication {
     @Bean
     public OfferBrokerService offerBrokerService(OfferStateStore offerStateStore,
                                                  OfferRuntimeStore offerRuntimeStore,
+                                                 OrderLifecycleFactService lifecycleFactService,
                                                  OperationalEventPublisher eventPublisher,
                                                  RouteChainRuntimeProperties runtimeProperties) {
         return new OfferBrokerService(
                 offerStateStore,
                 offerRuntimeStore,
+                lifecycleFactService,
                 eventPublisher,
                 runtimeProperties.getOffers().getDeclineCooldown(),
                 runtimeProperties.getOffers().getExpiryCooldown()

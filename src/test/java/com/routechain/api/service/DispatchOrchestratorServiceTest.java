@@ -5,6 +5,7 @@ import com.routechain.backend.offer.DriverOfferBatch;
 import com.routechain.backend.offer.DriverSessionState;
 import com.routechain.backend.offer.OfferBrokerService;
 import com.routechain.data.memory.InMemoryOfferStateStore;
+import com.routechain.data.service.OrderLifecycleFactService;
 import com.routechain.data.service.OperationalEventPublisher;
 import com.routechain.domain.GeoPoint;
 import com.routechain.domain.Order;
@@ -33,7 +34,7 @@ class DispatchOrchestratorServiceTest {
         InMemoryOperationalStore store = new InMemoryOperationalStore();
         InMemoryOfferStateStore offerStateStore = new InMemoryOfferStateStore();
         OperationalEventPublisher eventPublisher = new OperationalEventPublisher(store);
-        OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, eventPublisher);
+        OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, new OrderLifecycleFactService(store), eventPublisher);
         DispatchOrchestratorService orchestratorService = new DispatchOrchestratorService(store, store, offerStateStore, offerBrokerService);
 
         store.saveDriverSession(new DriverSessionState(
@@ -65,7 +66,7 @@ class DispatchOrchestratorServiceTest {
         InMemoryOperationalStore store = new InMemoryOperationalStore();
         InMemoryOfferStateStore offerStateStore = new InMemoryOfferStateStore();
         OperationalEventPublisher eventPublisher = new OperationalEventPublisher(store);
-        OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, eventPublisher);
+        OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, new OrderLifecycleFactService(store), eventPublisher);
         DispatchOrchestratorService orchestratorService = new DispatchOrchestratorService(store, store, offerStateStore, offerBrokerService);
 
         store.saveDriverSession(new DriverSessionState(
@@ -95,7 +96,7 @@ class DispatchOrchestratorServiceTest {
         InMemoryOperationalStore store = new InMemoryOperationalStore();
         InMemoryOfferStateStore offerStateStore = new InMemoryOfferStateStore();
         OperationalEventPublisher eventPublisher = new OperationalEventPublisher(store);
-        OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, eventPublisher);
+        OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, new OrderLifecycleFactService(store), eventPublisher);
         DispatchOrchestratorService orchestratorService = new DispatchOrchestratorService(store, store, offerStateStore, offerBrokerService);
 
         store.saveDriverSession(new DriverSessionState(

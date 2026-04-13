@@ -9,6 +9,7 @@ import com.routechain.data.port.IdempotencyRepository;
 import com.routechain.data.port.OfferRuntimeStore;
 import com.routechain.data.port.OfferStateStore;
 import com.routechain.data.port.OrderRepository;
+import com.routechain.data.port.OrderLifecycleFactRepository;
 import com.routechain.data.port.OutboxRepository;
 import com.routechain.data.port.QuoteRepository;
 import com.routechain.data.port.WalletRepository;
@@ -132,6 +133,12 @@ public class OperationalPersistenceConfiguration {
     @Bean
     @ConditionalOnProperty(prefix = "routechain.persistence.jdbc", name = "enabled", havingValue = "true")
     public OutboxRepository outboxRepository(JdbcOperationalPersistenceAdapter adapter) {
+        return adapter;
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "routechain.persistence.jdbc", name = "enabled", havingValue = "true")
+    public OrderLifecycleFactRepository orderLifecycleFactRepository(JdbcOperationalPersistenceAdapter adapter) {
         return adapter;
     }
 

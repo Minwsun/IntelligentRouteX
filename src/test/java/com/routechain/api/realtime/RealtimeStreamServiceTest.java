@@ -1,6 +1,7 @@
 package com.routechain.api.realtime;
 
 import com.routechain.api.service.DispatchOrchestratorService;
+import com.routechain.api.service.OrderLifecycleProjectionService;
 import com.routechain.api.service.RuntimeBridge;
 import com.routechain.api.store.InMemoryOperationalStore;
 import com.routechain.backend.offer.OfferBrokerService;
@@ -23,7 +24,8 @@ class RealtimeStreamServiceTest {
                 store,
                 offerStateStore,
                 offerBrokerService,
-                new DispatchOrchestratorService(store, store, offerStateStore, offerBrokerService));
+                new DispatchOrchestratorService(store, store, offerStateStore, offerBrokerService),
+                new OrderLifecycleProjectionService(store, store, offerStateStore));
         RealtimeStreamService realtimeStreamService = new RealtimeStreamService(store, runtimeBridge);
 
         WebSocketSession session = Mockito.mock(WebSocketSession.class);

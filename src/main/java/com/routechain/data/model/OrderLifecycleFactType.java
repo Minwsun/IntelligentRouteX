@@ -1,0 +1,20 @@
+package com.routechain.data.model;
+
+public enum OrderLifecycleFactType {
+    ORDER_CREATED,
+    OFFERS_PUBLISHED,
+    OFFER_BATCH_CREATED,
+    OFFER_BATCH_CLOSED,
+    OFFER_DECLINED,
+    OFFER_EXPIRED,
+    OFFER_LOST,
+    OFFER_ACCEPTED,
+    ASSIGNMENT_LOCKED,
+    ORDER_REOFFERED,
+    ARRIVED_PICKUP,
+    PICKED_UP,
+    ARRIVED_DROPOFF,
+    DROPPED_OFF,
+    CANCELLED,
+    FAILED
+}
