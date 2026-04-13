@@ -3,8 +3,8 @@ doc_id: "canonical.summarize"
 doc_kind: "canonical_handoff"
 canonical: true
 priority: 100
-updated_at: "2026-04-10T18:32:00+07:00"
-git_sha: "53d7480"
+updated_at: "2026-04-13T17:54:56+07:00"
+git_sha: "f93ab2c"
 tags: ["handoff", "current-state", "route-core", "priority"]
 depends_on: ["canonical.idea", "canonical.architecture", "canonical.result"]
 bootstrap: true

@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-04-10T18:32:00+07:00",
-  "git_sha": "53d7480",
+  "generated_at": "2026-04-13T17:54:56+07:00",
+  "git_sha": "f93ab2c",
   "workspace_dirty": true,
   "current_goal": "mặc định tìm cách ghép đơn một cách thông minh để tối ưu chi phí toàn hệ giao nhận, nhưng chỉ giữ batch khi utility tổng của khách hàng, tài xế và marketplace tốt hơn so với giao tách lẻ.",
   "current_verdict": {
@@ -15,11 +15,11 @@
     "Routing Verdict vẫn đang là PARTIAL"
   ],
   "deferred_work": [
-    "agent plane mới",
+    "agent plane moi",
     "Android demo",
     "multi module split"
   ],
-  "next_milestone": "route ai certification smoke vẫn PASS",
+  "next_milestone": "Dung Track D de chot realtime authority sach trong khi Track R giu clean checkpoint discipline.",
   "truth_layer_guard": "openPickupDemand chỉ dùng cho demand pickup còn mở; committedPickupPressure giữ riêng áp lực pickup đã commit và phải được bảo vệ như regression guard.",
   "primary_runbook_command": "powershell -ExecutionPolicy Bypass -File scripts/run_backend_demo.ps1 -RepoRoot E:\\Code _Project\\IntelligentRouteX",
   "bootstrap_order": [

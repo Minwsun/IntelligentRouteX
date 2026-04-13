@@ -3,8 +3,8 @@ doc_id: "operational.backend-runbook"
 doc_kind: "operational_runbook"
 canonical: true
 priority: 88
-updated_at: "2026-04-10T18:32:00+07:00"
-git_sha: "53d7480"
+updated_at: "2026-04-13T17:54:56+07:00"
+git_sha: "f93ab2c"
 tags: ["runbook", "ops", "benchmark", "memory-pack"]
 depends_on: ["canonical.architecture"]
 bootstrap: false

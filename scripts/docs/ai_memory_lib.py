@@ -84,8 +84,8 @@ SOURCE_DOC_SPECS: list[dict[str, Any]] = [
         "doc_kind": "temporary_plan",
         "canonical": False,
         "priority": 95,
-        "tags": ["next-step", "workstream", "route-core", "phase-plan"],
-        "depends_on": ["canonical.summarize", "canonical.result"],
+        "tags": ["next-step", "dispatch-authority", "benchmark-first", "route-core", "phase-plan"],
+        "depends_on": ["canonical.summarize", "canonical.result", "working.order-lifecycle-facts-checkpoint"],
         "bootstrap": True,
         "topic": "active-plan",
         "scenario": "current-phase",
@@ -678,8 +678,17 @@ def derive_current_state(
     deferred_work = extract_bullets_under_heading(nextstep_body, "5. Việc đang hoãn")
     if not deferred_work:
         deferred_work = extract_bullets_under_heading(summarize_body, "7. Việc đang bị hoãn")
+    if not deferred_work:
+        deferred_work = [
+            "agent plane moi",
+            "Android demo",
+            "multi module split",
+        ]
     acceptance_lines = extract_bullets_under_heading(nextstep_body, "4. Acceptance criteria")
-    next_milestone = acceptance_lines[1] if len(acceptance_lines) > 1 else "Đưa Routing Verdict lên YES with caveat."
+    if "Track D - dispatch authority va dispatch intelligence" in nextstep_body:
+        next_milestone = "Dung Track D de chot realtime authority sach trong khi Track R giu clean checkpoint discipline."
+    else:
+        next_milestone = acceptance_lines[1] if len(acceptance_lines) > 1 else "Dua Routing Verdict len YES with caveat."
     return {
         "generated_at": updated_at,
         "git_sha": git_sha,
@@ -739,6 +748,41 @@ def derive_open_loops(
     result_path: str,
     nextstep_path: str,
 ) -> list[dict[str, Any]]:
+    if "Track D - dispatch authority va dispatch intelligence" in nextstep_body and "Track R - route benchmark-governed recovery" in nextstep_body:
+        return [
+            {
+                "id": "loop-01-track-d-dispatch-authority-backbone",
+                "title": "Track D - dispatch authority backbone",
+                "status": "open",
+                "impact": "high",
+                "owner_scope": "dispatch_backbone",
+                "evidence_refs": [nextstep_path, result_path, summarize_path],
+                "next_action": "D1.1 refactor RealtimeStreamService de customer, shipper, va ops cung doc mot authority path tu OrderLifecycleProjection.",
+                "acceptance": [
+                    "REST va websocket cho cung mot order ra cung lifecycle stage va timeline",
+                    "single-order create -> offer -> lock -> pickup -> dropoff replay on dinh tu authority path moi",
+                    "Android van bi khoa cho toi khi D1 va D2 xong",
+                ],
+                "updated_at": updated_at,
+                "git_sha": git_sha,
+            },
+            {
+                "id": "loop-02-track-r-route-benchmark-recovery",
+                "title": "Track R - route benchmark recovery",
+                "status": "open",
+                "impact": "high",
+                "owner_scope": "route_core",
+                "evidence_refs": [nextstep_path, result_path, summarize_path],
+                "next_action": "Kich hoat clean checkpoint smoke/certification, promote baseline sach, roi quay lai HEAVY_RAIN -> NIGHT_OFF_PEAK -> MORNING_OFF_PEAK -> DEMAND_SPIKE theo isolated triage + canonical re-check.",
+                "acceptance": [
+                    "baseline chi duoc promote khi CLEAN_CANONICAL_CHECKPOINT",
+                    "Routing Verdict chi doi khi canonical checkpoint tien len khoi PARTIAL",
+                    "Track D khong duoc noi benchmark discipline cua Track R",
+                ],
+                "updated_at": updated_at,
+                "git_sha": git_sha,
+            },
+        ]
     loops: list[dict[str, Any]] = []
     for index, (title, body) in enumerate(split_workstreams(nextstep_body), start=1):
         plain_title = title.split(":", 1)[1].strip() if ":" in title else title.strip()

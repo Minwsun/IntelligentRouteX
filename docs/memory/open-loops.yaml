@@ -1,10 +1,30 @@
 {
-  "generated_at": "2026-04-10T18:32:00+07:00",
-  "git_sha": "53d7480",
+  "generated_at": "2026-04-13T17:54:56+07:00",
+  "git_sha": "f93ab2c",
   "loops": [
     {
-      "id": "loop-01-streaming-traffic-surrogate-t-telemetry-th-t",
-      "title": "Streaming traffic surrogate từ telemetry thật",
+      "id": "loop-01-track-d-dispatch-authority-backbone",
+      "title": "Track D - dispatch authority backbone",
+      "status": "open",
+      "impact": "high",
+      "owner_scope": "dispatch_backbone",
+      "evidence_refs": [
+        "docs/nextstepplan.md",
+        "docs/result/result-latest.md",
+        "docs/summarize/summarize.md"
+      ],
+      "next_action": "D1.1 refactor RealtimeStreamService de customer, shipper, va ops cung doc mot authority path tu OrderLifecycleProjection.",
+      "acceptance": [
+        "REST va websocket cho cung mot order ra cung lifecycle stage va timeline",
+        "single-order create -> offer -> lock -> pickup -> dropoff replay on dinh tu authority path moi",
+        "Android van bi khoa cho toi khi D1 va D2 xong"
+      ],
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c"
+    },
+    {
+      "id": "loop-02-track-r-route-benchmark-recovery",
+      "title": "Track R - route benchmark recovery",
       "status": "open",
       "impact": "high",
       "owner_scope": "route_core",
@@ -13,93 +33,14 @@
         "docs/result/result-latest.md",
         "docs/summarize/summarize.md"
       ],
-      "next_action": "đưa driver progress events, actual trip duration, pickup arrival, offer delay và weather snapshots vào Kafka/Flink",
+      "next_action": "Kich hoat clean checkpoint smoke/certification, promote baseline sach, roi quay lai HEAVY_RAIN -> NIGHT_OFF_PEAK -> MORNING_OFF_PEAK -> DEMAND_SPIKE theo isolated triage + canonical re-check.",
       "acceptance": [
-        "có corridor live stats và zone feature snapshots sinh ra từ dữ liệu runtime thật",
-        "Redis có feature nóng cho route core",
-        "ClickHouse và Iceberg có lịch sử đủ để replay và train"
+        "baseline chi duoc promote khi CLEAN_CANONICAL_CHECKPOINT",
+        "Routing Verdict chi doi khi canonical checkpoint tien len khoi PARTIAL",
+        "Track D khong duoc noi benchmark discipline cua Track R"
       ],
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480"
-    },
-    {
-      "id": "loop-02-hcmc-delivery-digital-twin",
-      "title": "HCMC delivery digital twin",
-      "status": "open",
-      "impact": "high",
-      "owner_scope": "route_core",
-      "evidence_refs": [
-        "docs/nextstepplan.md",
-        "docs/result/result-latest.md",
-        "docs/summarize/summarize.md"
-      ],
-      "next_action": "materialize zone, corridor, merchant cluster và landing zone theo hướng vận hành delivery",
-      "acceptance": [
-        "có map trạng thái zone/corridor đủ tốt để feed continuation và positioning",
-        "feature path giữa graph substrate và route scoring rõ ràng, không còn mơ hồ"
-      ],
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480"
-    },
-    {
-      "id": "loop-03-recalibrate-route-core-tr-n-feature-bigdata-first",
-      "title": "Recalibrate route core trên feature bigdata-first",
-      "status": "open",
-      "impact": "medium",
-      "owner_scope": "route_core",
-      "evidence_refs": [
-        "docs/nextstepplan.md",
-        "docs/result/result-latest.md",
-        "docs/summarize/summarize.md"
-      ],
-      "next_action": "retrain hoặc recalibrate ETA, route value, batch value, continuation và positioning trên feature mới",
-      "acceptance": [
-        "route ai certification smoke tiếp tục PASS",
-        "route core tận dụng được pickup friction, reachability, drift và slowdown để chọn plan tốt hơn",
-        "ablation của các lane chính tạo delta rõ hơn"
-      ],
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480"
-    },
-    {
-      "id": "loop-04-evidence-spine-v-warehouse-kpi",
-      "title": "Evidence spine và warehouse KPI",
-      "status": "open",
-      "impact": "medium",
-      "owner_scope": "route_core",
-      "evidence_refs": [
-        "docs/nextstepplan.md",
-        "docs/result/result-latest.md",
-        "docs/summarize/summarize.md"
-      ],
-      "next_action": "candidate level facts đủ cho training, audit và report",
-      "acceptance": [
-        "report không còn phụ thuộc vào prose thủ công làm nguồn thật duy nhất",
-        "có clean slice, traffic heavy slice và weather heavy slice đọc được từ warehouse",
-        "champion/challenger promotion có evidence rõ ràng"
-      ],
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480"
-    },
-    {
-      "id": "loop-05-route-quality-cleanup-sau-khi-c-feature-backbone-th-t",
-      "title": "Route-quality cleanup sau khi có feature backbone thật",
-      "status": "open",
-      "impact": "medium",
-      "owner_scope": "route_core",
-      "evidence_refs": [
-        "docs/nextstepplan.md",
-        "docs/result/result-latest.md",
-        "docs/summarize/summarize.md"
-      ],
-      "next_action": "dùng feature backbone mới để quay lại cleanup các bucket route quality còn yếu",
-      "acceptance": [
-        "Routing Verdict tiến lên khỏi PARTIAL",
-        "clean regime mạnh hơn một cách ổn định",
-        "sau đó mới quay lại các bucket khó như heavy rain lunch, night off peak, shortage regime"
-      ],
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480"
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c"
     }
   ]
 }

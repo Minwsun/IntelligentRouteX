@@ -3,8 +3,8 @@ doc_id: "canonical.idea"
 doc_kind: "canonical_idea"
 canonical: true
 priority: 100
-updated_at: "2026-04-10T18:32:00+07:00"
-git_sha: "53d7480"
+updated_at: "2026-04-13T17:54:56+07:00"
+git_sha: "f93ab2c"
 tags: ["idea", "route-core", "batching", "business-objective"]
 depends_on: []
 bootstrap: true

@@ -1,5 +1,11 @@
 .gradle/
+.gradle-bench/
+.gradle-cache-*/
+.gradle-local/
+.gradle-project-cache/
 build/
+build-bak-benchmark/
+build-bench-out/
 *.zip
 .idea/
 *.class
@@ -10,8 +16,12 @@ build/
 routechain.db
 .venv-neural/
 .venv-agent/
+.playwright-mcp/
 __pycache__/
 *.pyc
+.bench-builddir.init.gradle
+controlroom_tmp.java
+output/
 build/routechain-apex/runtime/
 models/onnx/*
 models/routefinder/

@@ -3,8 +3,8 @@ doc_id: "canonical.architecture"
 doc_kind: "canonical_architecture"
 canonical: true
 priority: 98
-updated_at: "2026-04-10T18:32:00+07:00"
-git_sha: "53d7480"
+updated_at: "2026-04-13T17:54:56+07:00"
+git_sha: "f93ab2c"
 tags: ["architecture", "route-core", "data-spine", "truth-layer"]
 depends_on: ["canonical.idea"]
 bootstrap: true

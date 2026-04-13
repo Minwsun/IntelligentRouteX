@@ -1,7 +1,7 @@
 # AI session handoff
 
-- Generated at: `2026-04-10T18:32:00+07:00`
-- Git SHA: `53d7480`
+- Generated at: `2026-04-13T17:54:56+07:00`
+- Git SHA: `f93ab2c`
 
 ## Current goal
 
@@ -22,15 +22,12 @@ mặc định tìm cách ghép đơn một cách thông minh để tối ưu chi
 
 ## Active workstreams
 
-- Streaming traffic surrogate từ telemetry thật: đưa driver progress events, actual trip duration, pickup arrival, offer delay và weather snapshots vào Kafka/Flink
-- HCMC delivery digital twin: materialize zone, corridor, merchant cluster và landing zone theo hướng vận hành delivery
-- Recalibrate route core trên feature bigdata-first: retrain hoặc recalibrate ETA, route value, batch value, continuation và positioning trên feature mới
-- Evidence spine và warehouse KPI: candidate level facts đủ cho training, audit và report
-- Route-quality cleanup sau khi có feature backbone thật: dùng feature backbone mới để quay lại cleanup các bucket route quality còn yếu
+- Track D - dispatch authority backbone: D1.1 refactor RealtimeStreamService de customer, shipper, va ops cung doc mot authority path tu OrderLifecycleProjection.
+- Track R - route benchmark recovery: Kich hoat clean checkpoint smoke/certification, promote baseline sach, roi quay lai HEAVY_RAIN -> NIGHT_OFF_PEAK -> MORNING_OFF_PEAK -> DEMAND_SPIKE theo isolated triage + canonical re-check.
 
 ## Deferred work
 
-- agent plane mới
+- agent plane moi
 - Android demo
 - multi module split
 

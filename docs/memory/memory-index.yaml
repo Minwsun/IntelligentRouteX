@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated_at": "2026-04-10T18:32:00+07:00",
-  "git_sha": "53d7480",
+  "generated_at": "2026-04-13T17:54:56+07:00",
+  "git_sha": "f93ab2c",
   "precedence": [
     "canonical_docs",
     "generated_memory",
@@ -35,8 +35,8 @@
       "scenario": "all",
       "language": "vi",
       "evidence_type": "narrative",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "hot"
     },
     {
@@ -60,8 +60,8 @@
       "scenario": "all",
       "language": "vi",
       "evidence_type": "narrative",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "hot"
     },
     {
@@ -87,8 +87,8 @@
       "scenario": "all",
       "language": "vi",
       "evidence_type": "narrative",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "hot"
     },
     {
@@ -110,8 +110,8 @@
       "scenario": "multi-scenario",
       "language": "vi",
       "evidence_type": "benchmark-summary",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "hot"
     },
     {
@@ -124,20 +124,22 @@
       "priority": 95,
       "tags": [
         "next-step",
-        "workstream",
+        "dispatch-authority",
+        "benchmark-first",
         "route-core",
         "phase-plan"
       ],
       "depends_on": [
         "canonical.summarize",
-        "canonical.result"
+        "canonical.result",
+        "working.order-lifecycle-facts-checkpoint"
       ],
       "topic": "active-plan",
       "scenario": "current-phase",
       "language": "vi",
       "evidence_type": "working-plan",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "hot"
     },
     {
@@ -161,8 +163,8 @@
       "scenario": "local-runtime",
       "language": "en",
       "evidence_type": "runbook",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "current"
     },
     {
@@ -183,8 +185,8 @@
       "scenario": "legacy",
       "language": "vi",
       "evidence_type": "archive-note",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -205,8 +207,8 @@
       "scenario": "legacy",
       "language": "vi",
       "evidence_type": "archive-note",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -227,8 +229,8 @@
       "scenario": "legacy",
       "language": "vi",
       "evidence_type": "archive-note",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -249,8 +251,8 @@
       "scenario": "legacy",
       "language": "vi",
       "evidence_type": "archive-note",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -271,8 +273,8 @@
       "scenario": "legacy",
       "language": "vi",
       "evidence_type": "archive-note",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -295,8 +297,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -319,8 +321,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -343,8 +345,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -367,8 +369,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -391,8 +393,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -415,8 +417,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -439,8 +441,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -463,8 +465,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -487,8 +489,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -511,8 +513,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -535,8 +537,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -559,8 +561,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -583,8 +585,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -607,8 +609,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -631,8 +633,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -655,8 +657,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -679,8 +681,8 @@
       "scenario": "history",
       "language": "vi",
       "evidence_type": "history-snapshot",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "archive"
     },
     {
@@ -700,8 +702,8 @@
       "scenario": "all",
       "language": "vi",
       "evidence_type": "decision",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "generated"
     },
     {
@@ -721,8 +723,8 @@
       "scenario": "all",
       "language": "vi",
       "evidence_type": "decision",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "generated"
     },
     {
@@ -742,8 +744,8 @@
       "scenario": "all",
       "language": "vi",
       "evidence_type": "decision",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "generated"
     },
     {
@@ -763,8 +765,8 @@
       "scenario": "all",
       "language": "vi",
       "evidence_type": "decision",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "generated"
     },
     {
@@ -785,8 +787,8 @@
       "scenario": "all",
       "language": "vi",
       "evidence_type": "generated-summary",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "generated"
     },
     {
@@ -807,8 +809,8 @@
       "scenario": "current-phase",
       "language": "vi",
       "evidence_type": "generated-summary",
-      "updated_at": "2026-04-10T18:32:00+07:00",
-      "git_sha": "53d7480",
+      "updated_at": "2026-04-13T17:54:56+07:00",
+      "git_sha": "f93ab2c",
       "freshness": "generated"
     }
   ]

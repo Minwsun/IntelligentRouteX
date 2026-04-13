@@ -3,8 +3,8 @@ doc_id: "working.nextstepplan"
 doc_kind: "temporary_plan"
 canonical: false
 priority: 95
-updated_at: "2026-04-13T12:05:00+07:00"
-git_sha: "HEAD"
+updated_at: "2026-04-13T17:54:56+07:00"
+git_sha: "f93ab2c"
 tags: ["next-step", "dispatch-authority", "benchmark-first", "route-core", "phase-plan"]
 depends_on: ["canonical.summarize", "canonical.result", "working.order-lifecycle-facts-checkpoint"]
 bootstrap: true
