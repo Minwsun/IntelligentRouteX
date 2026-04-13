@@ -11,6 +11,7 @@ public record TripTrackingView(
         double quotedFee,
         String assignedDriverId,
         String offerBatchId,
+        OrderOfferSnapshot offerSnapshot,
         String stage,
         Double etaMinutes,
         MapPointView pickup,

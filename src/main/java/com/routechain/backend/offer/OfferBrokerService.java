@@ -1,6 +1,7 @@
 package com.routechain.backend.offer;
 
 import com.routechain.api.store.InMemoryOperationalStore;
+import com.routechain.api.service.OrderOfferViewMapper;
 import com.routechain.data.memory.InMemoryOfferRuntimeStore;
 import com.routechain.data.memory.InMemoryOfferStateStore;
 import com.routechain.data.port.OfferRuntimeStore;
@@ -68,6 +69,15 @@ public class OfferBrokerService {
                                                        String serviceTier,
                                                        List<DriverOfferCandidate> screenedCandidates,
                                                        int requestedFanout) {
+        return publishOffers(orderId, serviceTier, screenedCandidates, requestedFanout, 1, "");
+    }
+
+    public synchronized DriverOfferBatch publishOffers(String orderId,
+                                                       String serviceTier,
+                                                       List<DriverOfferCandidate> screenedCandidates,
+                                                       int requestedFanout,
+                                                       int wave,
+                                                       String previousBatchId) {
         int requestedLimit = Math.max(1, Math.min(MAX_FANOUT, requestedFanout));
         List<DriverOfferCandidate> ranked = screenedCandidates == null
                 ? List.of()
@@ -123,6 +133,10 @@ public class OfferBrokerService {
                 ranked.size(),
                 createdAt,
                 expiresAt,
+                Math.max(1, wave),
+                previousBatchId == null ? "" : previousBatchId,
+                null,
+                "",
                 offerIds,
                 ranked
         );
@@ -136,6 +150,8 @@ public class OfferBrokerService {
                 batch.orderId(),
                 batch.serviceTier(),
                 batch.fanout(),
+                batch.wave(),
+                batch.previousBatchId(),
                 batch.createdAt(),
                 batch.expiresAt()
         ));
@@ -151,7 +167,28 @@ public class OfferBrokerService {
                     || entry.status() == DriverOfferStatus.DECLINED
                     || entry.status() == DriverOfferStatus.EXPIRED
                     || entry.status() == DriverOfferStatus.LOST) {
-                views.add(entry.toView());
+                DriverOfferBatch batch = stateStore.findBatch(entry.offerBatchId()).orElse(null);
+                OfferReservation reservation = stateStore.findReservation(entry.orderId()).orElse(null);
+                long reservationVersion = reservation == null ? 0L : reservation.reservationVersion();
+                views.add(new OfferView(
+                        entry.offerId(),
+                        entry.offerBatchId(),
+                        entry.orderId(),
+                        entry.driverId(),
+                        entry.serviceTier(),
+                        entry.score(),
+                        entry.acceptanceProbability(),
+                        entry.deadheadKm(),
+                        entry.borrowed(),
+                        entry.rationale(),
+                        entry.status(),
+                        OrderOfferViewMapper.driverOfferStage(entry, batch, reservation, reservation == null ? "" : reservation.driverId()),
+                        batch == null ? 1 : batch.wave(),
+                        batch == null ? "" : batch.previousBatchId(),
+                        reservationVersion,
+                        entry.createdAt(),
+                        entry.expiresAt()
+                ));
             }
         }
         views.sort(Comparator.comparing(OfferView::createdAt).reversed());
@@ -163,10 +200,10 @@ public class OfferBrokerService {
         DriverOfferRecord entry = stateStore.findOffer(offerId).orElse(null);
         Instant now = Instant.now();
         if (entry == null) {
-            return new OfferDecision(offerId, "order-unknown", driverId, DriverOfferStatus.LOST, "offer-not-found", now, 0);
+            return new OfferDecision(offerId, "", "order-unknown", driverId, DriverOfferStatus.LOST, "offer-not-found", now, 0);
         }
         if (!entry.driverId().equals(driverId)) {
-            return new OfferDecision(offerId, entry.orderId(), driverId, DriverOfferStatus.LOST, "driver-mismatch", now, 0);
+            return new OfferDecision(offerId, entry.offerBatchId(), entry.orderId(), driverId, DriverOfferStatus.LOST, "driver-mismatch", now, 0);
         }
         if (entry.status() != DriverOfferStatus.PENDING) {
             String terminalReason = switch (entry.status()) {
@@ -176,20 +213,21 @@ public class OfferBrokerService {
                 case ACCEPTED -> "offer-already-accepted";
                 default -> "offer-not-pending";
             };
-            return new OfferDecision(offerId, entry.orderId(), driverId, entry.status(), terminalReason, now,
+            return new OfferDecision(offerId, entry.offerBatchId(), entry.orderId(), driverId, entry.status(), terminalReason, now,
                     stateStore.findReservation(entry.orderId())
                             .orElse(OfferReservationDefaults.empty(entry.orderId()))
                             .reservationVersion());
         }
         if (!runtimeStore.isOfferActive(offerId, now)) {
             expireOffer(entry, now);
-            return new OfferDecision(offerId, entry.orderId(), driverId, DriverOfferStatus.EXPIRED, "offer-expired", now, 0);
+            return new OfferDecision(offerId, entry.offerBatchId(), entry.orderId(), driverId, DriverOfferStatus.EXPIRED, "offer-expired", now, 0);
         }
         OfferReservation existing = stateStore.findReservation(entry.orderId()).orElse(null);
         if (existing != null && "ACCEPTED".equalsIgnoreCase(existing.status())) {
             markLost(entry.offerBatchId(), offerId, "offer-lost");
-            OfferDecision decision = new OfferDecision(offerId, entry.orderId(), driverId, DriverOfferStatus.LOST, "offer-lost", now, existing.reservationVersion());
+            OfferDecision decision = new OfferDecision(offerId, entry.offerBatchId(), entry.orderId(), driverId, DriverOfferStatus.LOST, "offer-lost", now, existing.reservationVersion());
             stateStore.saveDecision(decision);
+            closeBatchIfResolved(entry.offerBatchId(), now, "accepted_elsewhere");
             return decision;
         }
 
@@ -198,6 +236,7 @@ public class OfferBrokerService {
                 "reservation-" + UUID.randomUUID().toString().substring(0, 8),
                 entry.orderId(),
                 entry.offerBatchId(),
+                entry.offerId(),
                 reservationVersion,
                 driverId,
                 now,
@@ -213,8 +252,14 @@ public class OfferBrokerService {
                 "ORDER",
                 entry.orderId(),
                 new Events.DriverOfferAccepted(offerId, entry.offerBatchId(), entry.orderId(), driverId, now));
-        OfferDecision decision = new OfferDecision(offerId, entry.orderId(), driverId, DriverOfferStatus.ACCEPTED, "accepted", now, reservationVersion);
+        eventPublisher.publish(
+                "assignment.locked.v1",
+                "ORDER",
+                entry.orderId(),
+                new Events.AssignmentLocked(entry.orderId(), offerId, entry.offerBatchId(), driverId, reservationVersion, now));
+        OfferDecision decision = new OfferDecision(offerId, entry.offerBatchId(), entry.orderId(), driverId, DriverOfferStatus.ACCEPTED, "accepted", now, reservationVersion);
         stateStore.saveDecision(decision);
+        closeBatchIfResolved(entry.offerBatchId(), now, "accepted");
         return decision;
     }
 
@@ -223,13 +268,13 @@ public class OfferBrokerService {
         DriverOfferRecord entry = stateStore.findOffer(offerId).orElse(null);
         Instant now = Instant.now();
         if (entry == null) {
-            return new OfferDecision(offerId, "order-unknown", driverId, DriverOfferStatus.LOST, "offer-not-found", now, 0);
+            return new OfferDecision(offerId, "", "order-unknown", driverId, DriverOfferStatus.LOST, "offer-not-found", now, 0);
         }
         if (!entry.driverId().equals(driverId)) {
-            return new OfferDecision(offerId, entry.orderId(), driverId, DriverOfferStatus.LOST, "driver-mismatch", now, 0);
+            return new OfferDecision(offerId, entry.offerBatchId(), entry.orderId(), driverId, DriverOfferStatus.LOST, "driver-mismatch", now, 0);
         }
         if (entry.status() != DriverOfferStatus.PENDING) {
-            return new OfferDecision(offerId, entry.orderId(), driverId, entry.status(), "offer-not-pending", now, 0);
+            return new OfferDecision(offerId, entry.offerBatchId(), entry.orderId(), driverId, entry.status(), "offer-not-pending", now, 0);
         }
         stateStore.saveOffer(entry.withStatus(DriverOfferStatus.DECLINED));
         runtimeStore.clearOffer(offerId);
@@ -241,9 +286,10 @@ public class OfferBrokerService {
                 entry.orderId(),
                 new Events.DriverOfferDeclined(offerId, entry.offerBatchId(), entry.orderId(), driverId,
                         resolvedReason, now));
-        OfferDecision decision = new OfferDecision(offerId, entry.orderId(), driverId, DriverOfferStatus.DECLINED,
+        OfferDecision decision = new OfferDecision(offerId, entry.offerBatchId(), entry.orderId(), driverId, DriverOfferStatus.DECLINED,
                 resolvedReason, now, 0);
         stateStore.saveDecision(decision);
+        closeBatchIfResolved(entry.offerBatchId(), now, "declined");
         return decision;
     }
 
@@ -272,10 +318,11 @@ public class OfferBrokerService {
                         "offer.resolved.v1",
                         "ORDER",
                         pending.orderId(),
-                        new Events.DriverOfferDeclined(pending.offerId(), pending.offerBatchId(), pending.orderId(),
+                        new Events.DriverOfferLost(pending.offerId(), pending.offerBatchId(), pending.orderId(),
                                 pending.driverId(), reason, Instant.now()));
                 stateStore.saveDecision(new OfferDecision(
                         pending.offerId(),
+                        pending.offerBatchId(),
                         pending.orderId(),
                         pending.driverId(),
                         DriverOfferStatus.LOST,
@@ -319,6 +366,7 @@ public class OfferBrokerService {
                 new Events.DriverOfferExpired(entry.offerId(), entry.offerBatchId(), entry.orderId(), entry.driverId(), now));
         stateStore.saveDecision(new OfferDecision(
                 entry.offerId(),
+                entry.offerBatchId(),
                 entry.orderId(),
                 entry.driverId(),
                 DriverOfferStatus.EXPIRED,
@@ -326,6 +374,26 @@ public class OfferBrokerService {
                 now,
                 0
         ));
+        closeBatchIfResolved(entry.offerBatchId(), now, "expired");
+    }
+
+    private void closeBatchIfResolved(String batchId, Instant now, String reason) {
+        DriverOfferBatch batch = stateStore.findBatch(batchId).orElse(null);
+        if (batch == null || batch.isClosed()) {
+            return;
+        }
+        boolean hasPending = stateStore.offersForBatch(batchId).stream()
+                .anyMatch(offer -> offer.status() == DriverOfferStatus.PENDING);
+        if (hasPending) {
+            return;
+        }
+        DriverOfferBatch closed = batch.close(now, reason);
+        stateStore.saveBatch(closed);
+        eventPublisher.publish(
+                "offer.batch_closed.v1",
+                "ORDER",
+                closed.orderId(),
+                new Events.OfferBatchClosed(closed.offerBatchId(), closed.orderId(), closed.wave(), closed.closeReason(), closed.closedAt()));
     }
 
     private Duration normalizeCooldown(Duration value, Duration fallback) {
@@ -347,13 +415,17 @@ public class OfferBrokerService {
             boolean borrowed,
             String rationale,
             DriverOfferStatus status,
+            com.routechain.api.dto.OrderOfferStage offerStage,
+            int wave,
+            String previousBatchId,
+            long reservationVersion,
             Instant createdAt,
             Instant expiresAt
     ) {}
 
     private static final class OfferReservationDefaults {
         private static OfferReservation empty(String orderId) {
-            return new OfferReservation("reservation-empty", orderId, "offer-batch-empty", 0L,
+            return new OfferReservation("reservation-empty", orderId, "offer-batch-empty", "", 0L,
                     "driver-unset", Instant.EPOCH, Instant.EPOCH, "NONE");
         }
     }

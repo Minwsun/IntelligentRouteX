@@ -9,16 +9,29 @@ public record OfferReservation(
         String reservationId,
         String orderId,
         String offerBatchId,
+        String acceptedOfferId,
         long reservationVersion,
         String driverId,
         Instant reservedAt,
         Instant expiresAt,
         String status
 ) {
+    public OfferReservation(String reservationId,
+                            String orderId,
+                            String offerBatchId,
+                            long reservationVersion,
+                            String driverId,
+                            Instant reservedAt,
+                            Instant expiresAt,
+                            String status) {
+        this(reservationId, orderId, offerBatchId, "", reservationVersion, driverId, reservedAt, expiresAt, status);
+    }
+
     public OfferReservation {
         reservationId = reservationId == null || reservationId.isBlank() ? "reservation-unknown" : reservationId;
         orderId = orderId == null || orderId.isBlank() ? "order-unknown" : orderId;
         offerBatchId = offerBatchId == null || offerBatchId.isBlank() ? "offer-batch-unknown" : offerBatchId;
+        acceptedOfferId = acceptedOfferId == null ? "" : acceptedOfferId;
         driverId = driverId == null || driverId.isBlank() ? "driver-unknown" : driverId;
         reservedAt = reservedAt == null ? Instant.now() : reservedAt;
         expiresAt = expiresAt == null ? reservedAt : expiresAt;

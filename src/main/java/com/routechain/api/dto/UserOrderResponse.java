@@ -11,6 +11,7 @@ public record UserOrderResponse(
         double quotedFee,
         String assignedDriverId,
         String offerBatchId,
+        OrderOfferSnapshot offerSnapshot,
         String createdAt,
         String assignedAt,
         String arrivedPickupAt,

@@ -46,6 +46,14 @@ public class InMemoryOfferStateStore implements OfferStateStore {
     }
 
     @Override
+    public List<DriverOfferBatch> batchesForOrder(String orderId) {
+        return batchesById.values().stream()
+                .filter(batch -> batch.orderId().equals(orderId))
+                .sorted(Comparator.comparing(DriverOfferBatch::createdAt))
+                .toList();
+    }
+
+    @Override
     public void saveOffer(DriverOfferRecord offer) {
         offersById.put(offer.offerId(), offer);
         offersByDriver.computeIfAbsent(offer.driverId(), ignored -> new CopyOnWriteArrayList<>());
@@ -82,6 +90,14 @@ public class InMemoryOfferStateStore implements OfferStateStore {
     }
 
     @Override
+    public List<DriverOfferRecord> offersForOrder(String orderId) {
+        return offersById.values().stream()
+                .filter(offer -> offer.orderId().equals(orderId))
+                .sorted(Comparator.comparing(DriverOfferRecord::createdAt))
+                .toList();
+    }
+
+    @Override
     public List<DriverOfferRecord> allOffers() {
         return offersById.values().stream()
                 .sorted(Comparator.comparing(DriverOfferRecord::createdAt))
@@ -106,5 +122,13 @@ public class InMemoryOfferStateStore implements OfferStateStore {
     @Override
     public void saveDecision(OfferDecision decision) {
         decisions.add(decision);
+    }
+
+    @Override
+    public List<OfferDecision> decisionsForOrder(String orderId) {
+        return decisions.stream()
+                .filter(decision -> orderId.equals(decision.orderId()))
+                .sorted(Comparator.comparing(OfferDecision::decidedAt))
+                .toList();
     }
 }

@@ -5,6 +5,9 @@ import com.routechain.backend.offer.DriverOfferBatch;
 import com.routechain.backend.offer.DriverOfferCandidate;
 import com.routechain.backend.offer.DriverSessionState;
 import com.routechain.backend.offer.OfferBrokerService;
+import com.routechain.backend.offer.OfferReservation;
+import com.routechain.data.port.OrderRepository;
+import com.routechain.data.port.OfferStateStore;
 import com.routechain.core.CompactDispatchDecision;
 import com.routechain.core.CompactSelectedPlanEvidence;
 import com.routechain.data.port.DriverFleetRepository;
@@ -13,12 +16,15 @@ import com.routechain.domain.Enums.VehicleType;
 import com.routechain.domain.GeoPoint;
 import com.routechain.domain.Order;
 import com.routechain.infra.RouteCoreRuntime;
+import com.routechain.infra.EventBus;
+import com.routechain.infra.Events;
 import com.routechain.simulation.DispatchPlan;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -30,17 +36,30 @@ import java.time.Instant;
  */
 @Service
 public class DispatchOrchestratorService {
+    private static final int MAX_SINGLE_ORDER_WAVES = 3;
+
     private final DriverFleetRepository driverFleetRepository;
+    private final OrderRepository orderRepository;
+    private final OfferStateStore offerStateStore;
     private final OfferBrokerService offerBrokerService;
     private final Map<String, PendingRuntimePlan> pendingRuntimePlans = new ConcurrentHashMap<>();
 
     public DispatchOrchestratorService(DriverFleetRepository driverFleetRepository,
+                                       OrderRepository orderRepository,
+                                       OfferStateStore offerStateStore,
                                        OfferBrokerService offerBrokerService) {
         this.driverFleetRepository = driverFleetRepository;
+        this.orderRepository = orderRepository;
+        this.offerStateStore = offerStateStore;
         this.offerBrokerService = offerBrokerService;
+        subscribeToOfferClosures();
     }
 
     public DriverOfferBatch publishOffersForOrder(Order order) {
+        return publishOffersForOrder(order, 1, "");
+    }
+
+    public DriverOfferBatch publishOffersForOrder(Order order, int wave, String previousBatchId) {
         if (order == null) {
             return null;
         }
@@ -48,7 +67,8 @@ public class DispatchOrchestratorService {
         List<DriverSessionState> availableSessions = driverFleetRepository.allDriverSessions().stream()
                 .filter(DriverSessionState::available)
                 .toList();
-        RuntimePreview runtimePreview = runtimePreview(order, availableSessions);
+        List<DriverSessionState> eligibleSessions = eligibleSessions(order.getId(), wave, availableSessions);
+        RuntimePreview runtimePreview = runtimePreview(order, eligibleSessions);
         if (runtimePreview != null) {
             pendingRuntimePlans.put(order.getId(), new PendingRuntimePlan(
                     order.getId(),
@@ -59,16 +79,20 @@ public class DispatchOrchestratorService {
                     order.getId(),
                     order.getServiceType(),
                     List.of(runtimePreview.candidate()),
-                    1);
+                    1,
+                    wave,
+                    previousBatchId);
         }
         pendingRuntimePlans.remove(order.getId());
-        List<DriverOfferCandidate> candidates = screenedCandidates(order, availableSessions);
+        List<DriverOfferCandidate> candidates = screenedCandidates(order, eligibleSessions);
         ContextualPolicyDecision decision = decidePolicy(order.getServiceType(), candidates);
         return offerBrokerService.publishOffers(
                 order.getId(),
                 order.getServiceType(),
                 candidates,
-                decision.offerFanout()
+                decision.offerFanout(),
+                wave,
+                previousBatchId
         );
     }
 
@@ -84,6 +108,42 @@ public class DispatchOrchestratorService {
         if (orderId != null) {
             pendingRuntimePlans.remove(orderId);
         }
+    }
+
+    private void subscribeToOfferClosures() {
+        EventBus.getInstance().subscribe(Events.OfferBatchClosed.class, event -> {
+            if (!"declined".equalsIgnoreCase(event.reason()) && !"expired".equalsIgnoreCase(event.reason())) {
+                return;
+            }
+            maybeReoffer(event.orderId(), event.offerBatchId(), event.reason());
+        });
+    }
+
+    private void maybeReoffer(String orderId, String previousBatchId, String triggerReason) {
+        orderRepository.findOrder(orderId).ifPresent(order -> {
+            if (order.getAssignedDriverId() != null && !order.getAssignedDriverId().isBlank()) {
+                return;
+            }
+            if (order.getStatus() == com.routechain.domain.Enums.OrderStatus.CANCELLED
+                    || order.getStatus() == com.routechain.domain.Enums.OrderStatus.FAILED
+                    || order.getStatus() == com.routechain.domain.Enums.OrderStatus.DELIVERED) {
+                return;
+            }
+            OfferReservation reservation = offerBrokerService.activeReservations().get(orderId);
+            if (reservation != null && "ACCEPTED".equalsIgnoreCase(reservation.status())) {
+                return;
+            }
+            var batches = offerStateStore.batchesForOrder(orderId);
+            int nextWave = batches.isEmpty() ? 1 : batches.getLast().wave() + 1;
+            if (nextWave > MAX_SINGLE_ORDER_WAVES) {
+                return;
+            }
+            DriverOfferBatch nextBatch = publishOffersForOrder(order, nextWave, previousBatchId);
+            if (nextBatch == null || nextBatch.offerIds().isEmpty()) {
+                return;
+            }
+            EventBus.getInstance().publish(new Events.OrderReoffered(orderId, previousBatchId, nextBatch.offerBatchId(), nextWave, triggerReason, Instant.now()));
+        });
     }
 
     private ContextualPolicyDecision decidePolicy(String serviceTier, List<DriverOfferCandidate> candidates) {
@@ -186,6 +246,18 @@ public class DispatchOrchestratorService {
                 + ((1.0 - plan.getCancellationRisk()) * 0.30)
                 + (Math.max(0.0, 1.0 - Math.min(1.0, plan.getPredictedDeadheadKm() / 4.0)) * 0.25);
         return Math.max(0.30, Math.min(0.98, confidence));
+    }
+
+    private List<DriverSessionState> eligibleSessions(String orderId, int wave, List<DriverSessionState> sessions) {
+        if (wave <= 1 || sessions == null || sessions.isEmpty()) {
+            return sessions == null ? List.of() : sessions;
+        }
+        HashSet<String> excludedDriverIds = offerStateStore.decisionsForOrder(orderId).stream()
+                .map(decision -> decision.driverId())
+                .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+        return sessions.stream()
+                .filter(session -> !excludedDriverIds.contains(session.driverId()))
+                .toList();
     }
 
     private record PendingRuntimePlan(

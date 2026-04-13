@@ -13,10 +13,12 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class DispatchOrchestratorServiceTest {
 
@@ -32,7 +34,7 @@ class DispatchOrchestratorServiceTest {
         InMemoryOfferStateStore offerStateStore = new InMemoryOfferStateStore();
         OperationalEventPublisher eventPublisher = new OperationalEventPublisher(store);
         OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, eventPublisher);
-        DispatchOrchestratorService orchestratorService = new DispatchOrchestratorService(store, offerBrokerService);
+        DispatchOrchestratorService orchestratorService = new DispatchOrchestratorService(store, store, offerStateStore, offerBrokerService);
 
         store.saveDriverSession(new DriverSessionState(
                 "drv-near", "device-near", true, 10.7762, 106.7008, Instant.now(), ""));
@@ -64,7 +66,7 @@ class DispatchOrchestratorServiceTest {
         InMemoryOfferStateStore offerStateStore = new InMemoryOfferStateStore();
         OperationalEventPublisher eventPublisher = new OperationalEventPublisher(store);
         OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, eventPublisher);
-        DispatchOrchestratorService orchestratorService = new DispatchOrchestratorService(store, offerBrokerService);
+        DispatchOrchestratorService orchestratorService = new DispatchOrchestratorService(store, store, offerStateStore, offerBrokerService);
 
         store.saveDriverSession(new DriverSessionState(
                 "drv-runtime-only", "device-runtime-only", true, 10.7769, 106.7009, Instant.now(), ""));
@@ -86,5 +88,46 @@ class DispatchOrchestratorServiceTest {
         assertFalse(batch.candidates().isEmpty());
         assertEquals("drv-runtime-only", batch.candidates().get(0).driverId());
         assertTrue(batch.candidates().get(0).rationale().contains("compact_runtime_candidate"));
+    }
+
+    @Test
+    void shouldReofferSingleOrderIntoNextWaveAfterFirstWaveDeclines() {
+        InMemoryOperationalStore store = new InMemoryOperationalStore();
+        InMemoryOfferStateStore offerStateStore = new InMemoryOfferStateStore();
+        OperationalEventPublisher eventPublisher = new OperationalEventPublisher(store);
+        OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, eventPublisher);
+        DispatchOrchestratorService orchestratorService = new DispatchOrchestratorService(store, store, offerStateStore, offerBrokerService);
+
+        store.saveDriverSession(new DriverSessionState(
+                "drv-wave-1", "device-wave-1", true, 10.7761, 106.7007, Instant.now(), ""));
+        store.saveDriverSession(new DriverSessionState(
+                "drv-wave-2", "device-wave-2", true, 10.7785, 106.7035, Instant.now(), ""));
+
+        Order order = new Order(
+                "ord-reoffer",
+                "cust-reoffer",
+                "pickup-r1",
+                new GeoPoint(10.7760, 106.7005),
+                new GeoPoint(10.7820, 106.7080),
+                "drop-r9",
+                52000.0,
+                35,
+                Instant.now());
+        order.setServiceType("instant");
+        store.saveOrder(order);
+
+        DriverOfferBatch firstBatch = orchestratorService.publishOffersForOrder(order);
+        assertEquals(1, firstBatch.wave());
+        assertEquals(1, firstBatch.offerIds().size());
+
+        offerBrokerService.declineOffer(firstBatch.offerIds().getFirst(), "drv-wave-1", "busy");
+
+        var batches = offerStateStore.batchesForOrder(order.getId());
+        assertEquals(2, batches.size());
+        DriverOfferBatch secondBatch = batches.getLast();
+        assertEquals(2, secondBatch.wave());
+        assertEquals(firstBatch.offerBatchId(), secondBatch.previousBatchId());
+        assertNotNull(secondBatch.createdAt());
+        assertEquals(List.of("drv-wave-2"), secondBatch.candidates().stream().map(candidate -> candidate.driverId()).toList());
     }
 }

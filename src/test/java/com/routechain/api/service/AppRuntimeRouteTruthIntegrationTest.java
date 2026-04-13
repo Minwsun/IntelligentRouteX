@@ -2,6 +2,7 @@ package com.routechain.api.service;
 
 import com.routechain.api.dto.DriverLoginRequest;
 import com.routechain.api.dto.OrderLifecycleStage;
+import com.routechain.api.dto.OrderOfferStage;
 import com.routechain.api.dto.DriverTaskStatusUpdate;
 import com.routechain.api.dto.RoutePreviewSourceView;
 import com.routechain.api.dto.RouteSourceView;
@@ -50,7 +51,7 @@ class AppRuntimeRouteTruthIntegrationTest {
         InMemoryOfferStateStore offerStateStore = new InMemoryOfferStateStore();
         OperationalEventPublisher eventPublisher = new OperationalEventPublisher(store);
         OfferBrokerService offerBrokerService = new OfferBrokerService(offerStateStore, eventPublisher);
-        DispatchOrchestratorService orchestratorService = new DispatchOrchestratorService(store, offerBrokerService);
+        DispatchOrchestratorService orchestratorService = new DispatchOrchestratorService(store, store, offerStateStore, offerBrokerService);
         RuntimeBridge runtimeBridge = new RuntimeBridge(
                 store,
                 store,
@@ -126,6 +127,7 @@ class AppRuntimeRouteTruthIntegrationTest {
         assertNotNull(trackingView.runtimeDriverLocation());
         assertNotNull(activeTask.runtimeDriverLocation());
         assertEquals(OrderLifecycleStage.ACCEPTED, trackingView.lifecycleStage());
+        assertEquals(OrderOfferStage.LOCKED_ASSIGNMENT, trackingView.offerSnapshot().stage());
         assertEquals(OrderLifecycleStage.ACCEPTED, activeTask.lifecycleStage());
 
         driverOperationsService.updateTaskStatus("drv-app-route", "task-" + orderId, new DriverTaskStatusUpdate("PICKED_UP"));

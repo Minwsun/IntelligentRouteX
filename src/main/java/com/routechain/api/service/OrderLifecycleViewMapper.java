@@ -2,6 +2,8 @@ package com.routechain.api.service;
 
 import com.routechain.api.dto.OrderLifecycleEventView;
 import com.routechain.api.dto.OrderLifecycleStage;
+import com.routechain.api.dto.OrderOfferSnapshot;
+import com.routechain.api.dto.OrderOfferStage;
 import com.routechain.data.model.OrderStatusHistoryRecord;
 import com.routechain.domain.Enums.OrderStatus;
 import com.routechain.domain.Order;
@@ -15,7 +17,7 @@ final class OrderLifecycleViewMapper {
     private OrderLifecycleViewMapper() {
     }
 
-    static OrderLifecycleStage stageFor(Order order, boolean hasOfferBatch) {
+    static OrderLifecycleStage stageFor(Order order, OrderOfferSnapshot offerSnapshot) {
         if (order == null) {
             return OrderLifecycleStage.CREATED;
         }
@@ -38,12 +40,13 @@ final class OrderLifecycleViewMapper {
         if (order.getArrivedPickupAt() != null) {
             return OrderLifecycleStage.ARRIVED_PICKUP;
         }
-        if (order.getAssignedDriverId() != null && !order.getAssignedDriverId().isBlank()
-                || order.getStatus() == OrderStatus.ASSIGNED
-                || order.getStatus() == OrderStatus.PICKUP_EN_ROUTE) {
+        if (offerSnapshot != null && (offerSnapshot.stage() == OrderOfferStage.ACCEPTED
+                || offerSnapshot.stage() == OrderOfferStage.LOCKED_ASSIGNMENT)) {
             return OrderLifecycleStage.ACCEPTED;
         }
-        if (hasOfferBatch) {
+        if (offerSnapshot != null && (offerSnapshot.stage() == OrderOfferStage.OFFERED
+                || offerSnapshot.stage() == OrderOfferStage.REOFFERED
+                || offerSnapshot.stage() == OrderOfferStage.BATCH_CREATED)) {
             return OrderLifecycleStage.OFFERED;
         }
         return OrderLifecycleStage.CREATED;

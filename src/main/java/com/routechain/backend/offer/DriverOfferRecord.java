@@ -63,6 +63,10 @@ public record DriverOfferRecord(
                 borrowed,
                 rationale,
                 status,
+                com.routechain.api.dto.OrderOfferStage.OFFERED,
+                1,
+                "",
+                0L,
                 createdAt,
                 expiresAt
         );

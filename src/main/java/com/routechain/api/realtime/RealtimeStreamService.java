@@ -69,21 +69,57 @@ public class RealtimeStreamService {
     private void subscribeToEvents() {
         eventBus.subscribe(Events.DriverOfferCreated.class, event -> {
             publishToDriver(event.driverId(), envelope("driver_offer_created", event));
+            publishDriverBootstrap(event.driverId());
+            publishCustomerSnapshot(event.orderId());
             publishToOps(envelope("driver_offer_created", event));
+        });
+        eventBus.subscribe(Events.OfferBatchCreated.class, event -> {
+            publishOrderEventToCustomer(event.orderId(), "order_offer_batch_created", event);
+            publishCustomerSnapshot(event.orderId());
+            publishToOps(envelope("order_offer_batch_created", event));
+        });
+        eventBus.subscribe(Events.OfferBatchClosed.class, event -> {
+            publishOrderEventToCustomer(event.orderId(), "order_offer_batch_closed", event);
+            publishCustomerSnapshot(event.orderId());
+            publishDriverSnapshot(event.orderId());
+            publishToOps(envelope("order_offer_batch_closed", event));
+        });
+        eventBus.subscribe(Events.OrderReoffered.class, event -> {
+            publishOrderEventToCustomer(event.orderId(), "order_reoffered", event);
+            publishCustomerSnapshot(event.orderId());
+            publishDriverSnapshot(event.orderId());
+            publishToOps(envelope("order_reoffered", event));
         });
         eventBus.subscribe(Events.DriverOfferAccepted.class, event -> {
             publishToDriver(event.driverId(), envelope("driver_offer_accepted", event));
-            publishToDriver(event.driverId(), envelope("driver_active_task", runtimeBridge.activeTask(event.driverId()).orElse(null)));
-            publishToDriver(event.driverId(), envelope("driver_map_snapshot", runtimeBridge.driverMapSnapshot(event.driverId())));
+            publishDriverBootstrap(event.driverId());
             publishOrderEventToCustomer(event.orderId(), "order_offer_accepted", event);
+            publishCustomerSnapshot(event.orderId());
             publishToOps(envelope("driver_offer_accepted", event));
+        });
+        eventBus.subscribe(Events.AssignmentLocked.class, event -> {
+            publishToDriver(event.driverId(), envelope("assignment_locked", event));
+            publishDriverBootstrap(event.driverId());
+            publishOrderEventToCustomer(event.orderId(), "assignment_locked", event);
+            publishCustomerSnapshot(event.orderId());
+            publishToOps(envelope("assignment_locked", event));
         });
         eventBus.subscribe(Events.DriverOfferDeclined.class, event -> {
             publishToDriver(event.driverId(), envelope("driver_offer_declined", event));
+            publishDriverBootstrap(event.driverId());
+            publishCustomerSnapshot(event.orderId());
             publishToOps(envelope("driver_offer_declined", event));
+        });
+        eventBus.subscribe(Events.DriverOfferLost.class, event -> {
+            publishToDriver(event.driverId(), envelope("driver_offer_lost", event));
+            publishDriverBootstrap(event.driverId());
+            publishCustomerSnapshot(event.orderId());
+            publishToOps(envelope("driver_offer_lost", event));
         });
         eventBus.subscribe(Events.DriverOfferExpired.class, event -> {
             publishToDriver(event.driverId(), envelope("driver_offer_expired", event));
+            publishDriverBootstrap(event.driverId());
+            publishCustomerSnapshot(event.orderId());
             publishToOps(envelope("driver_offer_expired", event));
         });
         eventBus.subscribe(Events.OrderCreated.class, event ->
@@ -144,11 +180,14 @@ public class RealtimeStreamService {
         orderRepository.findOrder(orderId)
                 .filter(order -> order.getAssignedDriverId() != null && !order.getAssignedDriverId().isBlank())
                 .ifPresent(order -> {
-                    publishToDriver(order.getAssignedDriverId(), envelope("driver_active_task",
-                            runtimeBridge.activeTask(order.getAssignedDriverId()).orElse(null)));
-                    publishToDriver(order.getAssignedDriverId(), envelope("driver_map_snapshot",
-                            runtimeBridge.driverMapSnapshot(order.getAssignedDriverId())));
+                    publishDriverBootstrap(order.getAssignedDriverId());
                 });
+    }
+
+    private void publishDriverBootstrap(String driverId) {
+        publishToDriver(driverId, envelope("driver_offers_snapshot", runtimeBridge.driverOffers(driverId)));
+        publishToDriver(driverId, envelope("driver_active_task", runtimeBridge.activeTask(driverId).orElse(null)));
+        publishToDriver(driverId, envelope("driver_map_snapshot", runtimeBridge.driverMapSnapshot(driverId)));
     }
 
     private void publishToDriver(String driverId, String json) {

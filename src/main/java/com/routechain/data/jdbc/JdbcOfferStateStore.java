@@ -27,14 +27,20 @@ public class JdbcOfferStateStore implements OfferStateStore {
     public void saveBatch(DriverOfferBatch batch) {
         jdbc.update("""
                 INSERT INTO offer_batches (
-                    id, order_id, public_id, order_public_id, service_tier, fanout, expires_at, created_at, updated_at
+                    id, order_id, public_id, order_public_id, service_tier, fanout, expires_at, wave_number,
+                    previous_batch_public_id, closed_at, close_reason, created_at, updated_at
                 ) VALUES (
-                    :id, :orderId, :publicId, :orderPublicId, :serviceTier, :fanout, :expiresAt, :createdAt, :updatedAt
+                    :id, :orderId, :publicId, :orderPublicId, :serviceTier, :fanout, :expiresAt, :waveNumber,
+                    :previousBatchPublicId, :closedAt, :closeReason, :createdAt, :updatedAt
                 )
                 ON CONFLICT (public_id) DO UPDATE SET
                     service_tier = EXCLUDED.service_tier,
                     fanout = EXCLUDED.fanout,
                     expires_at = EXCLUDED.expires_at,
+                    wave_number = EXCLUDED.wave_number,
+                    previous_batch_public_id = EXCLUDED.previous_batch_public_id,
+                    closed_at = EXCLUDED.closed_at,
+                    close_reason = EXCLUDED.close_reason,
                     updated_at = EXCLUDED.updated_at,
                     version = offer_batches.version + 1
                 """, new MapSqlParameterSource()
@@ -45,6 +51,10 @@ public class JdbcOfferStateStore implements OfferStateStore {
                 .addValue("serviceTier", batch.serviceTier())
                 .addValue("fanout", batch.fanout())
                 .addValue("expiresAt", ts(batch.expiresAt()))
+                .addValue("waveNumber", batch.wave())
+                .addValue("previousBatchPublicId", blankToNull(batch.previousBatchId()))
+                .addValue("closedAt", ts(batch.closedAt()))
+                .addValue("closeReason", blankToNull(batch.closeReason()))
                 .addValue("createdAt", ts(batch.createdAt()))
                 .addValue("updatedAt", ts(Instant.now())));
     }
@@ -52,9 +62,10 @@ public class JdbcOfferStateStore implements OfferStateStore {
     @Override
     public Optional<DriverOfferBatch> findBatch(String batchId) {
         return jdbc.query("""
-                        SELECT public_id, order_public_id, service_tier, fanout, created_at, expires_at
+                        SELECT public_id, order_public_id, service_tier, fanout, created_at, expires_at,
+                               wave_number, previous_batch_public_id, closed_at, close_reason
                           FROM offer_batches
-                         WHERE public_id = :batchId
+                        WHERE public_id = :batchId
                         """,
                 new MapSqlParameterSource("batchId", batchId),
                 rs -> {
@@ -69,6 +80,10 @@ public class JdbcOfferStateStore implements OfferStateStore {
                             rs.getInt("fanout"),
                             instant(rs.getTimestamp("created_at")),
                             instant(rs.getTimestamp("expires_at")),
+                            rs.getInt("wave_number"),
+                            rs.getString("previous_batch_public_id"),
+                            instant(rs.getTimestamp("closed_at")),
+                            rs.getString("close_reason"),
                             offers.stream().map(DriverOfferRecord::offerId).toList(),
                             offers.stream().map(this::toCandidate).toList()
                     ));
@@ -86,6 +101,18 @@ public class JdbcOfferStateStore implements OfferStateStore {
                         """,
                 new MapSqlParameterSource("orderId", orderId),
                 rs -> rs.next() ? findBatch(rs.getString("public_id")) : Optional.empty());
+    }
+
+    @Override
+    public List<DriverOfferBatch> batchesForOrder(String orderId) {
+        return jdbc.query("""
+                        SELECT public_id
+                          FROM offer_batches
+                         WHERE order_public_id = :orderId
+                      ORDER BY created_at ASC
+                        """,
+                new MapSqlParameterSource("orderId", orderId),
+                (rs, rowNum) -> findBatch(rs.getString("public_id")).orElseThrow());
     }
 
     @Override
@@ -168,6 +195,19 @@ public class JdbcOfferStateStore implements OfferStateStore {
     }
 
     @Override
+    public List<DriverOfferRecord> offersForOrder(String orderId) {
+        return jdbc.query("""
+                        SELECT public_id, offer_batch_public_id, order_public_id, driver_public_id, service_tier,
+                               score, acceptance_probability, deadhead_km, borrowed, rationale, status, created_at, expires_at
+                          FROM driver_offers
+                         WHERE order_public_id = :orderId
+                      ORDER BY created_at ASC
+                        """,
+                new MapSqlParameterSource("orderId", orderId),
+                (rs, rowNum) -> mapOffer(rs));
+    }
+
+    @Override
     public List<DriverOfferRecord> allOffers() {
         return jdbc.query("""
                         SELECT public_id, offer_batch_public_id, order_public_id, driver_public_id, service_tier,
@@ -183,14 +223,15 @@ public class JdbcOfferStateStore implements OfferStateStore {
         jdbc.update("""
                 INSERT INTO order_reservations (
                     id, order_id, offer_batch_id, driver_id, public_id, order_public_id, offer_batch_public_id, driver_public_id,
-                    reservation_version, status, reserved_at, expires_at, updated_at
+                    accepted_offer_public_id, reservation_version, status, reserved_at, expires_at, updated_at
                 ) VALUES (
                     :id, :orderId, :offerBatchId, :driverId, :publicId, :orderPublicId, :offerBatchPublicId, :driverPublicId,
-                    :reservationVersion, :status, :reservedAt, :expiresAt, :updatedAt
+                    :acceptedOfferPublicId, :reservationVersion, :status, :reservedAt, :expiresAt, :updatedAt
                 )
                 ON CONFLICT (order_public_id) DO UPDATE SET
                     offer_batch_public_id = EXCLUDED.offer_batch_public_id,
                     driver_public_id = EXCLUDED.driver_public_id,
+                    accepted_offer_public_id = EXCLUDED.accepted_offer_public_id,
                     reservation_version = EXCLUDED.reservation_version,
                     status = EXCLUDED.status,
                     reserved_at = EXCLUDED.reserved_at,
@@ -206,6 +247,7 @@ public class JdbcOfferStateStore implements OfferStateStore {
                 .addValue("orderPublicId", reservation.orderId())
                 .addValue("offerBatchPublicId", reservation.offerBatchId())
                 .addValue("driverPublicId", reservation.driverId())
+                .addValue("acceptedOfferPublicId", blankToNull(reservation.acceptedOfferId()))
                 .addValue("reservationVersion", reservation.reservationVersion())
                 .addValue("status", reservation.status())
                 .addValue("reservedAt", ts(reservation.reservedAt()))
@@ -216,8 +258,8 @@ public class JdbcOfferStateStore implements OfferStateStore {
     @Override
     public Optional<OfferReservation> findReservation(String orderId) {
         return jdbc.query("""
-                        SELECT public_id, order_public_id, offer_batch_public_id, reservation_version,
-                               driver_public_id, reserved_at, expires_at, status
+                        SELECT public_id, order_public_id, offer_batch_public_id, accepted_offer_public_id,
+                               reservation_version, driver_public_id, reserved_at, expires_at, status
                           FROM order_reservations
                          WHERE order_public_id = :orderId
                         """,
@@ -227,6 +269,7 @@ public class JdbcOfferStateStore implements OfferStateStore {
                         rs.getString("public_id"),
                         rs.getString("order_public_id"),
                         rs.getString("offer_batch_public_id"),
+                        rs.getString("accepted_offer_public_id"),
                         rs.getLong("reservation_version"),
                         rs.getString("driver_public_id"),
                         instant(rs.getTimestamp("reserved_at")),
@@ -239,8 +282,8 @@ public class JdbcOfferStateStore implements OfferStateStore {
     @Override
     public List<OfferReservation> allReservations() {
         return jdbc.query("""
-                        SELECT public_id, order_public_id, offer_batch_public_id, reservation_version,
-                               driver_public_id, reserved_at, expires_at, status
+                        SELECT public_id, order_public_id, offer_batch_public_id, accepted_offer_public_id,
+                               reservation_version, driver_public_id, reserved_at, expires_at, status
                           FROM order_reservations
                       ORDER BY reserved_at DESC
                         """,
@@ -248,6 +291,7 @@ public class JdbcOfferStateStore implements OfferStateStore {
                         rs.getString("public_id"),
                         rs.getString("order_public_id"),
                         rs.getString("offer_batch_public_id"),
+                        rs.getString("accepted_offer_public_id"),
                         rs.getLong("reservation_version"),
                         rs.getString("driver_public_id"),
                         instant(rs.getTimestamp("reserved_at")),
@@ -262,14 +306,15 @@ public class JdbcOfferStateStore implements OfferStateStore {
         jdbc.update("""
                 INSERT INTO offer_decisions (
                     id, offer_id, driver_id, public_id, offer_public_id, order_public_id, driver_public_id,
-                    status, reason, decided_at, reservation_version
+                    offer_batch_public_id, status, reason, decided_at, reservation_version
                 ) VALUES (
                     :id, :offerId, :driverId, :publicId, :offerPublicId, :orderPublicId, :driverPublicId,
-                    :status, :reason, :decidedAt, :reservationVersion
+                    :offerBatchPublicId, :status, :reason, :decidedAt, :reservationVersion
                 )
                 ON CONFLICT (public_id) DO UPDATE SET
                     reason = EXCLUDED.reason,
                     decided_at = EXCLUDED.decided_at,
+                    offer_batch_public_id = EXCLUDED.offer_batch_public_id,
                     reservation_version = EXCLUDED.reservation_version
                 """, new MapSqlParameterSource()
                 .addValue("id", UUID.nameUUIDFromBytes(("offer-decision:" + publicId).getBytes()))
@@ -279,10 +324,32 @@ public class JdbcOfferStateStore implements OfferStateStore {
                 .addValue("offerPublicId", decision.offerId())
                 .addValue("orderPublicId", decision.orderId())
                 .addValue("driverPublicId", decision.driverId())
+                .addValue("offerBatchPublicId", blankToNull(decision.offerBatchId()))
                 .addValue("status", decision.status().name())
                 .addValue("reason", decision.reason())
                 .addValue("decidedAt", ts(decision.decidedAt()))
                 .addValue("reservationVersion", decision.reservationVersion()));
+    }
+
+    @Override
+    public List<OfferDecision> decisionsForOrder(String orderId) {
+        return jdbc.query("""
+                        SELECT offer_public_id, offer_batch_public_id, order_public_id, driver_public_id,
+                               status, reason, decided_at, reservation_version
+                          FROM offer_decisions
+                         WHERE order_public_id = :orderId
+                      ORDER BY decided_at ASC, public_id ASC
+                        """,
+                new MapSqlParameterSource("orderId", orderId),
+                (rs, rowNum) -> new OfferDecision(
+                        rs.getString("offer_public_id"),
+                        rs.getString("offer_batch_public_id"),
+                        rs.getString("order_public_id"),
+                        rs.getString("driver_public_id"),
+                        DriverOfferStatus.valueOf(rs.getString("status")),
+                        rs.getString("reason"),
+                        instant(rs.getTimestamp("decided_at")),
+                        rs.getLong("reservation_version")));
     }
 
     private DriverOfferRecord mapOffer(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -326,5 +393,9 @@ public class JdbcOfferStateStore implements OfferStateStore {
 
     private UUID uuidRef(String namespace, String publicId) {
         return UUID.nameUUIDFromBytes((namespace + ":" + publicId).getBytes());
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 }

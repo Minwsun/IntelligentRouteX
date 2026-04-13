@@ -6,6 +6,7 @@ import com.routechain.api.dto.MapPointView;
 import com.routechain.api.dto.NearbyDriverView;
 import com.routechain.api.dto.OrderLifecycleEventView;
 import com.routechain.api.dto.OrderLifecycleStage;
+import com.routechain.api.dto.OrderOfferSnapshot;
 import com.routechain.api.dto.RoutePreviewSourceView;
 import com.routechain.api.dto.RouteSourceView;
 import com.routechain.api.dto.TripTrackingView;
@@ -221,7 +222,13 @@ public class RuntimeBridge {
         RoutePayload routePayload = routePayload(order, assignedSession, runtimeDriver);
         DriverOfferBatch batch = offerStateStore.latestBatchForOrder(order.getId()).orElse(null);
         NearbyDriverView assignedDriver = assignedDriverView(order, assignedSession, runtimeDriver);
-        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(order, batch != null);
+        OrderOfferSnapshot offerSnapshot = OrderOfferViewMapper.snapshot(
+                offerStateStore.batchesForOrder(order.getId()),
+                offerStateStore.offersForOrder(order.getId()),
+                offerStateStore.decisionsForOrder(order.getId()),
+                offerStateStore.findReservation(order.getId()).orElse(null),
+                order.getAssignedDriverId());
+        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(order, offerSnapshot);
         List<OrderLifecycleEventView> lifecycleHistory = OrderLifecycleViewMapper.historyView(orderRepository.historyForOrder(order.getId()));
         return new TripTrackingView(
                 order.getId(),
@@ -232,6 +239,7 @@ public class RuntimeBridge {
                 order.getQuotedFee(),
                 order.getAssignedDriverId(),
                 batch == null ? "" : batch.offerBatchId(),
+                offerSnapshot,
                 OrderLifecycleViewMapper.legacyStageToken(lifecycleStage),
                 estimateEtaMinutes(order, assignedSession),
                 point("pickup", order.getPickupPoint()),
@@ -262,7 +270,13 @@ public class RuntimeBridge {
         DriverSessionState session = driverFleetRepository.findDriverSession(driverId).orElse(null);
         Driver runtimeDriver = runtimeDriver(driverId);
         RoutePayload routePayload = routePayload(order, session, runtimeDriver);
-        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(order, true);
+        OrderOfferSnapshot offerSnapshot = OrderOfferViewMapper.snapshot(
+                offerStateStore.batchesForOrder(order.getId()),
+                offerStateStore.offersForOrder(order.getId()),
+                offerStateStore.decisionsForOrder(order.getId()),
+                offerStateStore.findReservation(order.getId()).orElse(null),
+                order.getAssignedDriverId());
+        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(order, offerSnapshot);
         return new DriverActiveTaskView(
                 driverId,
                 "task-" + order.getId(),

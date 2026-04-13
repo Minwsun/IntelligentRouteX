@@ -7,6 +7,7 @@ import java.time.Instant;
  */
 public record OfferDecision(
         String offerId,
+        String offerBatchId,
         String orderId,
         String driverId,
         DriverOfferStatus status,
@@ -14,8 +15,21 @@ public record OfferDecision(
         Instant decidedAt,
         long reservationVersion
 ) {
+    public OfferDecision(
+            String offerId,
+            String orderId,
+            String driverId,
+            DriverOfferStatus status,
+            String reason,
+            Instant decidedAt,
+            long reservationVersion
+    ) {
+        this(offerId, "", orderId, driverId, status, reason, decidedAt, reservationVersion);
+    }
+
     public OfferDecision {
         offerId = offerId == null || offerId.isBlank() ? "offer-unknown" : offerId;
+        offerBatchId = offerBatchId == null ? "" : offerBatchId;
         orderId = orderId == null || orderId.isBlank() ? "order-unknown" : orderId;
         driverId = driverId == null || driverId.isBlank() ? "driver-unknown" : driverId;
         status = status == null ? DriverOfferStatus.LOST : status;

@@ -6,7 +6,11 @@ import com.routechain.api.dto.UserQuoteRequest;
 import com.routechain.api.dto.UserQuoteResponse;
 import com.routechain.api.dto.OrderLifecycleEventView;
 import com.routechain.api.dto.OrderLifecycleStage;
+import com.routechain.api.dto.OrderOfferSnapshot;
 import com.routechain.backend.offer.DriverOfferBatch;
+import com.routechain.backend.offer.OfferReservation;
+import com.routechain.backend.offer.OfferDecision;
+import com.routechain.backend.offer.DriverOfferRecord;
 import com.routechain.data.model.OrderStatusHistoryRecord;
 import com.routechain.data.model.QuoteRecord;
 import com.routechain.data.port.OfferStateStore;
@@ -142,8 +146,13 @@ public class UserOrderingService {
     }
 
     private UserOrderResponse toResponse(Order order, String offerBatchId) {
-        boolean hasOfferBatch = offerBatchId != null && !offerBatchId.isBlank();
-        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(order, hasOfferBatch);
+        OrderOfferSnapshot offerSnapshot = OrderOfferViewMapper.snapshot(
+                offerStateStore.batchesForOrder(order.getId()),
+                offerStateStore.offersForOrder(order.getId()),
+                offerStateStore.decisionsForOrder(order.getId()),
+                offerStateStore.findReservation(order.getId()).orElse(null),
+                order.getAssignedDriverId());
+        OrderLifecycleStage lifecycleStage = OrderLifecycleViewMapper.stageFor(order, offerSnapshot);
         List<OrderLifecycleEventView> lifecycleHistory = OrderLifecycleViewMapper.historyView(orderRepository.historyForOrder(order.getId()));
         return new UserOrderResponse(
                 order.getId(),
@@ -154,6 +163,7 @@ public class UserOrderingService {
                 order.getQuotedFee(),
                 order.getAssignedDriverId(),
                 offerBatchId,
+                offerSnapshot,
                 iso(order.getCreatedAt()),
                 iso(order.getAssignedAt()),
                 iso(order.getArrivedPickupAt()),

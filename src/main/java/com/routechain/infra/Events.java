@@ -53,14 +53,20 @@ public final class Events {
                                     int holdTtlRemaining,
                                     double marginalDeadheadPerAddedOrder) {}
     public record OfferBatchCreated(String offerBatchId, String orderId, String serviceTier,
-                                    int fanout, Instant createdAt, Instant expiresAt) {}
+                                    int fanout, int wave, String previousBatchId, Instant createdAt, Instant expiresAt) {}
+    public record OfferBatchClosed(String offerBatchId, String orderId, int wave, String reason, Instant closedAt) {}
+    public record OrderReoffered(String orderId, String previousBatchId, String nextBatchId, int wave, String reason, Instant createdAt) {}
     public record DriverOfferCreated(String offerId, String offerBatchId, String orderId,
                                      String driverId, double score, double acceptanceProbability,
                                      Instant expiresAt) {}
     public record DriverOfferAccepted(String offerId, String offerBatchId, String orderId,
                                       String driverId, Instant acceptedAt) {}
+    public record AssignmentLocked(String orderId, String offerId, String offerBatchId,
+                                   String driverId, long reservationVersion, Instant lockedAt) {}
     public record DriverOfferDeclined(String offerId, String offerBatchId, String orderId,
                                       String driverId, String reason, Instant decidedAt) {}
+    public record DriverOfferLost(String offerId, String offerBatchId, String orderId,
+                                  String driverId, String reason, Instant decidedAt) {}
     public record DriverOfferExpired(String offerId, String offerBatchId, String orderId,
                                      String driverId, Instant expiredAt) {}
     public record ReDispatchTriggered(String orderId, String reason) {}

@@ -23,7 +23,7 @@ class RealtimeStreamServiceTest {
                 store,
                 offerStateStore,
                 offerBrokerService,
-                new DispatchOrchestratorService(store, offerBrokerService));
+                new DispatchOrchestratorService(store, store, offerStateStore, offerBrokerService));
         RealtimeStreamService realtimeStreamService = new RealtimeStreamService(store, runtimeBridge);
 
         WebSocketSession session = Mockito.mock(WebSocketSession.class);

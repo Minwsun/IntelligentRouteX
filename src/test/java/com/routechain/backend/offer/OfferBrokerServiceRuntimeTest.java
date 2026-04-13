@@ -70,4 +70,29 @@ class OfferBrokerServiceRuntimeTest {
                 .filter(view -> view.offerId().equals(offerId))
                 .anyMatch(view -> view.status() == DriverOfferStatus.EXPIRED));
     }
+
+    @Test
+    void decliningLastPendingOfferClosesTheWave() {
+        InMemoryOfferStateStore stateStore = new InMemoryOfferStateStore();
+        InMemoryOfferRuntimeStore runtimeStore = new InMemoryOfferRuntimeStore();
+        OfferBrokerService broker = new OfferBrokerService(
+                stateStore,
+                runtimeStore,
+                new OperationalEventPublisher(new InMemoryOperationalStore()),
+                Duration.ofSeconds(30),
+                Duration.ofSeconds(45)
+        );
+
+        DriverOfferBatch batch = broker.publishOffers("ord-close", "instant", List.of(
+                new DriverOfferCandidate("ord-close", "drv-close", "instant", 0.95, 0.92, 0.4, false, "single")
+        ), 1);
+
+        OfferDecision declined = broker.declineOffer(batch.offerIds().getFirst(), "drv-close", "not_now");
+
+        assertEquals(DriverOfferStatus.DECLINED, declined.status());
+        DriverOfferBatch persistedBatch = stateStore.findBatch(batch.offerBatchId()).orElseThrow();
+        assertTrue(persistedBatch.isClosed());
+        assertEquals("declined", persistedBatch.closeReason());
+        assertEquals(1, stateStore.decisionsForOrder("ord-close").size());
+    }
 }
