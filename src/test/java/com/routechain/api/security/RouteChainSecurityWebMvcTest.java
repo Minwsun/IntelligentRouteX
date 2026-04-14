@@ -1,12 +1,14 @@
 package com.routechain.api.security;
 
 import com.routechain.api.controller.DriverController;
+import com.routechain.api.controller.MerchantController;
 import com.routechain.api.controller.OpsController;
 import com.routechain.api.controller.UserOrderController;
 import com.routechain.api.http.CorrelationIdFilter;
 import com.routechain.api.http.RouteChainExceptionHandler;
 import com.routechain.api.service.DriverOperationsService;
 import com.routechain.api.service.OpsArtifactService;
+import com.routechain.api.service.RuntimeBridge;
 import com.routechain.api.service.UserOrderingService;
 import com.routechain.backend.offer.OfferBrokerService;
 import com.routechain.data.port.OfferStateStore;
@@ -33,6 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         controllers = {
                 UserOrderController.class,
                 DriverController.class,
+                MerchantController.class,
                 OpsController.class
         },
         properties = "routechain.security.enabled=true"
@@ -66,6 +69,9 @@ class RouteChainSecurityWebMvcTest {
 
     @MockBean
     private OpsArtifactService opsArtifactService;
+
+    @MockBean
+    private RuntimeBridge runtimeBridge;
 
     @MockBean
     private OfferStateStore offerStateStore;
@@ -127,5 +133,26 @@ class RouteChainSecurityWebMvcTest {
                         .with(jwt().jwt(jwt -> jwt.subject("drv-ops"))
                                 .authorities(new SimpleGrantedAuthority("ROLE_DRIVER"))))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void mismatchedMerchantSubjectReturnsForbiddenEnvelope() throws Exception {
+        mockMvc.perform(get("/v1/merchant/orders")
+                        .param("merchantId", "merchant-1")
+                        .with(jwt().jwt(jwt -> jwt.subject("merchant-2"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("access_denied"));
+    }
+
+    @Test
+    void matchingMerchantSubjectCanReadOrders() throws Exception {
+        when(runtimeBridge.merchantOrders("merchant-1")).thenReturn(List.of());
+
+        mockMvc.perform(get("/v1/merchant/orders")
+                        .param("merchantId", "merchant-1")
+                        .with(jwt().jwt(jwt -> jwt.subject("merchant-1"))))
+                .andExpect(status().isOk())
+                .andExpect(header().exists(CorrelationIdFilter.HEADER_NAME))
+                .andExpect(jsonPath("$").isArray());
     }
 }

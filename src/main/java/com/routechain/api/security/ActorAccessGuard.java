@@ -48,6 +48,19 @@ public class ActorAccessGuard {
         }
     }
 
+    public void requireMerchant(String merchantId) {
+        if (!securityProperties.isEnabled()) {
+            return;
+        }
+        String subject = currentSubject();
+        if (hasAnyRole("OPS", "ADMIN")) {
+            return;
+        }
+        if (!subject.equals(merchantId)) {
+            throw new AccessDeniedException("JWT subject does not match merchantId");
+        }
+    }
+
     public void requireOps() {
         if (!securityProperties.isEnabled()) {
             return;

@@ -73,6 +73,11 @@ Field intent terms used below:
 - `createdAt`, `updatedAt`: authority timestamps for merchant timeline binding
 - `status`: compatibility-only raw operational status string
 
+Merchant REST read path:
+
+- `GET /v1/merchant/orders?merchantId=...`
+- response payload is a list of `MerchantOrderView`
+
 ## Ops surface
 
 ### `OpsOrderMonitorView`
@@ -87,6 +92,11 @@ Field intent terms used below:
 ### `OpsRealtimeSnapshot`
 
 - `activeOrders`: authority monitor payload
+
+Ops REST read path:
+
+- `GET /v1/ops/orders/active`
+- response payload is a list of `OpsOrderMonitorView`
 
 ## Shared authority sub-models
 

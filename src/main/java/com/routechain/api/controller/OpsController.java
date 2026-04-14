@@ -1,7 +1,9 @@
 package com.routechain.api.controller;
 
 import com.routechain.api.security.ActorAccessGuard;
+import com.routechain.api.service.RuntimeBridge;
 import com.routechain.api.service.OpsArtifactService;
+import com.routechain.api.dto.OpsOrderMonitorView;
 import com.routechain.infra.AdminQueryService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,11 +18,14 @@ import java.util.Map;
 @RequestMapping("/v1/ops")
 public class OpsController {
     private final OpsArtifactService opsArtifactService;
+    private final RuntimeBridge runtimeBridge;
     private final ActorAccessGuard actorAccessGuard;
 
     public OpsController(OpsArtifactService opsArtifactService,
+                         RuntimeBridge runtimeBridge,
                          ActorAccessGuard actorAccessGuard) {
         this.opsArtifactService = opsArtifactService;
+        this.runtimeBridge = runtimeBridge;
         this.actorAccessGuard = actorAccessGuard;
     }
 
@@ -80,5 +85,11 @@ public class OpsController {
                 "compactStatus", opsArtifactService.compactRuntimeStatus(),
                 "compactEvidence", opsArtifactService.compactEvidence()
         );
+    }
+
+    @GetMapping("/orders/active")
+    public List<OpsOrderMonitorView> activeOrders() {
+        actorAccessGuard.requireOps();
+        return runtimeBridge.opsRealtimeSnapshot().activeOrders();
     }
 }
