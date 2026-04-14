@@ -6,7 +6,9 @@ import com.routechain.domain.Enums.WeatherProfile;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.ToDoubleFunction;
 
 /**
@@ -78,6 +80,20 @@ public class ScenarioBatchRunner {
             scenario("heavy_rain", 1200, 40, 0.9, 0.50, WeatherProfile.HEAVY_RAIN),
             scenario("demand_spike", 1200, 40, 1.35, 0.45, WeatherProfile.LIGHT_RAIN),
             scenario("shortage", 1200, 26, 1.0, 0.40, WeatherProfile.CLEAR)
+    );
+    private static final List<ScenarioConfig> CONFIGURED_LANE_SCENARIOS = List.of(
+            scenario("normal", 1200, 40, 0.8, 0.30, WeatherProfile.CLEAR),
+            scenario("instant-normal", 1200, 40, 0.85, 0.30, WeatherProfile.CLEAR),
+            scenario("instant-rain_onset", 1200, 40, 1.05, 0.40, WeatherProfile.LIGHT_RAIN),
+            scenario("rush_hour", 1200, 40, 1.1, 0.55, WeatherProfile.CLEAR),
+            scenario("instant-rush_hour", 1200, 40, 1.15, 0.58, WeatherProfile.CLEAR),
+            scenario("demand_spike", 1200, 40, 1.35, 0.45, WeatherProfile.LIGHT_RAIN),
+            scenario("instant-demand_spike", 1200, 40, 1.35, 0.45, WeatherProfile.LIGHT_RAIN),
+            scenario("heavy_rain", 1200, 40, 0.9, 0.50, WeatherProfile.HEAVY_RAIN),
+            scenario("shortage", 1200, 26, 1.0, 0.40, WeatherProfile.CLEAR),
+            scenario("post_drop_shortage", 1200, 26, 1.05, 0.42, WeatherProfile.CLEAR),
+            scenario("merchant_cluster", 1200, 40, 1.10, 0.34, WeatherProfile.CLEAR),
+            scenario("storm", 1200, 40, 0.92, 0.62, WeatherProfile.STORM)
     );
 
     private static final List<ScenarioConfig> SHOWCASE_SCENARIOS = List.of(
@@ -210,11 +226,7 @@ public class ScenarioBatchRunner {
     private static void runConfiguredComparisonBatch(String laneName) {
         BenchmarkCertificationScenarioMatrix.LaneDefinition lane =
                 BenchmarkCertificationConfigLoader.loadScenarioMatrix().lane(laneName);
-        List<ScenarioConfig> scenarios = SCENARIOS.stream()
-                .filter(scenario -> lane.scenarioBuckets().stream()
-                        .anyMatch(bucket -> BenchmarkCertificationSupport.matchesScenario(
-                                scenario.name(), bucket.scenarioMatchers())))
-                .toList();
+        List<ScenarioConfig> scenarios = resolveConfiguredScenarios(laneName);
 
         System.out.println("=================================================");
         System.out.println("   ROUTECHAIN AI - SCENARIO BATCH (" + laneName.toUpperCase() + ")");
@@ -256,6 +268,31 @@ public class ScenarioBatchRunner {
         }
 
         System.out.println("=================================================");
+    }
+
+    static List<String> listResolvedScenarioNamesForLane(String laneName) {
+        return resolveConfiguredScenarios(laneName).stream()
+                .map(ScenarioConfig::name)
+                .toList();
+    }
+
+    private static List<ScenarioConfig> resolveConfiguredScenarios(String laneName) {
+        BenchmarkCertificationScenarioMatrix.LaneDefinition lane =
+                BenchmarkCertificationConfigLoader.loadScenarioMatrix().lane(laneName);
+        Map<String, ScenarioConfig> catalog = new LinkedHashMap<>();
+        for (ScenarioConfig scenario : CONFIGURED_LANE_SCENARIOS) {
+            catalog.putIfAbsent(scenario.name(), scenario);
+        }
+        List<ScenarioConfig> scenarios = new ArrayList<>();
+        for (ScenarioConfig scenario : catalog.values()) {
+            boolean matchesLane = lane.scenarioBuckets().stream()
+                    .anyMatch(bucket -> BenchmarkCertificationSupport.matchesScenario(
+                            scenario.name(), bucket.scenarioMatchers()));
+            if (matchesLane) {
+                scenarios.add(scenario);
+            }
+        }
+        return scenarios;
     }
 
     private static void runAblationBatch() {

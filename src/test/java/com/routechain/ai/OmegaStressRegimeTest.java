@@ -423,6 +423,55 @@ class OmegaStressRegimeTest {
     }
 
     @Test
+    void heavyRainExecutionGateKeepsBorderlineLocalSingleWhenLandingIsStrong() throws Exception {
+        OmegaDispatchAgent agent = new OmegaDispatchAgent(List.of());
+        Driver driver = new Driver(
+                "D-RAIN-BORDERLINE",
+                "Rain Borderline Driver",
+                new GeoPoint(10.7765, 106.7009),
+                "R1",
+                VehicleType.MOTORBIKE);
+
+        DispatchPlan borderlineLocal = new DispatchPlan(
+                driver,
+                new DispatchPlan.Bundle("RAIN-BORDERLINE", List.of(order("RB-1", 0)), 42000.0, 1),
+                List.of());
+        borderlineLocal.setSelectionBucket(SelectionBucket.SINGLE_LOCAL);
+        borderlineLocal.setServiceTier("instant");
+        borderlineLocal.setPredictedDeadheadKm(1.22);
+        borderlineLocal.setOnTimeProbability(0.81);
+        borderlineLocal.setExpectedPostCompletionEmptyKm(1.56);
+        borderlineLocal.setExecutionScore(0.77);
+        borderlineLocal.setLastDropLandingScore(0.72);
+        borderlineLocal.setPostDropDemandProbability(0.68);
+        borderlineLocal.setDeliveryCorridorScore(0.70);
+        borderlineLocal.setContinuationValueScore(0.60);
+        borderlineLocal.setNextOrderAcquisitionScore(0.58);
+        borderlineLocal.setExpectedNextOrderIdleMinutes(2.2);
+        borderlineLocal.setBorrowedDependencyScore(0.05);
+        borderlineLocal.setEmptyRiskAfter(0.18);
+        borderlineLocal.setHarshWeatherStress(true);
+        borderlineLocal.setStressFallbackOnly(true);
+        borderlineLocal.setStressRegime(StressRegime.STRESS);
+
+        Method method = OmegaDispatchAgent.class.getDeclaredMethod(
+                "passesExecutionGate",
+                DispatchPlan.class,
+                StressRegime.class,
+                WeatherProfile.class);
+        method.setAccessible(true);
+
+        boolean accepted = (boolean) method.invoke(
+                agent,
+                borderlineLocal,
+                StressRegime.STRESS,
+                WeatherProfile.HEAVY_RAIN);
+
+        assertTrue(accepted,
+                "Heavy-rain recovery should keep a borderline local single when landing quality is genuinely strong");
+    }
+
+    @Test
     void heavyRainLocalMainlineSingleIsNotDowngradedIntoFallbackOnly() throws Exception {
         OmegaDispatchAgent agent = new OmegaDispatchAgent(List.of());
         Driver driver = new Driver(

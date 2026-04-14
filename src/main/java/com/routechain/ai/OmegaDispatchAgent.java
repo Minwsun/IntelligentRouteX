@@ -2983,10 +2983,16 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                 : regime == StressRegime.STRESS ? 0.82 : 0.65;
         double harshWeatherPenalty = 0.0;
         if (plan.isHarshWeatherStress()) {
-            harshWeatherPenalty += clamp01(plan.getBorrowedDependencyScore()) * 0.18;
-            harshWeatherPenalty += clamp01(plan.getEmptyRiskAfter()) * 0.14;
-            harshWeatherPenalty += Math.max(0.0, plan.getExpectedPostCompletionEmptyKm() - 1.0) * 0.10;
-            harshWeatherPenalty += Math.max(0.0, plan.getExpectedNextOrderIdleMinutes() - 3.5) * 0.04;
+            double borrowedPenalty = clamp01(plan.getBorrowedDependencyScore()) * 0.18;
+            double emptyRiskPenalty = clamp01(plan.getEmptyRiskAfter()) * 0.14;
+            double postCompletionEmptyPenalty =
+                    Math.max(0.0, plan.getExpectedPostCompletionEmptyKm() - 1.0) * 0.10;
+            double idlePenalty =
+                    Math.max(0.0, plan.getExpectedNextOrderIdleMinutes() - 3.5) * 0.04;
+            harshWeatherPenalty += borrowedPenalty;
+            harshWeatherPenalty += emptyRiskPenalty;
+            harshWeatherPenalty += postCompletionEmptyPenalty;
+            harshWeatherPenalty += idlePenalty;
             if (plan.getPredictedDeadheadKm() >= 1.8) {
                 harshWeatherPenalty += 0.06;
             }
@@ -3001,6 +3007,8 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                     || plan.getPostDropDemandProbability() < 0.30) {
                 harshWeatherPenalty += 0.06;
             }
+            harshWeatherPenalty = Math.max(0.0,
+                    harshWeatherPenalty - heavyRainRecoveryRelief(plan, regime));
         }
         return clamp01(score * regimeWeight - harshWeatherPenalty);
     }
@@ -3052,6 +3060,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         double postCompletionCap = plan.getBundleSize() >= 3 ? 3.6 : 2.8;
         if (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM) {
             postCompletionCap = plan.getBundleSize() >= 3 ? 1.9 : 1.45;
+            postCompletionCap += heavyRainPostCompletionCapRelief(plan, regime);
         }
         if (plan.getExpectedPostCompletionEmptyKm() > postCompletionCap
                 && plan.getSelectionBucket() != SelectionBucket.EMERGENCY_COVERAGE) {
@@ -3074,6 +3083,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         if (weather == WeatherProfile.HEAVY_RAIN || weather == WeatherProfile.STORM) {
             DeliveryServiceTier serviceTier = DeliveryServiceTier.fromWireValue(plan.getServiceTier());
             boolean severeStress = regime == StressRegime.SEVERE_STRESS;
+            double relief = heavyRainDeadheadBudgetRelief(plan, regime);
             if (plan.getSelectionBucket() == SelectionBucket.EMERGENCY_COVERAGE) {
                 return severeStress ? 1.2 : 1.5;
             }
@@ -3082,20 +3092,20 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
                     case INSTANT -> severeStress ? 0.90 : 1.10;
                     case TWO_HOUR, MULTI_STOP_COD -> severeStress ? 1.05 : 1.25;
                     case FOUR_HOUR, SCHEDULED -> severeStress ? 1.20 : 1.40;
-                };
+                } + relief;
             }
             if (plan.getBundleSize() == 2) {
                 return switch (serviceTier) {
                     case INSTANT -> severeStress ? 1.10 : 1.30;
                     case TWO_HOUR, MULTI_STOP_COD -> severeStress ? 1.25 : 1.45;
                     case FOUR_HOUR, SCHEDULED -> severeStress ? 1.40 : 1.60;
-                };
+                } + relief;
             }
             return switch (serviceTier) {
                 case INSTANT -> severeStress ? 1.45 : 1.70;
                 case TWO_HOUR, MULTI_STOP_COD -> severeStress ? 1.60 : 1.85;
                 case FOUR_HOUR, SCHEDULED -> severeStress ? 1.75 : 2.00;
-            };
+            } + relief;
         }
         boolean borrowed = plan.getBorrowedDependencyScore() >= 0.25;
         if (plan.getSelectionBucket() == SelectionBucket.EMERGENCY_COVERAGE) {
@@ -3111,6 +3121,75 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
             return adjustDeadheadBudgetForServiceTier(plan.getServiceTier(), borrowed ? 2.8 : 3.4);
         }
         return adjustDeadheadBudgetForServiceTier(plan.getServiceTier(), 3.0);
+    }
+
+    private double heavyRainRecoveryRelief(DispatchPlan plan,
+                                           StressRegime regime) {
+        double strength = heavyRainRecoveryStrength(plan, regime);
+        if (strength <= 0.0) {
+            return 0.0;
+        }
+        return strength * 0.10;
+    }
+
+    private double heavyRainPostCompletionCapRelief(DispatchPlan plan,
+                                                    StressRegime regime) {
+        double strength = heavyRainRecoveryStrength(plan, regime);
+        if (strength <= 0.0 || plan.getSelectionBucket() == SelectionBucket.EMERGENCY_COVERAGE) {
+            return 0.0;
+        }
+        return plan.getBundleSize() >= 3
+                ? strength * 0.20
+                : strength * 0.24;
+    }
+
+    private double heavyRainDeadheadBudgetRelief(DispatchPlan plan,
+                                                 StressRegime regime) {
+        double strength = heavyRainRecoveryStrength(plan, regime);
+        if (strength <= 0.0 || plan.getSelectionBucket() == SelectionBucket.EMERGENCY_COVERAGE) {
+            return 0.0;
+        }
+        return plan.getBundleSize() >= 2
+                ? strength * 0.14
+                : strength * 0.22;
+    }
+
+    private double heavyRainRecoveryStrength(DispatchPlan plan,
+                                             StressRegime regime) {
+        if (!plan.isHarshWeatherStress()
+                || (regime != StressRegime.STRESS && regime != StressRegime.SEVERE_STRESS)
+                || !isHeavyRainRecoveryBucket(plan)) {
+            return 0.0;
+        }
+        double locality = clamp01(
+                0.34
+                        + clamp01(1.0 - plan.getBorrowedDependencyScore()) * 0.22
+                        + clamp01(1.0 - plan.getPredictedDeadheadKm() / 1.8) * 0.18
+                        + clamp01(1.0 - plan.getExpectedPostCompletionEmptyKm() / 1.8) * 0.16
+                        + clamp01(plan.getOnTimeProbability()) * 0.10);
+        double landingQuality = clamp01(
+                clamp01(plan.getLastDropLandingScore()) * 0.28
+                        + clamp01(plan.getPostDropDemandProbability()) * 0.20
+                        + clamp01(plan.getDeliveryCorridorScore()) * 0.14
+                        + clamp01(plan.getContinuationValueScore()) * 0.10
+                        + clamp01(plan.getNextOrderAcquisitionScore()) * 0.08
+                        + clamp01(1.0 - plan.getEmptyRiskAfter()) * 0.10
+                        + clamp01(1.0 - plan.getExpectedNextOrderIdleMinutes() / 6.0) * 0.10);
+        double recoveryStrength = clamp01(locality * 0.56 + landingQuality * 0.44);
+        if (plan.isStressFallbackOnly()) {
+            recoveryStrength *= 0.90;
+        }
+        if (plan.getSelectionBucket() == SelectionBucket.EXTENSION_LOCAL && plan.getBundleSize() >= 3) {
+            recoveryStrength *= 0.92;
+        }
+        return recoveryStrength >= 0.60 ? recoveryStrength : 0.0;
+    }
+
+    private boolean isHeavyRainRecoveryBucket(DispatchPlan plan) {
+        return plan.getSelectionBucket() == SelectionBucket.SINGLE_LOCAL
+                || plan.getSelectionBucket() == SelectionBucket.FALLBACK_LOCAL_LOW_DEADHEAD
+                || plan.getSelectionBucket() == SelectionBucket.EXTENSION_LOCAL
+                || plan.getSelectionBucket() == SelectionBucket.WAVE_LOCAL;
     }
 
     private double minOnTimeForGate(DispatchPlan plan,
@@ -4384,6 +4463,7 @@ public class OmegaDispatchAgent implements DispatchBrainAgent {
         summary.put("batchValueScore", plan.getBatchValueScore());
         summary.put("stressRescueScore", plan.getStressRescueScore());
         summary.put("positioningValueScore", plan.getPositioningValueScore());
+        summary.put("heavyRainRecoveryStrength", heavyRainRecoveryStrength(plan, plan.getStressRegime()));
         summary.put("graphExplanation", plan.getGraphExplanationTrace());
         summary.put("marginalDeadheadPerAddedOrder", plan.getMarginalDeadheadPerAddedOrder());
         summary.put("routeAlternative", routeAlternative);

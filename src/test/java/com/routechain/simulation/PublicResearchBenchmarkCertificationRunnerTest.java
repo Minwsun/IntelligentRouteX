@@ -34,6 +34,27 @@ class PublicResearchBenchmarkCertificationRunnerTest {
         assertTrue(payload.contains("\"familyId\": \"li-lim-pdptw\""));
     }
 
+    @Test
+    void shouldExplainDatasetBlockerWhenResearchFamiliesAreEmpty() throws IOException {
+        Path root = Path.of("build", "routechain-apex", "benchmarks");
+        deleteRecursively(root);
+
+        writeResearchFamily("solomon", "distributed_customers");
+
+        try {
+            PublicResearchBenchmarkCertificationRunner.main(new String[]{"certification"});
+        } catch (IllegalStateException ignored) {
+            // Expected because benchmark coverage is incomplete.
+        }
+
+        Path json = root.resolve("certification").resolve("public-research-benchmark-certification.json");
+        String payload = Files.readString(json);
+        assertTrue(payload.contains("dataset directory is empty for family homberger"),
+                "Certification summary should call out missing public datasets explicitly");
+        assertTrue(payload.contains("fetch_route_research_datasets.ps1"),
+                "Certification summary should point to the dataset bootstrap script");
+    }
+
     private void writeResearchFamily(String family, String scenarioName) {
         RunReport legacy = createReport(
                 "B-" + family + "-case-s42-legacy-seed42",

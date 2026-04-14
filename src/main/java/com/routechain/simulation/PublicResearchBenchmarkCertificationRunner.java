@@ -20,6 +20,7 @@ public final class PublicResearchBenchmarkCertificationRunner {
     private static final Path ROOT = Path.of("build", "routechain-apex", "benchmarks");
     private static final Path RUNS_DIR = ROOT.resolve("runs");
     private static final Path COMPARES_DIR = ROOT.resolve("compares");
+    private static final Path DATASET_ROOT = Path.of("benchmarks", "vrp");
     private static final List<String> REQUIRED_FAMILIES = List.of(
             "solomon",
             "homberger",
@@ -76,6 +77,10 @@ public final class PublicResearchBenchmarkCertificationRunner {
                 .filter(run -> BenchmarkCertificationSupport.normalize(run.runId()).contains(marker))
                 .toList();
         List<String> notes = new ArrayList<>();
+        if (datasetFamilyIsEmpty(family)) {
+            notes.add("dataset directory is empty for family " + family
+                    + "; run scripts/benchmark/fetch_route_research_datasets.ps1 before certification");
+        }
         if (familyCompares.isEmpty()) {
             notes.add("missing compare artifacts for family " + family);
             return new ResearchBenchmarkFamilyResult(family, 0, 0.0, 0.0, 0.0, 0.0, 0.0, false, notes);
@@ -124,6 +129,20 @@ public final class PublicResearchBenchmarkCertificationRunner {
                 pass,
                 notes
         );
+    }
+
+    private static boolean datasetFamilyIsEmpty(String family) {
+        Path familyDir = DATASET_ROOT.resolve(family);
+        try {
+            if (Files.notExists(familyDir) || !Files.isDirectory(familyDir)) {
+                return true;
+            }
+            try (var stream = Files.walk(familyDir)) {
+                return stream.noneMatch(Files::isRegularFile);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to inspect public benchmark dataset directory " + familyDir, e);
+        }
     }
 
     private static <T> List<T> readJsonDirectory(Path dir, Class<T> type) {
