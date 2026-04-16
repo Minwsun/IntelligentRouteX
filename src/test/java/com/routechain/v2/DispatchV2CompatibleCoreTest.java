@@ -40,7 +40,7 @@ class DispatchV2CompatibleCoreTest {
                 WeatherProfile.CLEAR,
                 Instant.now()));
         assertFalse(result.fallbackUsed());
-        assertTrue(result.decisionStages().containsAll(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool")));
+        assertTrue(result.decisionStages().containsAll(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank")));
     }
 
     @Test

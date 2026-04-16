@@ -6,7 +6,7 @@
 
 ## Current Executable Slice
 
-The current runtime result must only report stages that actually ran. For the current bundle slice, `DispatchV2Result.decisionStages` must be exactly `["eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool"]` on the enabled path.
+The current runtime result must only report stages that actually ran. For the current route-candidate slice, `DispatchV2Result.decisionStages` must be exactly `["eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank"]` on the enabled path.
 
 ## Runtime Defaults
 

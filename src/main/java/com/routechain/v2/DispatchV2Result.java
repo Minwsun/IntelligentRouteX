@@ -4,6 +4,10 @@ import com.routechain.v2.bundle.BoundaryExpansion;
 import com.routechain.v2.bundle.BoundaryExpansionSummary;
 import com.routechain.v2.bundle.BundleCandidate;
 import com.routechain.v2.bundle.BundlePoolSummary;
+import com.routechain.v2.route.DriverCandidate;
+import com.routechain.v2.route.DriverShortlistSummary;
+import com.routechain.v2.route.PickupAnchor;
+import com.routechain.v2.route.PickupAnchorSummary;
 import com.routechain.v2.cluster.BufferedOrderWindow;
 import com.routechain.v2.cluster.MicroCluster;
 import com.routechain.v2.cluster.MicroClusterSummary;
@@ -30,6 +34,10 @@ public record DispatchV2Result(
         BoundaryExpansionSummary boundaryExpansionSummary,
         List<BundleCandidate> bundleCandidates,
         BundlePoolSummary bundlePoolSummary,
+        List<PickupAnchor> pickupAnchors,
+        PickupAnchorSummary pickupAnchorSummary,
+        List<DriverCandidate> driverCandidates,
+        DriverShortlistSummary driverShortlistSummary,
         List<String> degradeReasons) implements SchemaVersioned {
 
     public static DispatchV2Result fallback(String traceId) {
@@ -50,6 +58,10 @@ public record DispatchV2Result(
                 BoundaryExpansionSummary.empty(),
                 List.of(),
                 BundlePoolSummary.empty(),
+                List.of(),
+                PickupAnchorSummary.empty(),
+                List.of(),
+                DriverShortlistSummary.empty(),
                 List.of("dispatch-v2-disabled"));
     }
 }

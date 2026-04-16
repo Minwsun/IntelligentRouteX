@@ -20,6 +20,11 @@ import com.routechain.v2.bundle.BundleScorer;
 import com.routechain.v2.bundle.BundleSeedGenerator;
 import com.routechain.v2.bundle.BundleValidator;
 import com.routechain.v2.bundle.DispatchBundleStageService;
+import com.routechain.v2.route.CandidateDriverShortlister;
+import com.routechain.v2.route.DispatchRouteCandidateService;
+import com.routechain.v2.route.DriverReranker;
+import com.routechain.v2.route.DriverRouteFeatureBuilder;
+import com.routechain.v2.route.PickupAnchorSelector;
 import com.routechain.v2.cluster.DispatchPairClusterService;
 import com.routechain.v2.cluster.EtaLegCacheFactory;
 import com.routechain.v2.cluster.MicroClusterer;
@@ -97,7 +102,20 @@ final class TestDispatchV2Factory {
                 bundleValidator,
                 bundleScorer,
                 bundleDominancePruner);
-        return configuration.dispatchV2Core(dispatchEtaContextService, dispatchPairClusterService, dispatchBundleStageService);
+        PickupAnchorSelector pickupAnchorSelector = configuration.pickupAnchorSelector(properties);
+        DriverRouteFeatureBuilder driverRouteFeatureBuilder = configuration.driverRouteFeatureBuilder();
+        CandidateDriverShortlister candidateDriverShortlister = configuration.candidateDriverShortlister(properties, driverRouteFeatureBuilder);
+        DriverReranker driverReranker = configuration.driverReranker();
+        DispatchRouteCandidateService dispatchRouteCandidateService = configuration.dispatchRouteCandidateService(
+                pickupAnchorSelector,
+                candidateDriverShortlister,
+                driverReranker,
+                etaLegCacheFactory);
+        return configuration.dispatchV2Core(
+                dispatchEtaContextService,
+                dispatchPairClusterService,
+                dispatchBundleStageService,
+                dispatchRouteCandidateService);
     }
 
     static DispatchV2Request requestWithOrdersAndDriver() {
@@ -109,7 +127,10 @@ final class TestDispatchV2Factory {
                         order("order-1", 10.7750, 106.7000, 10.7800, 106.7100, decisionTime, false),
                         order("order-2", 10.7760, 106.7010, 10.7810, 106.7120, decisionTime.plusSeconds(120), false),
                         order("order-3", 10.8200, 106.7600, 10.8300, 106.7700, decisionTime.plusSeconds(300), true)),
-                List.of(new Driver("driver-1", new GeoPoint(10.7700, 106.6950))),
+                List.of(
+                        new Driver("driver-1", new GeoPoint(10.7700, 106.6950)),
+                        new Driver("driver-2", new GeoPoint(10.7720, 106.6970)),
+                        new Driver("driver-3", new GeoPoint(10.7810, 106.7060))),
                 List.of(),
                 WeatherProfile.CLEAR,
                 decisionTime);

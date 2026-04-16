@@ -24,6 +24,11 @@ import com.routechain.v2.bundle.BundleScorer;
 import com.routechain.v2.bundle.BundleSeedGenerator;
 import com.routechain.v2.bundle.BundleValidator;
 import com.routechain.v2.bundle.DispatchBundleStageService;
+import com.routechain.v2.route.CandidateDriverShortlister;
+import com.routechain.v2.route.DispatchRouteCandidateService;
+import com.routechain.v2.route.DriverReranker;
+import com.routechain.v2.route.DriverRouteFeatureBuilder;
+import com.routechain.v2.route.PickupAnchorSelector;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
@@ -210,10 +215,48 @@ public class DispatchV2Configuration {
     }
 
     @Bean
+    PickupAnchorSelector pickupAnchorSelector(RouteChainDispatchV2Properties properties) {
+        return new PickupAnchorSelector(properties);
+    }
+
+    @Bean
+    DriverRouteFeatureBuilder driverRouteFeatureBuilder() {
+        return new DriverRouteFeatureBuilder();
+    }
+
+    @Bean
+    CandidateDriverShortlister candidateDriverShortlister(RouteChainDispatchV2Properties properties,
+                                                          DriverRouteFeatureBuilder driverRouteFeatureBuilder) {
+        return new CandidateDriverShortlister(properties, driverRouteFeatureBuilder);
+    }
+
+    @Bean
+    DriverReranker driverReranker() {
+        return new DriverReranker();
+    }
+
+    @Bean
+    DispatchRouteCandidateService dispatchRouteCandidateService(PickupAnchorSelector pickupAnchorSelector,
+                                                                CandidateDriverShortlister candidateDriverShortlister,
+                                                                DriverReranker driverReranker,
+                                                                EtaLegCacheFactory etaLegCacheFactory) {
+        return new DispatchRouteCandidateService(
+                pickupAnchorSelector,
+                candidateDriverShortlister,
+                driverReranker,
+                etaLegCacheFactory);
+    }
+
+    @Bean
     DispatchV2Core dispatchV2Core(DispatchEtaContextService dispatchEtaContextService,
                                   DispatchPairClusterService dispatchPairClusterService,
-                                  DispatchBundleStageService dispatchBundleStageService) {
-        return new DispatchV2Core(dispatchEtaContextService, dispatchPairClusterService, dispatchBundleStageService);
+                                  DispatchBundleStageService dispatchBundleStageService,
+                                  DispatchRouteCandidateService dispatchRouteCandidateService) {
+        return new DispatchV2Core(
+                dispatchEtaContextService,
+                dispatchPairClusterService,
+                dispatchBundleStageService,
+                dispatchRouteCandidateService);
     }
 
     @Bean

@@ -23,6 +23,11 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 - `BundleCandidate`
 - `BundlePoolSummary`
 - `DispatchBundleStage`
+- `PickupAnchor`
+- `PickupAnchorSummary`
+- `DriverCandidate`
+- `DriverShortlistSummary`
+- `DispatchRouteCandidateStage`
 - `WarmStartState`
 - `HotStartState`
 - `DecisionLogRecord`

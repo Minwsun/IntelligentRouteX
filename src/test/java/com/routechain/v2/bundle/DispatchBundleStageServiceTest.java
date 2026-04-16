@@ -21,7 +21,6 @@ class DispatchBundleStageServiceTest {
                 new BundleDominancePruner());
 
         DispatchBundleStage stage = service.evaluate(
-                BundleTestFixtures.request(),
                 BundleTestFixtures.clearEtaContext(),
                 BundleTestFixtures.pairClusterStage());
 

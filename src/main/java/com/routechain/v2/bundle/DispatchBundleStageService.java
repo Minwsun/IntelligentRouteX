@@ -1,7 +1,6 @@
 package com.routechain.v2.bundle;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
-import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 
@@ -38,7 +37,7 @@ public final class DispatchBundleStageService {
         this.bundleDominancePruner = bundleDominancePruner;
     }
 
-    public DispatchBundleStage evaluate(DispatchV2Request request, EtaContext etaContext, DispatchPairClusterStage pairClusterStage) {
+    public DispatchBundleStage evaluate(EtaContext etaContext, DispatchPairClusterStage pairClusterStage) {
         Map<String, List<BoundaryCandidate>> boundaryCandidates = boundaryCandidateSelector.select(
                 pairClusterStage.bufferedOrderWindow(),
                 pairClusterStage.microClusters(),
@@ -60,10 +59,11 @@ public final class DispatchBundleStageService {
         List<BundleCandidate> feasibleCandidates = new ArrayList<>();
         for (BundleSeed seed : seeds) {
             List<BundleCandidate> familyCandidates = bundleFamilyEnumerator.enumerate(seed, context).stream()
-                    .limit(properties.getBundle().getBeamWidth())
                     .map(candidate -> bundleValidator.validate(candidate, context))
                     .filter(BundleCandidate::feasible)
                     .map(candidate -> bundleScorer.score(candidate, context))
+                    .sorted(bundleDominancePruner.bundleComparator())
+                    .limit(Math.max(1, properties.getBundle().getBeamWidth()))
                     .toList();
             feasibleCandidates.addAll(familyCandidates);
         }

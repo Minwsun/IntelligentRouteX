@@ -19,11 +19,13 @@ class DispatchV2CoreBundleSliceTest {
 
         DispatchV2Result result = core.dispatch(TestDispatchV2Factory.requestWithOrdersAndDriver());
 
-        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool"), result.decisionStages());
+        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank"), result.decisionStages());
         assertFalse(result.fallbackUsed());
         assertNull(result.selectedRouteId());
         assertNotNull(result.boundaryExpansionSummary());
         assertNotNull(result.bundlePoolSummary());
+        assertNotNull(result.pickupAnchorSummary());
+        assertNotNull(result.driverShortlistSummary());
         assertFalse(result.boundaryExpansions().isEmpty());
         assertFalse(result.bundleCandidates().isEmpty());
         assertTrue(result.bundlePoolSummary().retainedCount() > 0);

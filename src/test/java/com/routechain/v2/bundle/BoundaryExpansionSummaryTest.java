@@ -11,7 +11,7 @@ class BoundaryExpansionSummaryTest {
     void summaryMatchesExpansionOutputs() {
         DispatchBundleStageService service = bundleStageService(RouteChainDispatchV2Properties.defaults());
 
-        DispatchBundleStage stage = service.evaluate(BundleTestFixtures.request(), BundleTestFixtures.clearEtaContext(), BundleTestFixtures.pairClusterStage());
+        DispatchBundleStage stage = service.evaluate(BundleTestFixtures.clearEtaContext(), BundleTestFixtures.pairClusterStage());
 
         int accepted = stage.boundaryExpansions().stream().mapToInt(expansion -> expansion.acceptedBoundaryOrderIds().size()).sum();
         int rejected = stage.boundaryExpansions().stream().mapToInt(expansion -> expansion.rejectedBoundaryOrderIds().size()).sum();
