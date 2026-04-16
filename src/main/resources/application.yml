@@ -41,4 +41,18 @@ routechain:
         forecast-max-age: 30m
       timeouts:
         eta-ml-timeout: 150ms
-
+    pair:
+      pickup-distance-km-threshold: 2.2
+      ready-gap-minutes-threshold: 15
+      drop-angle-diff-degrees-threshold: 55
+      merge-eta-ratio-threshold: 1.25
+      score-threshold: 0.45
+      ml-timeout: 120ms
+      max-candidate-neighbors-per-order: 12
+      weather-tightened:
+        pickup-distance-km-threshold: 1.4
+        ready-gap-minutes-threshold: 10
+        merge-eta-ratio-threshold: 1.15
+    micro-cluster:
+      time-bucket-minutes: 15
+      split-score-threshold: 0.55

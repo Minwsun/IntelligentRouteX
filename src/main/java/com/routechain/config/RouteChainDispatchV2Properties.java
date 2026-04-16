@@ -20,6 +20,8 @@ public class RouteChainDispatchV2Properties {
     private final Bundle bundle = new Bundle();
     private final Candidate candidate = new Candidate();
     private final Context context = new Context();
+    private final Pair pair = new Pair();
+    private final MicroCluster microCluster = new MicroCluster();
 
     public static RouteChainDispatchV2Properties defaults() {
         return new RouteChainDispatchV2Properties();
@@ -115,6 +117,14 @@ public class RouteChainDispatchV2Properties {
 
     public Context getContext() {
         return context;
+    }
+
+    public Pair getPair() {
+        return pair;
+    }
+
+    public MicroCluster getMicroCluster() {
+        return microCluster;
     }
 
     public static final class Buffer {
@@ -289,6 +299,128 @@ public class RouteChainDispatchV2Properties {
 
         public void setEtaMlTimeout(Duration etaMlTimeout) {
             this.etaMlTimeout = etaMlTimeout;
+        }
+    }
+
+    public static final class Pair {
+        private double pickupDistanceKmThreshold = 2.2;
+        private int readyGapMinutesThreshold = 15;
+        private double dropAngleDiffDegreesThreshold = 55.0;
+        private double mergeEtaRatioThreshold = 1.25;
+        private double scoreThreshold = 0.45;
+        private Duration mlTimeout = Duration.ofMillis(120);
+        private int maxCandidateNeighborsPerOrder = 12;
+        private final WeatherTightened weatherTightened = new WeatherTightened();
+
+        public double getPickupDistanceKmThreshold() {
+            return pickupDistanceKmThreshold;
+        }
+
+        public void setPickupDistanceKmThreshold(double pickupDistanceKmThreshold) {
+            this.pickupDistanceKmThreshold = pickupDistanceKmThreshold;
+        }
+
+        public int getReadyGapMinutesThreshold() {
+            return readyGapMinutesThreshold;
+        }
+
+        public void setReadyGapMinutesThreshold(int readyGapMinutesThreshold) {
+            this.readyGapMinutesThreshold = readyGapMinutesThreshold;
+        }
+
+        public double getDropAngleDiffDegreesThreshold() {
+            return dropAngleDiffDegreesThreshold;
+        }
+
+        public void setDropAngleDiffDegreesThreshold(double dropAngleDiffDegreesThreshold) {
+            this.dropAngleDiffDegreesThreshold = dropAngleDiffDegreesThreshold;
+        }
+
+        public double getMergeEtaRatioThreshold() {
+            return mergeEtaRatioThreshold;
+        }
+
+        public void setMergeEtaRatioThreshold(double mergeEtaRatioThreshold) {
+            this.mergeEtaRatioThreshold = mergeEtaRatioThreshold;
+        }
+
+        public double getScoreThreshold() {
+            return scoreThreshold;
+        }
+
+        public void setScoreThreshold(double scoreThreshold) {
+            this.scoreThreshold = scoreThreshold;
+        }
+
+        public Duration getMlTimeout() {
+            return mlTimeout;
+        }
+
+        public void setMlTimeout(Duration mlTimeout) {
+            this.mlTimeout = mlTimeout;
+        }
+
+        public int getMaxCandidateNeighborsPerOrder() {
+            return maxCandidateNeighborsPerOrder;
+        }
+
+        public void setMaxCandidateNeighborsPerOrder(int maxCandidateNeighborsPerOrder) {
+            this.maxCandidateNeighborsPerOrder = maxCandidateNeighborsPerOrder;
+        }
+
+        public WeatherTightened getWeatherTightened() {
+            return weatherTightened;
+        }
+    }
+
+    public static final class WeatherTightened {
+        private double pickupDistanceKmThreshold = 1.4;
+        private int readyGapMinutesThreshold = 10;
+        private double mergeEtaRatioThreshold = 1.15;
+
+        public double getPickupDistanceKmThreshold() {
+            return pickupDistanceKmThreshold;
+        }
+
+        public void setPickupDistanceKmThreshold(double pickupDistanceKmThreshold) {
+            this.pickupDistanceKmThreshold = pickupDistanceKmThreshold;
+        }
+
+        public int getReadyGapMinutesThreshold() {
+            return readyGapMinutesThreshold;
+        }
+
+        public void setReadyGapMinutesThreshold(int readyGapMinutesThreshold) {
+            this.readyGapMinutesThreshold = readyGapMinutesThreshold;
+        }
+
+        public double getMergeEtaRatioThreshold() {
+            return mergeEtaRatioThreshold;
+        }
+
+        public void setMergeEtaRatioThreshold(double mergeEtaRatioThreshold) {
+            this.mergeEtaRatioThreshold = mergeEtaRatioThreshold;
+        }
+    }
+
+    public static final class MicroCluster {
+        private int timeBucketMinutes = 15;
+        private double splitScoreThreshold = 0.55;
+
+        public int getTimeBucketMinutes() {
+            return timeBucketMinutes;
+        }
+
+        public void setTimeBucketMinutes(int timeBucketMinutes) {
+            this.timeBucketMinutes = timeBucketMinutes;
+        }
+
+        public double getSplitScoreThreshold() {
+            return splitScoreThreshold;
+        }
+
+        public void setSplitScoreThreshold(double splitScoreThreshold) {
+            this.splitScoreThreshold = splitScoreThreshold;
         }
     }
 }

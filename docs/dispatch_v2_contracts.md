@@ -9,9 +9,22 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 - `EtaContext`
 - `EtaEstimateRequest`
 - `EtaEstimate`
+- `BufferedOrderWindow`
+- `PairFeatureVector`
+- `PairGateDecision`
+- `PairCompatibility`
+- `PairGraphSummary`
+- `MicroCluster`
+- `MicroClusterSummary`
+- `DispatchPairClusterStage`
 - `WarmStartState`
 - `HotStartState`
 - `DecisionLogRecord`
+
+## Internal-Only Contracts
+
+- `PairSimilarityGraph`
+- `PairEdge`
 
 ## Rule
 

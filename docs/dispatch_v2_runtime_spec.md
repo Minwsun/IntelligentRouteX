@@ -6,7 +6,7 @@
 
 ## Current Executable Slice
 
-The current runtime result must only report stages that actually ran. For the ETA/context slice, `DispatchV2Result.decisionStages` must be exactly `["eta/context"]` on the enabled path.
+The current runtime result must only report stages that actually ran. For the current pair-cluster slice, `DispatchV2Result.decisionStages` must be exactly `["eta/context", "order-buffer", "pair-graph", "micro-cluster"]` on the enabled path.
 
 ## Runtime Defaults
 

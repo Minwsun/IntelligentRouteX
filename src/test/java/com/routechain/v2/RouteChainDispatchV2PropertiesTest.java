@@ -31,6 +31,18 @@ class RouteChainDispatchV2PropertiesTest {
         assertEquals(Duration.ofMinutes(10), properties.getContext().getFreshness().getTrafficMaxAge());
         assertEquals(Duration.ofMinutes(30), properties.getContext().getFreshness().getForecastMaxAge());
         assertEquals(Duration.ofMillis(150), properties.getContext().getTimeouts().getEtaMlTimeout());
+        assertEquals(2.2, properties.getPair().getPickupDistanceKmThreshold());
+        assertEquals(15, properties.getPair().getReadyGapMinutesThreshold());
+        assertEquals(55.0, properties.getPair().getDropAngleDiffDegreesThreshold());
+        assertEquals(1.25, properties.getPair().getMergeEtaRatioThreshold());
+        assertEquals(0.45, properties.getPair().getScoreThreshold());
+        assertEquals(Duration.ofMillis(120), properties.getPair().getMlTimeout());
+        assertEquals(12, properties.getPair().getMaxCandidateNeighborsPerOrder());
+        assertEquals(1.4, properties.getPair().getWeatherTightened().getPickupDistanceKmThreshold());
+        assertEquals(10, properties.getPair().getWeatherTightened().getReadyGapMinutesThreshold());
+        assertEquals(1.15, properties.getPair().getWeatherTightened().getMergeEtaRatioThreshold());
+        assertEquals(15, properties.getMicroCluster().getTimeBucketMinutes());
+        assertEquals(0.55, properties.getMicroCluster().getSplitScoreThreshold());
         assertFalse(properties.isEnabled());
         assertFalse(properties.isMlEnabled());
         assertFalse(properties.isSidecarRequired());
