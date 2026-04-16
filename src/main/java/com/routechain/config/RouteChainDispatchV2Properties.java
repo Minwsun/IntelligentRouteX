@@ -19,6 +19,7 @@ public class RouteChainDispatchV2Properties {
     private final Cluster cluster = new Cluster();
     private final Bundle bundle = new Bundle();
     private final Candidate candidate = new Candidate();
+    private final Context context = new Context();
 
     public static RouteChainDispatchV2Properties defaults() {
         return new RouteChainDispatchV2Properties();
@@ -112,6 +113,10 @@ public class RouteChainDispatchV2Properties {
         return candidate;
     }
 
+    public Context getContext() {
+        return context;
+    }
+
     public static final class Buffer {
         private Duration holdWindow = Duration.ofSeconds(45);
 
@@ -195,5 +200,95 @@ public class RouteChainDispatchV2Properties {
             this.maxRouteAlternatives = maxRouteAlternatives;
         }
     }
-}
 
+    public static final class Context {
+        private double baselineSpeedKph = 22.0;
+        private double heavyRainMultiplier = 1.28;
+        private double lightRainMultiplier = 1.07;
+        private int tomtomRefineBudgetPerTick = 8;
+        private final Freshness freshness = new Freshness();
+        private final Timeouts timeouts = new Timeouts();
+
+        public double getBaselineSpeedKph() {
+            return baselineSpeedKph;
+        }
+
+        public void setBaselineSpeedKph(double baselineSpeedKph) {
+            this.baselineSpeedKph = baselineSpeedKph;
+        }
+
+        public double getHeavyRainMultiplier() {
+            return heavyRainMultiplier;
+        }
+
+        public void setHeavyRainMultiplier(double heavyRainMultiplier) {
+            this.heavyRainMultiplier = heavyRainMultiplier;
+        }
+
+        public double getLightRainMultiplier() {
+            return lightRainMultiplier;
+        }
+
+        public void setLightRainMultiplier(double lightRainMultiplier) {
+            this.lightRainMultiplier = lightRainMultiplier;
+        }
+
+        public int getTomtomRefineBudgetPerTick() {
+            return tomtomRefineBudgetPerTick;
+        }
+
+        public void setTomtomRefineBudgetPerTick(int tomtomRefineBudgetPerTick) {
+            this.tomtomRefineBudgetPerTick = tomtomRefineBudgetPerTick;
+        }
+
+        public Freshness getFreshness() {
+            return freshness;
+        }
+
+        public Timeouts getTimeouts() {
+            return timeouts;
+        }
+    }
+
+    public static final class Freshness {
+        private Duration weatherMaxAge = Duration.ofMinutes(15);
+        private Duration trafficMaxAge = Duration.ofMinutes(10);
+        private Duration forecastMaxAge = Duration.ofMinutes(30);
+
+        public Duration getWeatherMaxAge() {
+            return weatherMaxAge;
+        }
+
+        public void setWeatherMaxAge(Duration weatherMaxAge) {
+            this.weatherMaxAge = weatherMaxAge;
+        }
+
+        public Duration getTrafficMaxAge() {
+            return trafficMaxAge;
+        }
+
+        public void setTrafficMaxAge(Duration trafficMaxAge) {
+            this.trafficMaxAge = trafficMaxAge;
+        }
+
+        public Duration getForecastMaxAge() {
+            return forecastMaxAge;
+        }
+
+        public void setForecastMaxAge(Duration forecastMaxAge) {
+            this.forecastMaxAge = forecastMaxAge;
+        }
+    }
+
+    public static final class Timeouts {
+        private Duration etaMlTimeout = Duration.ofMillis(150);
+
+        public Duration getEtaMlTimeout() {
+            return etaMlTimeout;
+        }
+
+        public void setEtaMlTimeout(Duration etaMlTimeout) {
+            this.etaMlTimeout = etaMlTimeout;
+        }
+    }
+}

@@ -7,6 +7,8 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 - `DispatchV2Request`
 - `DispatchV2Result`
 - `EtaContext`
+- `EtaEstimateRequest`
+- `EtaEstimate`
 - `WarmStartState`
 - `HotStartState`
 - `DecisionLogRecord`
@@ -14,4 +16,3 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 ## Rule
 
 No contract may change shape without a `schemaVersion` bump and matching replay/snapshot migration handling.
-

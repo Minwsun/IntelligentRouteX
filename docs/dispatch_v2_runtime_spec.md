@@ -4,6 +4,10 @@
 
 `ETA/context -> order buffer -> pair graph -> micro-cluster -> boundary expansion -> bundle pool -> pickup anchor -> driver shortlist/rerank -> route proposal pool -> scenario evaluation -> global selector -> dispatch executor -> decision log/replay`
 
+## Current Executable Slice
+
+The current runtime result must only report stages that actually ran. For the ETA/context slice, `DispatchV2Result.decisionStages` must be exactly `["eta/context"]` on the enabled path.
+
 ## Runtime Defaults
 
 - `tick=30s`
@@ -26,4 +30,3 @@
 - `routechain.dispatch-v2.hot-start.enabled`
 - `routechain.dispatch-v2.tomtom.enabled`
 - `routechain.dispatch-v2.open-meteo.enabled`
-

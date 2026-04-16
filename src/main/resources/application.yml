@@ -30,4 +30,15 @@ routechain:
       max-anchors: 3
       max-drivers: 8
       max-route-alternatives: 4
+    context:
+      baseline-speed-kph: 22
+      heavy-rain-multiplier: 1.28
+      light-rain-multiplier: 1.07
+      tomtom-refine-budget-per-tick: 8
+      freshness:
+        weather-max-age: 15m
+        traffic-max-age: 10m
+        forecast-max-age: 30m
+      timeouts:
+        eta-ml-timeout: 150ms
 

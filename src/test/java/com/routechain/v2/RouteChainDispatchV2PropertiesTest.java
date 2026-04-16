@@ -23,6 +23,14 @@ class RouteChainDispatchV2PropertiesTest {
         assertEquals(3, properties.getCandidate().getMaxAnchors());
         assertEquals(8, properties.getCandidate().getMaxDrivers());
         assertEquals(4, properties.getCandidate().getMaxRouteAlternatives());
+        assertEquals(22.0, properties.getContext().getBaselineSpeedKph());
+        assertEquals(1.28, properties.getContext().getHeavyRainMultiplier());
+        assertEquals(1.07, properties.getContext().getLightRainMultiplier());
+        assertEquals(8, properties.getContext().getTomtomRefineBudgetPerTick());
+        assertEquals(Duration.ofMinutes(15), properties.getContext().getFreshness().getWeatherMaxAge());
+        assertEquals(Duration.ofMinutes(10), properties.getContext().getFreshness().getTrafficMaxAge());
+        assertEquals(Duration.ofMinutes(30), properties.getContext().getFreshness().getForecastMaxAge());
+        assertEquals(Duration.ofMillis(150), properties.getContext().getTimeouts().getEtaMlTimeout());
         assertFalse(properties.isEnabled());
         assertFalse(properties.isMlEnabled());
         assertFalse(properties.isSidecarRequired());

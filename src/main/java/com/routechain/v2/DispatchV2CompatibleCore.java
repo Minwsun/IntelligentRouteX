@@ -6,9 +6,9 @@ public final class DispatchV2CompatibleCore {
     private final RouteChainDispatchV2Properties properties;
     private final DispatchV2Core dispatchV2Core;
 
-    public DispatchV2CompatibleCore(RouteChainDispatchV2Properties properties) {
+    public DispatchV2CompatibleCore(RouteChainDispatchV2Properties properties, DispatchV2Core dispatchV2Core) {
         this.properties = properties == null ? RouteChainDispatchV2Properties.defaults() : properties;
-        this.dispatchV2Core = new DispatchV2Core();
+        this.dispatchV2Core = dispatchV2Core;
     }
 
     public DispatchV2Result dispatch(DispatchV2Request request) {
@@ -26,4 +26,3 @@ public final class DispatchV2CompatibleCore {
         return properties.isSidecarRequired();
     }
 }
-
