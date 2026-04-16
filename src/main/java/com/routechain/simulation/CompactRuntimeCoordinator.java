@@ -1,5 +1,6 @@
 package com.routechain.simulation;
 
+import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.core.AdaptiveWeightEngine;
 import com.routechain.core.CompactCoreAdapter;
 import com.routechain.core.CompactDecisionResolution;
@@ -34,13 +35,21 @@ public class CompactRuntimeCoordinator {
     private final Map<String, String> runIdsByTrace = new ConcurrentHashMap<>();
 
     public CompactRuntimeCoordinator() {
-        this(CompactPolicyConfig.defaults());
+        this(CompactPolicyConfig.defaults(), RouteChainDispatchV2Properties.defaults());
     }
 
     public CompactRuntimeCoordinator(CompactPolicyConfig policyConfig) {
+        this(policyConfig, RouteChainDispatchV2Properties.defaults());
+    }
+
+    public CompactRuntimeCoordinator(CompactPolicyConfig policyConfig,
+                                     RouteChainDispatchV2Properties dispatchV2Properties) {
         this.policyConfig = policyConfig == null ? CompactPolicyConfig.defaults() : policyConfig;
-        this.compactCoreAdapter = new CompactCoreAdapter(this.policyConfig);
+        this.compactCoreAdapter = new CompactCoreAdapter(this.policyConfig, dispatchV2Properties);
         this.learningRuntime = new CompactLearningRuntime(this.policyConfig);
+        this.compactCoreAdapter.core().syncLearningState(
+                learningRuntime.latestSnapshotTag(),
+                learningRuntime.rollbackAvailable());
     }
 
     public CompactDispatchDecision dispatch(List<Order> openOrders,
@@ -64,16 +73,19 @@ public class CompactRuntimeCoordinator {
                               String modeName,
                               Instant decisionTime,
                               CompactDispatchDecision decision) {
+        compactCoreAdapter.core().syncLearningState(
+                learningRuntime.latestSnapshotTag(),
+                learningRuntime.rollbackAvailable());
         evidencePublisher.publishDecision(
                 runId,
                 modeName,
                 decisionTime,
                 decision,
-                compactCoreAdapter.core().adaptiveWeightEngine().snapshot(),
+                compactCoreAdapter.core().currentWeightSnapshot(),
                 learningRuntime.calibrationRuntime().snapshot(),
-                learningRuntime.latestSnapshotTag(),
-                learningRuntime.rollbackAvailable(),
-                compactCoreAdapter.core().adaptiveWeightEngine().isLearningFrozen());
+                compactCoreAdapter.core().latestSnapshotTag(),
+                compactCoreAdapter.core().rollbackAvailable(),
+                compactCoreAdapter.core().isLearningFrozen());
     }
 
     public void recordSelectedPlan(String runId,
@@ -141,6 +153,9 @@ public class CompactRuntimeCoordinator {
         learningRuntime.reset();
         evidencePublisher.reset();
         runIdsByTrace.clear();
+        compactCoreAdapter.core().syncLearningState(
+                learningRuntime.latestSnapshotTag(),
+                learningRuntime.rollbackAvailable());
     }
 
     public CompactEvidenceBundle latestEvidence() {
@@ -152,7 +167,7 @@ public class CompactRuntimeCoordinator {
     }
 
     public WeightSnapshot currentWeightSnapshot() {
-        return compactCoreAdapter.core().adaptiveWeightEngine().snapshot();
+        return compactCoreAdapter.core().currentWeightSnapshot();
     }
 
     public CompactPolicyConfig policyConfig() {
@@ -216,13 +231,16 @@ public class CompactRuntimeCoordinator {
                 resolution,
                 resolvedAt,
                 compactCoreAdapter.core().adaptiveWeightEngine());
-        WeightSnapshot snapshotAfter = compactCoreAdapter.core().adaptiveWeightEngine().snapshot();
+        compactCoreAdapter.core().syncLearningState(
+                learningRuntime.latestSnapshotTag(),
+                learningRuntime.rollbackAvailable());
+        WeightSnapshot snapshotAfter = compactCoreAdapter.core().currentWeightSnapshot();
         CompactDecisionResolution finalized = resolution.withSnapshotAfter(snapshotAfter, resolvedAt);
         evidencePublisher.publishResolution(
                 finalized,
-                learningRuntime.latestSnapshotTag(),
-                learningRuntime.rollbackAvailable(),
-                compactCoreAdapter.core().adaptiveWeightEngine().isLearningFrozen(),
+                compactCoreAdapter.core().latestSnapshotTag(),
+                compactCoreAdapter.core().rollbackAvailable(),
+                compactCoreAdapter.core().isLearningFrozen(),
                 learningRuntime.calibrationRuntime().snapshot(),
                 assessment);
         if (finalized.isFinalResolution()) {

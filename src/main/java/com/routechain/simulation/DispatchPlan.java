@@ -90,6 +90,18 @@ public class DispatchPlan {
     private long neuralPriorLatencyMs;
     private String neuralPriorBackend = "fallback";
     private String neuralPriorFallbackReason = "not-requested";
+    private String pipelineVersion = "compact-v1";
+    private String bufferWindowId;
+    private String clusterId;
+    private String boundaryExpansionId;
+    private String pickupAnchorId;
+    private int candidateDriverRank = -1;
+    private String routeProposalId;
+    private String routeProposalSource;
+    private List<String> scenarioSet = List.of();
+    private double robustUtility;
+    private double globalValue;
+    private int globalSelectionRank = -1;
 
     // ── Final scoring ───────────────────────────────────────────────────
     private double totalScore;
@@ -195,6 +207,18 @@ public class DispatchPlan {
     public long getNeuralPriorLatencyMs() { return neuralPriorLatencyMs; }
     public String getNeuralPriorBackend() { return neuralPriorBackend; }
     public String getNeuralPriorFallbackReason() { return neuralPriorFallbackReason; }
+    public String getPipelineVersion() { return pipelineVersion; }
+    public String getBufferWindowId() { return bufferWindowId; }
+    public String getClusterId() { return clusterId; }
+    public String getBoundaryExpansionId() { return boundaryExpansionId; }
+    public String getPickupAnchorId() { return pickupAnchorId; }
+    public int getCandidateDriverRank() { return candidateDriverRank; }
+    public String getRouteProposalId() { return routeProposalId; }
+    public String getRouteProposalSource() { return routeProposalSource; }
+    public List<String> getScenarioSet() { return scenarioSet; }
+    public double getRobustUtility() { return robustUtility; }
+    public double getGlobalValue() { return globalValue; }
+    public int getGlobalSelectionRank() { return globalSelectionRank; }
     public double getTotalScore() { return totalScore; }
     public double getConfidence() { return confidence; }
     public String getTraceId() { return traceId; }
@@ -357,6 +381,24 @@ public class DispatchPlan {
                 ? "none"
                 : neuralPriorFallbackReason;
     }
+    public void setPipelineVersion(String pipelineVersion) {
+        this.pipelineVersion = (pipelineVersion == null || pipelineVersion.isBlank())
+                ? "compact-v1"
+                : pipelineVersion;
+    }
+    public void setBufferWindowId(String bufferWindowId) { this.bufferWindowId = bufferWindowId; }
+    public void setClusterId(String clusterId) { this.clusterId = clusterId; }
+    public void setBoundaryExpansionId(String boundaryExpansionId) { this.boundaryExpansionId = boundaryExpansionId; }
+    public void setPickupAnchorId(String pickupAnchorId) { this.pickupAnchorId = pickupAnchorId; }
+    public void setCandidateDriverRank(int candidateDriverRank) { this.candidateDriverRank = candidateDriverRank; }
+    public void setRouteProposalId(String routeProposalId) { this.routeProposalId = routeProposalId; }
+    public void setRouteProposalSource(String routeProposalSource) { this.routeProposalSource = routeProposalSource; }
+    public void setScenarioSet(List<String> scenarioSet) {
+        this.scenarioSet = scenarioSet == null ? List.of() : List.copyOf(scenarioSet);
+    }
+    public void setRobustUtility(double robustUtility) { this.robustUtility = robustUtility; }
+    public void setGlobalValue(double globalValue) { this.globalValue = globalValue; }
+    public void setGlobalSelectionRank(int globalSelectionRank) { this.globalSelectionRank = globalSelectionRank; }
     public void setTotalScore(double v) { this.totalScore = v; }
     public void setConfidence(double v) { this.confidence = v; }
     public void setTraceId(String v) { this.traceId = v; }
