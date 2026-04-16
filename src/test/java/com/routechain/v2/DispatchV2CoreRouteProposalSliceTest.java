@@ -11,10 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class DispatchV2CoreRouteCandidateSliceTest {
+class DispatchV2CoreRouteProposalSliceTest {
 
     @Test
-    void enabledPathReturnsRouteCandidateStagesAndOutputs() {
+    void enabledPathReturnsRouteProposalPoolOutputs() {
         DispatchV2Core core = TestDispatchV2Factory.core(RouteChainDispatchV2Properties.defaults());
 
         DispatchV2Result result = core.dispatch(TestDispatchV2Factory.requestWithOrdersAndDriver());
@@ -22,12 +22,8 @@ class DispatchV2CoreRouteCandidateSliceTest {
         assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool"), result.decisionStages());
         assertFalse(result.fallbackUsed());
         assertNull(result.selectedRouteId());
-        assertNotNull(result.pickupAnchorSummary());
-        assertNotNull(result.driverShortlistSummary());
         assertNotNull(result.routeProposalSummary());
-        assertFalse(result.pickupAnchors().isEmpty());
-        assertFalse(result.driverCandidates().isEmpty());
         assertFalse(result.routeProposals().isEmpty());
-        assertTrue(result.driverShortlistSummary().rerankedDriverCount() > 0);
+        assertTrue(result.routeProposalSummary().retainedProposalCount() > 0);
     }
 }

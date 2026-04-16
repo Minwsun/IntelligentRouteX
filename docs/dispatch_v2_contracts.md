@@ -28,6 +28,10 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 - `DriverCandidate`
 - `DriverShortlistSummary`
 - `DispatchRouteCandidateStage`
+- `RouteProposalSource`
+- `RouteProposal`
+- `RouteProposalSummary`
+- `DispatchRouteProposalStage`
 - `WarmStartState`
 - `HotStartState`
 - `DecisionLogRecord`

@@ -19,7 +19,7 @@ class DispatchV2CorePairClusterSliceTest {
 
         DispatchV2Result result = core.dispatch(TestDispatchV2Factory.requestWithOrdersAndDriver());
 
-        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank"), result.decisionStages());
+        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool"), result.decisionStages());
         assertFalse(result.fallbackUsed());
         assertNull(result.selectedRouteId());
         assertNotNull(result.etaContext());
@@ -31,6 +31,7 @@ class DispatchV2CorePairClusterSliceTest {
         assertNotNull(result.bundlePoolSummary());
         assertNotNull(result.pickupAnchorSummary());
         assertNotNull(result.driverShortlistSummary());
+        assertNotNull(result.routeProposalSummary());
         assertTrue(result.pairGraphSummary().candidatePairCount() > 0);
         assertFalse(result.microClusters().isEmpty());
     }

@@ -23,10 +23,8 @@ public final class BundleValidator {
         if (!context.hasConnectedSupport(candidate.orderIds())) {
             degradeReasons.add("bundle-lacks-connected-support");
         }
-        if (candidate.family() == BundleFamily.BOUNDARY_CROSS) {
-            boolean hasBoundaryOrder = candidate.orderIds().stream()
-                    .anyMatch(orderId -> context.expansionsByClusterId().values().stream()
-                            .anyMatch(expansion -> expansion.acceptedBoundaryOrderIds().contains(orderId)));
+        if (candidate.boundaryCross()) {
+            boolean hasBoundaryOrder = !candidate.acceptedBoundaryOrderIds().isEmpty();
             if (!hasBoundaryOrder) {
                 degradeReasons.add("boundary-cross-missing-accepted-boundary-order");
             }
@@ -41,6 +39,9 @@ public final class BundleValidator {
                 candidate.schemaVersion(),
                 candidate.bundleId(),
                 candidate.family(),
+                candidate.clusterId(),
+                candidate.boundaryCross(),
+                candidate.acceptedBoundaryOrderIds(),
                 candidate.orderIds(),
                 candidate.orderSetSignature(),
                 candidate.seedOrderId(),

@@ -4,7 +4,6 @@ import com.routechain.config.RouteChainDispatchV2Properties;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DispatchRouteCandidateServiceTest {
@@ -25,5 +24,6 @@ class DispatchRouteCandidateServiceTest {
         assertFalse(stage.pickupAnchors().isEmpty());
         assertFalse(stage.driverCandidates().isEmpty());
         assertTrue(stage.pickupAnchors().stream().allMatch(anchor -> bundleStage.bundleCandidates().stream().anyMatch(bundle -> bundle.bundleId().equals(anchor.bundleId()))));
+        assertTrue(stage.driverShortlistSummary().shortlistedDriverCount() >= stage.driverShortlistSummary().rerankedDriverCount());
     }
 }

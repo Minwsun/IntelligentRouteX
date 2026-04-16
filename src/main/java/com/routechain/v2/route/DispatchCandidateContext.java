@@ -15,11 +15,11 @@ import java.util.Map;
 
 final class DispatchCandidateContext {
     private final Map<String, Order> orderById;
+    private final Map<String, Driver> driverById;
     private final Map<String, BundleCandidate> bundleById;
     private final Map<String, MicroCluster> clusterById;
     private final Map<String, BoundaryExpansion> boundaryExpansionByClusterId;
     private final Map<String, Map<String, Double>> pairSupport;
-    private final Map<String, String> bundleToClusterId;
     private final List<Driver> availableDrivers;
 
     DispatchCandidateContext(List<Order> orders,
@@ -36,13 +36,11 @@ final class DispatchCandidateContext {
             pairSupport.computeIfAbsent(edge.leftOrderId(), ignored -> new HashMap<>()).put(edge.rightOrderId(), edge.weight());
             pairSupport.computeIfAbsent(edge.rightOrderId(), ignored -> new HashMap<>()).put(edge.leftOrderId(), edge.weight());
         }
-        this.bundleToClusterId = new HashMap<>();
-        for (BundleCandidate bundle : bundleStage.bundleCandidates()) {
-            this.bundleToClusterId.put(bundle.bundleId(), resolveClusterId(bundle, pairClusterStage.microClusters()));
-        }
         this.availableDrivers = availableDrivers == null ? List.of() : availableDrivers.stream()
                 .sorted(java.util.Comparator.comparing(Driver::driverId))
                 .toList();
+        this.driverById = this.availableDrivers.stream()
+                .collect(java.util.stream.Collectors.toMap(Driver::driverId, driver -> driver));
     }
 
     Order order(String orderId) {
@@ -59,6 +57,10 @@ final class DispatchCandidateContext {
 
     List<Driver> availableDrivers() {
         return availableDrivers;
+    }
+
+    Driver driver(String driverId) {
+        return driverById.get(driverId);
     }
 
     double pairSupport(String leftOrderId, String rightOrderId) {
@@ -100,13 +102,13 @@ final class DispatchCandidateContext {
     }
 
     MicroCluster clusterForBundle(String bundleId) {
-        String clusterId = bundleToClusterId.get(bundleId);
-        return clusterId == null ? null : clusterById.get(clusterId);
+        BundleCandidate bundle = bundle(bundleId);
+        return bundle == null ? null : clusterById.get(bundle.clusterId());
     }
 
     BoundaryExpansion boundaryExpansionForBundle(String bundleId) {
-        MicroCluster cluster = clusterForBundle(bundleId);
-        return cluster == null ? null : boundaryExpansionByClusterId.get(cluster.clusterId());
+        BundleCandidate bundle = bundle(bundleId);
+        return bundle == null ? null : boundaryExpansionByClusterId.get(bundle.clusterId());
     }
 
     boolean isAcceptedBoundaryOrder(String bundleId, String orderId) {
@@ -115,27 +117,17 @@ final class DispatchCandidateContext {
     }
 
     double acceptedBoundarySupport(String bundleId) {
+        BundleCandidate bundle = bundle(bundleId);
+        if (bundle == null || bundle.acceptedBoundaryOrderIds().isEmpty()) {
+            return 0.0;
+        }
         BoundaryExpansion expansion = boundaryExpansionForBundle(bundleId);
         if (expansion == null) {
             return 0.0;
         }
-        return expansion.acceptedBoundaryOrderIds().stream()
+        return bundle.acceptedBoundaryOrderIds().stream()
                 .mapToDouble(orderId -> expansion.supportScoreByOrder().getOrDefault(orderId, 0.0))
                 .average()
                 .orElse(0.0);
-    }
-
-    private String resolveClusterId(BundleCandidate bundle, List<MicroCluster> microClusters) {
-        return microClusters.stream()
-                .sorted(java.util.Comparator.comparing(MicroCluster::clusterId))
-                .max(java.util.Comparator.comparingInt(cluster -> overlap(bundle.orderIds(), cluster.orderIds())))
-                .map(MicroCluster::clusterId)
-                .orElse(null);
-    }
-
-    private int overlap(List<String> left, List<String> right) {
-        java.util.Set<String> leftSet = new java.util.HashSet<>(left);
-        leftSet.retainAll(right);
-        return leftSet.size();
     }
 }

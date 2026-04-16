@@ -142,6 +142,31 @@ final class RouteTestFixtures {
                 etaLegCacheFactory);
     }
 
+    static DispatchRouteCandidateStage routeCandidateStage(RouteChainDispatchV2Properties properties) {
+        DispatchPairClusterStage pairClusterStage = pairClusterStage(properties);
+        DispatchBundleStage bundleStage = bundleStage(properties, pairClusterStage);
+        return routeService(properties).evaluate(request(), etaContext(), pairClusterStage, bundleStage);
+    }
+
+    static DispatchRouteProposalService routeProposalService(RouteChainDispatchV2Properties properties) {
+        EtaService etaService = new EtaService(
+                properties,
+                new BaselineTravelTimeEstimator(),
+                new TrafficProfileService(properties),
+                new WeatherContextService(properties, new NoOpOpenMeteoClient()),
+                new NoOpTomTomTrafficRefineClient(),
+                new NoOpTabularScoringClient(),
+                new EtaFeatureBuilder(),
+                new EtaUncertaintyEstimator());
+        EtaLegCacheFactory etaLegCacheFactory = new EtaLegCacheFactory(properties, etaService);
+        return new DispatchRouteProposalService(
+                new RouteProposalEngine(),
+                new RouteProposalValidator(),
+                new RouteValueScorer(),
+                new RouteProposalPruner(properties),
+                etaLegCacheFactory);
+    }
+
     private static Order order(String orderId,
                                double pickupLat,
                                double pickupLon,

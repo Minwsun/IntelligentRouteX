@@ -37,6 +37,9 @@ public final class BundleScorer {
                 candidate.schemaVersion(),
                 candidate.bundleId(),
                 candidate.family(),
+                candidate.clusterId(),
+                candidate.boundaryCross(),
+                candidate.acceptedBoundaryOrderIds(),
                 candidate.orderIds(),
                 candidate.orderSetSignature(),
                 candidate.seedOrderId(),
@@ -79,14 +82,15 @@ public final class BundleScorer {
     }
 
     private double boundarySupport(BundleCandidate candidate, BundleContext context) {
-        if (candidate.family() != BundleFamily.BOUNDARY_CROSS) {
+        if (!candidate.boundaryCross()) {
             return 0.0;
         }
-        return context.expansionsByClusterId().values().stream()
-                .map(BoundaryExpansion::supportScoreByOrder)
-                .map(Map::entrySet)
-                .flatMap(java.util.Collection::stream)
-                .filter(entry -> candidate.orderIds().contains(entry.getKey()))
+        BoundaryExpansion expansion = context.expansionsByClusterId().get(candidate.clusterId());
+        if (expansion == null) {
+            return 0.0;
+        }
+        return expansion.supportScoreByOrder().entrySet().stream()
+                .filter(entry -> candidate.acceptedBoundaryOrderIds().contains(entry.getKey()))
                 .mapToDouble(Map.Entry::getValue)
                 .average()
                 .orElse(0.0);

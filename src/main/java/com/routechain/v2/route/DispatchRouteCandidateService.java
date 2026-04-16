@@ -42,6 +42,7 @@ public final class DispatchRouteCandidateService {
                 request.decisionTime(),
                 request.weatherProfile() == null ? WeatherProfile.CLEAR : request.weatherProfile());
         List<DriverCandidate> driverCandidates = new ArrayList<>();
+        int rawShortlistedCount = 0;
         for (PickupAnchor pickupAnchor : pickupAnchors) {
             List<DriverRouteFeatures> shortlisted = candidateDriverShortlister.shortlist(
                     context.availableDrivers(),
@@ -49,6 +50,7 @@ public final class DispatchRouteCandidateService {
                     context,
                     etaContext,
                     etaLegCache);
+            rawShortlistedCount += shortlisted.size();
             driverCandidates.addAll(driverReranker.rerank(pickupAnchor, shortlisted));
         }
         List<String> degradeReasons = driverCandidates.stream()
@@ -60,7 +62,7 @@ public final class DispatchRouteCandidateService {
                 pickupAnchors,
                 summarizeAnchors(bundleStage.bundleCandidates().size(), pickupAnchors, degradeReasons),
                 List.copyOf(driverCandidates),
-                summarizeDrivers(bundleStage.bundleCandidates().size(), pickupAnchors.size(), driverCandidates, degradeReasons),
+                summarizeDrivers(bundleStage.bundleCandidates().size(), pickupAnchors.size(), rawShortlistedCount, driverCandidates.size(), degradeReasons),
                 degradeReasons);
     }
 
@@ -75,16 +77,17 @@ public final class DispatchRouteCandidateService {
                 degradeReasons);
     }
 
-    private DriverShortlistSummary summarizeDrivers(int bundleCount,
-                                                    int anchorCount,
-                                                    List<DriverCandidate> driverCandidates,
-                                                    List<String> degradeReasons) {
+    DriverShortlistSummary summarizeDrivers(int bundleCount,
+                                            int anchorCount,
+                                            int shortlistedDriverCount,
+                                            int rerankedDriverCount,
+                                            List<String> degradeReasons) {
         return new DriverShortlistSummary(
                 "driver-shortlist-summary/v1",
                 bundleCount,
                 anchorCount,
-                driverCandidates.size(),
-                driverCandidates.size(),
+                shortlistedDriverCount,
+                rerankedDriverCount,
                 degradeReasons);
     }
 }

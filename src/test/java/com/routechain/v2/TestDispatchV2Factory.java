@@ -22,9 +22,14 @@ import com.routechain.v2.bundle.BundleValidator;
 import com.routechain.v2.bundle.DispatchBundleStageService;
 import com.routechain.v2.route.CandidateDriverShortlister;
 import com.routechain.v2.route.DispatchRouteCandidateService;
+import com.routechain.v2.route.DispatchRouteProposalService;
 import com.routechain.v2.route.DriverReranker;
 import com.routechain.v2.route.DriverRouteFeatureBuilder;
 import com.routechain.v2.route.PickupAnchorSelector;
+import com.routechain.v2.route.RouteProposalEngine;
+import com.routechain.v2.route.RouteProposalPruner;
+import com.routechain.v2.route.RouteProposalValidator;
+import com.routechain.v2.route.RouteValueScorer;
 import com.routechain.v2.cluster.DispatchPairClusterService;
 import com.routechain.v2.cluster.EtaLegCacheFactory;
 import com.routechain.v2.cluster.MicroClusterer;
@@ -111,11 +116,22 @@ final class TestDispatchV2Factory {
                 candidateDriverShortlister,
                 driverReranker,
                 etaLegCacheFactory);
+        RouteProposalEngine routeProposalEngine = configuration.routeProposalEngine();
+        RouteProposalValidator routeProposalValidator = configuration.routeProposalValidator();
+        RouteValueScorer routeValueScorer = configuration.routeValueScorer();
+        RouteProposalPruner routeProposalPruner = configuration.routeProposalPruner(properties);
+        DispatchRouteProposalService dispatchRouteProposalService = configuration.dispatchRouteProposalService(
+                routeProposalEngine,
+                routeProposalValidator,
+                routeValueScorer,
+                routeProposalPruner,
+                etaLegCacheFactory);
         return configuration.dispatchV2Core(
                 dispatchEtaContextService,
                 dispatchPairClusterService,
                 dispatchBundleStageService,
-                dispatchRouteCandidateService);
+                dispatchRouteCandidateService,
+                dispatchRouteProposalService);
     }
 
     static DispatchV2Request requestWithOrdersAndDriver() {

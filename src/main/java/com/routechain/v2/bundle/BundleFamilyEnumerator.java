@@ -23,29 +23,35 @@ public final class BundleFamilyEnumerator {
 
         Order preferredSeed = prioritizedOrders.isEmpty() ? workingOrders.getFirst() : prioritizedOrders.getFirst();
         java.util.ArrayList<BundleCandidate> candidates = new java.util.ArrayList<>();
-        candidates.add(candidate(BundleFamily.COMPACT_CLIQUE, bundleOrders(preferredSeed, prioritizedOrders, properties.getBundle().getMaxSize()), context));
-        candidates.add(candidate(BundleFamily.CORRIDOR_CHAIN, corridorChain(preferredSeed, prioritizedOrders), context));
-        candidates.add(candidate(BundleFamily.FAN_OUT_LIGHT, fanOutLight(preferredSeed, prioritizedOrders), context));
+        candidates.add(candidate(seed, BundleFamily.COMPACT_CLIQUE, bundleOrders(preferredSeed, prioritizedOrders, properties.getBundle().getMaxSize()), context));
+        candidates.add(candidate(seed, BundleFamily.CORRIDOR_CHAIN, corridorChain(preferredSeed, prioritizedOrders), context));
+        candidates.add(candidate(seed, BundleFamily.FAN_OUT_LIGHT, fanOutLight(preferredSeed, prioritizedOrders), context));
         if (!seed.acceptedBoundaryOrderIds().isEmpty()) {
-            candidates.add(candidate(BundleFamily.BOUNDARY_CROSS, boundaryCross(preferredSeed, prioritizedOrders, seed.acceptedBoundaryOrderIds()), context));
+            candidates.add(candidate(seed, BundleFamily.BOUNDARY_CROSS, boundaryCross(preferredSeed, prioritizedOrders, seed.acceptedBoundaryOrderIds()), context));
         }
         Order urgentOrder = workingOrders.stream().filter(Order::urgent).findFirst().orElse(null);
         if (urgentOrder != null) {
-            candidates.add(candidate(BundleFamily.URGENT_COMPANION, urgentCompanion(urgentOrder, prioritizedOrders), context));
+            candidates.add(candidate(seed, BundleFamily.URGENT_COMPANION, urgentCompanion(urgentOrder, prioritizedOrders), context));
         }
-        candidates.add(candidate(BundleFamily.LANDING_VALUE_BUNDLE, landingValueBundle(preferredSeed, prioritizedOrders), context));
+        candidates.add(candidate(seed, BundleFamily.LANDING_VALUE_BUNDLE, landingValueBundle(preferredSeed, prioritizedOrders), context));
         return candidates.stream().filter(candidate -> !candidate.orderIds().isEmpty()).toList();
     }
 
-    private BundleCandidate candidate(BundleFamily family, List<String> orderIds, BundleContext context) {
+    private BundleCandidate candidate(BundleSeed seed, BundleFamily family, List<String> orderIds, BundleContext context) {
         List<String> distinctOrders = orderIds.stream().distinct().sorted().toList();
         String orderSetSignature = context.orderSetSignature(distinctOrders);
         String seedOrderId = distinctOrders.isEmpty() ? "none" : distinctOrders.getFirst();
         String corridorSignature = distinctOrders.isEmpty() ? "unknown" : corridorSignature(context.order(seedOrderId));
+        List<String> acceptedBoundaryOrderIds = distinctOrders.stream()
+                .filter(seed.acceptedBoundaryOrderIds()::contains)
+                .toList();
         return new BundleCandidate(
                 "bundle-candidate/v1",
                 "%s|%s|%s".formatted(family.name(), orderSetSignature, seedOrderId),
                 family,
+                seed.cluster().clusterId(),
+                family == BundleFamily.BOUNDARY_CROSS,
+                acceptedBoundaryOrderIds,
                 distinctOrders,
                 orderSetSignature,
                 seedOrderId,

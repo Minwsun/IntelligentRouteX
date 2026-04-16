@@ -8,6 +8,8 @@ import com.routechain.v2.route.DriverCandidate;
 import com.routechain.v2.route.DriverShortlistSummary;
 import com.routechain.v2.route.PickupAnchor;
 import com.routechain.v2.route.PickupAnchorSummary;
+import com.routechain.v2.route.RouteProposal;
+import com.routechain.v2.route.RouteProposalSummary;
 import com.routechain.v2.cluster.BufferedOrderWindow;
 import com.routechain.v2.cluster.MicroCluster;
 import com.routechain.v2.cluster.MicroClusterSummary;
@@ -38,6 +40,8 @@ public record DispatchV2Result(
         PickupAnchorSummary pickupAnchorSummary,
         List<DriverCandidate> driverCandidates,
         DriverShortlistSummary driverShortlistSummary,
+        List<RouteProposal> routeProposals,
+        RouteProposalSummary routeProposalSummary,
         List<String> degradeReasons) implements SchemaVersioned {
 
     public static DispatchV2Result fallback(String traceId) {
@@ -62,6 +66,8 @@ public record DispatchV2Result(
                 PickupAnchorSummary.empty(),
                 List.of(),
                 DriverShortlistSummary.empty(),
+                List.of(),
+                RouteProposalSummary.empty(),
                 List.of("dispatch-v2-disabled"));
     }
 }

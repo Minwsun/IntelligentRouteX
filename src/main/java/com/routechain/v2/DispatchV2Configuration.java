@@ -26,9 +26,14 @@ import com.routechain.v2.bundle.BundleValidator;
 import com.routechain.v2.bundle.DispatchBundleStageService;
 import com.routechain.v2.route.CandidateDriverShortlister;
 import com.routechain.v2.route.DispatchRouteCandidateService;
+import com.routechain.v2.route.DispatchRouteProposalService;
 import com.routechain.v2.route.DriverReranker;
 import com.routechain.v2.route.DriverRouteFeatureBuilder;
 import com.routechain.v2.route.PickupAnchorSelector;
+import com.routechain.v2.route.RouteProposalEngine;
+import com.routechain.v2.route.RouteProposalPruner;
+import com.routechain.v2.route.RouteProposalValidator;
+import com.routechain.v2.route.RouteValueScorer;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
@@ -248,15 +253,51 @@ public class DispatchV2Configuration {
     }
 
     @Bean
+    RouteProposalEngine routeProposalEngine() {
+        return new RouteProposalEngine();
+    }
+
+    @Bean
+    RouteProposalValidator routeProposalValidator() {
+        return new RouteProposalValidator();
+    }
+
+    @Bean
+    RouteValueScorer routeValueScorer() {
+        return new RouteValueScorer();
+    }
+
+    @Bean
+    RouteProposalPruner routeProposalPruner(RouteChainDispatchV2Properties properties) {
+        return new RouteProposalPruner(properties);
+    }
+
+    @Bean
+    DispatchRouteProposalService dispatchRouteProposalService(RouteProposalEngine routeProposalEngine,
+                                                              RouteProposalValidator routeProposalValidator,
+                                                              RouteValueScorer routeValueScorer,
+                                                              RouteProposalPruner routeProposalPruner,
+                                                              EtaLegCacheFactory etaLegCacheFactory) {
+        return new DispatchRouteProposalService(
+                routeProposalEngine,
+                routeProposalValidator,
+                routeValueScorer,
+                routeProposalPruner,
+                etaLegCacheFactory);
+    }
+
+    @Bean
     DispatchV2Core dispatchV2Core(DispatchEtaContextService dispatchEtaContextService,
                                   DispatchPairClusterService dispatchPairClusterService,
                                   DispatchBundleStageService dispatchBundleStageService,
-                                  DispatchRouteCandidateService dispatchRouteCandidateService) {
+                                  DispatchRouteCandidateService dispatchRouteCandidateService,
+                                  DispatchRouteProposalService dispatchRouteProposalService) {
         return new DispatchV2Core(
                 dispatchEtaContextService,
                 dispatchPairClusterService,
                 dispatchBundleStageService,
-                dispatchRouteCandidateService);
+                dispatchRouteCandidateService,
+                dispatchRouteProposalService);
     }
 
     @Bean
