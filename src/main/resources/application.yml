@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: intelligent-route-x
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+routechain:
+  dispatch-v2:
+    enabled: false
+    ml-enabled: false
+    sidecar-required: false
+    selector-ortools-enabled: false
+    warm-start-enabled: true
+    hot-start-enabled: true
+    tomtom-enabled: false
+    open-meteo-enabled: true
+    tick: 30s
+    buffer:
+      hold-window: 45s
+    cluster:
+      max-size: 24
+    bundle:
+      max-size: 5
+      top-neighbors: 12
+      beam-width: 16
+    candidate:
+      max-anchors: 3
+      max-drivers: 8
+      max-route-alternatives: 4
+

@@ -1,0 +1,55 @@
+schemaVersion: model-manifest/v1
+workers:
+  - worker_name: ml-greedrl-worker
+    model_name: greedrl
+    model_version: pinned-placeholder
+    artifact_digest: sha256:pending
+    rollback_artifact_digest: sha256:pending-rollback
+    runtime_image: ghcr.io/minwsun/intelligentroutex/ml-greedrl-worker:bootstrap
+    compatibility_contract_version: dispatch-v2-ml/v1
+    min_supported_java_contract_version: dispatch-v2-java/v1
+    startup_warmup_request:
+      endpoint: /bundle/propose
+      payload:
+        schemaVersion: bundle-proposal-request/v1
+        traceId: warmup-greedrl
+  - worker_name: ml-routefinder-worker
+    model_name: routefinder
+    model_version: pinned-placeholder
+    artifact_digest: sha256:pending
+    rollback_artifact_digest: sha256:pending-rollback
+    runtime_image: ghcr.io/minwsun/intelligentroutex/ml-routefinder-worker:bootstrap
+    compatibility_contract_version: dispatch-v2-ml/v1
+    min_supported_java_contract_version: dispatch-v2-java/v1
+    startup_warmup_request:
+      endpoint: /route/refine
+      payload:
+        schemaVersion: route-alternatives-request/v1
+        traceId: warmup-routefinder
+  - worker_name: ml-forecast-worker
+    model_name: chronos-2
+    model_version: pinned-placeholder
+    artifact_digest: sha256:pending
+    rollback_artifact_digest: sha256:pending-rollback
+    runtime_image: ghcr.io/minwsun/intelligentroutex/ml-forecast-worker:bootstrap
+    compatibility_contract_version: dispatch-v2-ml/v1
+    min_supported_java_contract_version: dispatch-v2-java/v1
+    startup_warmup_request:
+      endpoint: /forecast/zone-burst
+      payload:
+        schemaVersion: forecast-request/v1
+        traceId: warmup-forecast
+  - worker_name: ml-tabular-worker
+    model_name: tabpfn
+    model_version: pinned-placeholder
+    artifact_digest: sha256:pending
+    rollback_artifact_digest: sha256:pending-rollback
+    runtime_image: ghcr.io/minwsun/intelligentroutex/ml-tabular-worker:bootstrap
+    compatibility_contract_version: dispatch-v2-ml/v1
+    min_supported_java_contract_version: dispatch-v2-java/v1
+    startup_warmup_request:
+      endpoint: /score/eta-residual
+      payload:
+        schemaVersion: score-request/v1
+        traceId: warmup-tabular
+
