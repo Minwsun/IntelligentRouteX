@@ -79,9 +79,10 @@ public final class ScenarioEvaluator {
     }
 
     private boolean isTrafficBad(com.routechain.simulation.DispatchPlan plan, double trafficIntensity) {
-        return trafficIntensity >= properties.getScenario().getTrafficBadThreshold() - 1.0
+        return trafficIntensity >= 0.70
                 || plan.getTravelTimeDriftScore() >= properties.getScenario().getTravelTimeDriftBadThreshold()
-                || plan.getCorridorCongestionScore() >= properties.getScenario().getCorridorCongestionBadThreshold();
+                || plan.getCorridorCongestionScore() >= properties.getScenario().getCorridorCongestionBadThreshold()
+                || plan.getTrafficUncertaintyScore() >= 0.55;
     }
 
     private double scenarioValue(com.routechain.simulation.DispatchPlan plan, String scenario, double trafficIntensity) {

@@ -104,12 +104,14 @@ public final class RouteProposalEngine {
         plan.setCorridorCongestionScore(driverMatch.reachEta().corridorCongestionScore());
         plan.setTravelTimeDriftScore(driverMatch.reachEta().travelTimeDrift());
         plan.setTrafficUncertaintyScore(driverMatch.reachEta().etaUncertainty());
+        plan.setTrafficExposureScore(driverMatch.reachEta().trafficMultiplier() - 1.0);
+        plan.setWeatherExposureScore(driverMatch.reachEta().weatherState().severity());
         plan.setRoadGraphBackend("dispatch-v2:" + source);
         plan.setServiceTier(anchor.anchorOrder().getServiceType());
         plan.setCompactPlanType(resolvePlanType(bundle.size()));
         fillRouteMetrics(plan, driverMatch, decisionTime, weatherProfile, trafficIntensity);
         plan.setModelInferenceLatencyMs(0L);
-        plan.setNeuralPriorBackend(source.startsWith("greedrl") ? greedRLAdapter.backend() : routeFinderAdapter.backend());
+        plan.setNeuralPriorBackend(resolveBackend(source));
         return plan;
     }
 
@@ -211,6 +213,16 @@ public final class RouteProposalEngine {
 
     private int maxAlternatives() {
         return properties == null ? 4 : properties.getMaxRouteAlternatives();
+    }
+
+    private String resolveBackend(String source) {
+        if (source != null && source.startsWith("greedrl")) {
+            return greedRLAdapter.backend();
+        }
+        if (source != null && source.startsWith("routefinder")) {
+            return routeFinderAdapter.backend();
+        }
+        return "dispatch-v2-heuristic";
     }
 
     private CompactPlanType resolvePlanType(int size) {

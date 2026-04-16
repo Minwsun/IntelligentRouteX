@@ -1,7 +1,6 @@
 package com.routechain.v2.feedback;
 
 import com.routechain.core.AdaptiveWeightEngine;
-import com.routechain.core.RegimeKey;
 import com.routechain.v2.DispatchV2Result;
 
 /**
@@ -14,13 +13,10 @@ import com.routechain.v2.DispatchV2Result;
 public final class DispatchV2ReplayTrainer {
 
     public void onDispatchCompleted(DispatchV2Result result, AdaptiveWeightEngine compatibilityWeightEngine) {
-        if (result == null || compatibilityWeightEngine == null || result.selectedRoutes().isEmpty()) {
+        if (result == null || compatibilityWeightEngine == null) {
             return;
         }
-        result.selectedRoutes().forEach(candidate -> {
-            if (candidate != null && candidate.plan() != null && candidate.plan().getOnTimeProbability() >= 0.0) {
-                compatibilityWeightEngine.recordSupport(RegimeKey.CLEAR_NORMAL);
-            }
-        });
+        // Learning updates still happen on resolved outcomes through the existing
+        // compact runtime path. This hook only reserves a stable extension point.
     }
 }
