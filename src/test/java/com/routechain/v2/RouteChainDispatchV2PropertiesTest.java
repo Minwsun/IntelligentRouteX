@@ -43,6 +43,9 @@ class RouteChainDispatchV2PropertiesTest {
         assertEquals(1.15, properties.getPair().getWeatherTightened().getMergeEtaRatioThreshold());
         assertEquals(15, properties.getMicroCluster().getTimeBucketMinutes());
         assertEquals(0.55, properties.getMicroCluster().getSplitScoreThreshold());
+        assertEquals(0.52, properties.getBoundaryExpansion().getMinSupportScoreThreshold());
+        assertEquals(2, properties.getBoundaryExpansion().getMaxBoundaryOrdersPerCluster());
+        assertEquals(0.62, properties.getBoundaryExpansion().getWeatherTightenedSupportThreshold());
         assertFalse(properties.isEnabled());
         assertFalse(properties.isMlEnabled());
         assertFalse(properties.isSidecarRequired());

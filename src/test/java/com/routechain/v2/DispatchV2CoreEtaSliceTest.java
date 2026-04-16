@@ -18,7 +18,7 @@ class DispatchV2CoreEtaSliceTest {
     void returnsCurrentExecutedStagesForEnabledCore() {
         DispatchV2Core core = TestDispatchV2Factory.core(com.routechain.config.RouteChainDispatchV2Properties.defaults());
         DispatchV2Result result = core.dispatch(TestDispatchV2Factory.requestWithOrdersAndDriver());
-        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster"), result.decisionStages());
+        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool"), result.decisionStages());
         assertFalse(result.fallbackUsed());
         assertNull(result.selectedRouteId());
         assertNotNull(result.etaContext());
@@ -28,6 +28,10 @@ class DispatchV2CoreEtaSliceTest {
         assertNotNull(result.pairGraphSummary());
         assertNotNull(result.microClusters());
         assertNotNull(result.microClusterSummary());
+        assertNotNull(result.boundaryExpansions());
+        assertNotNull(result.boundaryExpansionSummary());
+        assertNotNull(result.bundleCandidates());
+        assertNotNull(result.bundlePoolSummary());
     }
 
     @Test
@@ -41,10 +45,11 @@ class DispatchV2CoreEtaSliceTest {
                 List.of(),
                 WeatherProfile.CLEAR,
                 Instant.now()));
-        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster"), result.decisionStages());
+        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool"), result.decisionStages());
         assertEquals(0, result.etaContext().sampledLegCount());
         assertTrue(result.degradeReasons().contains("no-sampleable-eta-leg"));
         assertEquals(0, result.bufferedOrderWindow().orderCount());
         assertTrue(result.microClusters().isEmpty());
+        assertTrue(result.bundleCandidates().isEmpty());
     }
 }

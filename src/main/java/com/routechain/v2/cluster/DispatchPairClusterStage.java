@@ -8,6 +8,7 @@ public record DispatchPairClusterStage(
         String schemaVersion,
         BufferedOrderWindow bufferedOrderWindow,
         PairGraphSummary pairGraphSummary,
+        PairSimilarityGraph pairSimilarityGraph,
         List<MicroCluster> microClusters,
         MicroClusterSummary microClusterSummary,
         List<String> degradeReasons) implements SchemaVersioned {

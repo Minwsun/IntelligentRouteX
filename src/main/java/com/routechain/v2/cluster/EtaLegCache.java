@@ -1,23 +1,32 @@
 package com.routechain.v2.cluster;
 
 import com.routechain.domain.GeoPoint;
-import com.routechain.v2.DispatchV2Request;
+import com.routechain.domain.WeatherProfile;
 import com.routechain.v2.context.EtaEstimate;
 import com.routechain.v2.context.EtaEstimateRequest;
 import com.routechain.v2.context.EtaService;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 
 public final class EtaLegCache {
     private final EtaService etaService;
-    private final DispatchV2Request request;
+    private final String traceId;
+    private final Instant decisionTime;
+    private final WeatherProfile weatherProfile;
     private final long timeoutBudgetMs;
     private final Map<String, EtaEstimate> cache = new HashMap<>();
 
-    public EtaLegCache(EtaService etaService, DispatchV2Request request, long timeoutBudgetMs) {
+    public EtaLegCache(EtaService etaService,
+                       String traceId,
+                       Instant decisionTime,
+                       WeatherProfile weatherProfile,
+                       long timeoutBudgetMs) {
         this.etaService = etaService;
-        this.request = request;
+        this.traceId = traceId;
+        this.decisionTime = decisionTime;
+        this.weatherProfile = weatherProfile;
         this.timeoutBudgetMs = timeoutBudgetMs;
     }
 
@@ -25,11 +34,11 @@ public final class EtaLegCache {
         String key = key(from, to, stageName);
         return cache.computeIfAbsent(key, ignored -> etaService.estimate(new EtaEstimateRequest(
                 "eta-estimate-request/v1",
-                request.traceId() + ":" + legTraceSuffix,
+                traceId + ":" + legTraceSuffix,
                 from,
                 to,
-                request.decisionTime(),
-                request.weatherProfile(),
+                decisionTime,
+                weatherProfile,
                 stageName,
                 timeoutBudgetMs)));
     }
@@ -43,4 +52,3 @@ public final class EtaLegCache {
                 to == null ? "null" : to.longitude());
     }
 }
-

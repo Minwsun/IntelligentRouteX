@@ -22,6 +22,7 @@ public class RouteChainDispatchV2Properties {
     private final Context context = new Context();
     private final Pair pair = new Pair();
     private final MicroCluster microCluster = new MicroCluster();
+    private final BoundaryExpansion boundaryExpansion = new BoundaryExpansion();
 
     public static RouteChainDispatchV2Properties defaults() {
         return new RouteChainDispatchV2Properties();
@@ -125,6 +126,10 @@ public class RouteChainDispatchV2Properties {
 
     public MicroCluster getMicroCluster() {
         return microCluster;
+    }
+
+    public BoundaryExpansion getBoundaryExpansion() {
+        return boundaryExpansion;
     }
 
     public static final class Buffer {
@@ -421,6 +426,36 @@ public class RouteChainDispatchV2Properties {
 
         public void setSplitScoreThreshold(double splitScoreThreshold) {
             this.splitScoreThreshold = splitScoreThreshold;
+        }
+    }
+
+    public static final class BoundaryExpansion {
+        private double minSupportScoreThreshold = 0.52;
+        private int maxBoundaryOrdersPerCluster = 2;
+        private double weatherTightenedSupportThreshold = 0.62;
+
+        public double getMinSupportScoreThreshold() {
+            return minSupportScoreThreshold;
+        }
+
+        public void setMinSupportScoreThreshold(double minSupportScoreThreshold) {
+            this.minSupportScoreThreshold = minSupportScoreThreshold;
+        }
+
+        public int getMaxBoundaryOrdersPerCluster() {
+            return maxBoundaryOrdersPerCluster;
+        }
+
+        public void setMaxBoundaryOrdersPerCluster(int maxBoundaryOrdersPerCluster) {
+            this.maxBoundaryOrdersPerCluster = maxBoundaryOrdersPerCluster;
+        }
+
+        public double getWeatherTightenedSupportThreshold() {
+            return weatherTightenedSupportThreshold;
+        }
+
+        public void setWeatherTightenedSupportThreshold(double weatherTightenedSupportThreshold) {
+            this.weatherTightenedSupportThreshold = weatherTightenedSupportThreshold;
         }
     }
 }

@@ -16,6 +16,14 @@ import com.routechain.v2.cluster.PairFeatureBuilder;
 import com.routechain.v2.cluster.PairHardGateEvaluator;
 import com.routechain.v2.cluster.PairSimilarityGraphBuilder;
 import com.routechain.v2.cluster.PairSimilarityScorer;
+import com.routechain.v2.bundle.BoundaryCandidateSelector;
+import com.routechain.v2.bundle.BoundaryExpansionEngine;
+import com.routechain.v2.bundle.BundleDominancePruner;
+import com.routechain.v2.bundle.BundleFamilyEnumerator;
+import com.routechain.v2.bundle.BundleScorer;
+import com.routechain.v2.bundle.BundleSeedGenerator;
+import com.routechain.v2.bundle.BundleValidator;
+import com.routechain.v2.bundle.DispatchBundleStageService;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
@@ -122,10 +130,9 @@ public class DispatchV2Configuration {
 
     @Bean
     PairSimilarityGraphBuilder pairSimilarityGraphBuilder(RouteChainDispatchV2Properties properties,
-                                                          EtaService etaService,
                                                           PairFeatureBuilder pairFeatureBuilder,
                                                           PairSimilarityScorer pairSimilarityScorer) {
-        return new PairSimilarityGraphBuilder(properties, etaService, pairFeatureBuilder, pairSimilarityScorer);
+        return new PairSimilarityGraphBuilder(properties, pairFeatureBuilder, pairSimilarityScorer);
     }
 
     @Bean
@@ -137,26 +144,76 @@ public class DispatchV2Configuration {
     DispatchPairClusterService dispatchPairClusterService(RouteChainDispatchV2Properties properties,
                                                           OrderBuffer orderBuffer,
                                                           PairSimilarityGraphBuilder pairSimilarityGraphBuilder,
-                                                          PairSimilarityScorer pairSimilarityScorer,
-                                                          PairHardGateEvaluator pairHardGateEvaluator,
-                                                          PairFeatureBuilder pairFeatureBuilder,
                                                           EtaLegCacheFactory etaLegCacheFactory,
                                                           MicroClusterer microClusterer) {
         return new DispatchPairClusterService(
                 properties,
                 orderBuffer,
                 pairSimilarityGraphBuilder,
-                pairSimilarityScorer,
-                pairHardGateEvaluator,
-                pairFeatureBuilder,
                 etaLegCacheFactory,
                 microClusterer);
     }
 
     @Bean
+    BoundaryCandidateSelector boundaryCandidateSelector(RouteChainDispatchV2Properties properties) {
+        return new BoundaryCandidateSelector(properties);
+    }
+
+    @Bean
+    BoundaryExpansionEngine boundaryExpansionEngine(RouteChainDispatchV2Properties properties) {
+        return new BoundaryExpansionEngine(properties);
+    }
+
+    @Bean
+    BundleSeedGenerator bundleSeedGenerator(RouteChainDispatchV2Properties properties) {
+        return new BundleSeedGenerator(properties);
+    }
+
+    @Bean
+    BundleFamilyEnumerator bundleFamilyEnumerator(RouteChainDispatchV2Properties properties) {
+        return new BundleFamilyEnumerator(properties);
+    }
+
+    @Bean
+    BundleValidator bundleValidator(RouteChainDispatchV2Properties properties) {
+        return new BundleValidator(properties);
+    }
+
+    @Bean
+    BundleScorer bundleScorer(RouteChainDispatchV2Properties properties) {
+        return new BundleScorer(properties);
+    }
+
+    @Bean
+    BundleDominancePruner bundleDominancePruner() {
+        return new BundleDominancePruner();
+    }
+
+    @Bean
+    DispatchBundleStageService dispatchBundleStageService(RouteChainDispatchV2Properties properties,
+                                                          BoundaryCandidateSelector boundaryCandidateSelector,
+                                                          BoundaryExpansionEngine boundaryExpansionEngine,
+                                                          BundleSeedGenerator bundleSeedGenerator,
+                                                          BundleFamilyEnumerator bundleFamilyEnumerator,
+                                                          BundleValidator bundleValidator,
+                                                          BundleScorer bundleScorer,
+                                                          BundleDominancePruner bundleDominancePruner) {
+        return new DispatchBundleStageService(
+                properties,
+                boundaryCandidateSelector,
+                boundaryExpansionEngine,
+                bundleSeedGenerator,
+                bundleFamilyEnumerator,
+                bundleValidator,
+                bundleScorer,
+                bundleDominancePruner);
+    }
+
+    @Bean
     DispatchV2Core dispatchV2Core(DispatchEtaContextService dispatchEtaContextService,
-                                  DispatchPairClusterService dispatchPairClusterService) {
-        return new DispatchV2Core(dispatchEtaContextService, dispatchPairClusterService);
+                                  DispatchPairClusterService dispatchPairClusterService,
+                                  DispatchBundleStageService dispatchBundleStageService) {
+        return new DispatchV2Core(dispatchEtaContextService, dispatchPairClusterService, dispatchBundleStageService);
     }
 
     @Bean

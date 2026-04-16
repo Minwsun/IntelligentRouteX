@@ -1,5 +1,9 @@
 package com.routechain.v2;
 
+import com.routechain.v2.bundle.BoundaryExpansion;
+import com.routechain.v2.bundle.BoundaryExpansionSummary;
+import com.routechain.v2.bundle.BundleCandidate;
+import com.routechain.v2.bundle.BundlePoolSummary;
 import com.routechain.v2.cluster.BufferedOrderWindow;
 import com.routechain.v2.cluster.MicroCluster;
 import com.routechain.v2.cluster.MicroClusterSummary;
@@ -22,6 +26,10 @@ public record DispatchV2Result(
         PairGraphSummary pairGraphSummary,
         List<MicroCluster> microClusters,
         MicroClusterSummary microClusterSummary,
+        List<BoundaryExpansion> boundaryExpansions,
+        BoundaryExpansionSummary boundaryExpansionSummary,
+        List<BundleCandidate> bundleCandidates,
+        BundlePoolSummary bundlePoolSummary,
         List<String> degradeReasons) implements SchemaVersioned {
 
     public static DispatchV2Result fallback(String traceId) {
@@ -38,6 +46,10 @@ public record DispatchV2Result(
                 PairGraphSummary.empty(),
                 List.of(),
                 MicroClusterSummary.empty(),
+                List.of(),
+                BoundaryExpansionSummary.empty(),
+                List.of(),
+                BundlePoolSummary.empty(),
                 List.of("dispatch-v2-disabled"));
     }
 }

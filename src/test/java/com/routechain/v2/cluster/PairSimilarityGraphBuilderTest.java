@@ -39,7 +39,6 @@ class PairSimilarityGraphBuilderTest {
                 new NoOpTabularScoringClient());
         PairSimilarityGraphBuilder builder = new PairSimilarityGraphBuilder(
                 properties,
-                etaService,
                 new PairFeatureBuilder(baselineTravelTimeEstimator),
                 scorer);
         Order closeA = ClusterTestFixtures.order("order-1", 10.7750, 106.7000, 10.7820, 106.7100, "2026-04-16T12:00:00Z", false);
@@ -47,12 +46,24 @@ class PairSimilarityGraphBuilderTest {
         Order far = ClusterTestFixtures.order("order-3", 10.8400, 106.7900, 10.8500, 106.8000, "2026-04-16T12:06:00Z", false);
         BufferedOrderWindow window = ClusterTestFixtures.window(List.of(closeA, closeB, far));
 
-        PairSimilarityGraph graph = builder.build(window, ClusterTestFixtures.clearEtaContext());
+        EtaLegCache etaLegCache = new EtaLegCache(
+                etaService,
+                "trace-cluster",
+                window.decisionTime(),
+                com.routechain.domain.WeatherProfile.CLEAR,
+                properties.getPair().getMlTimeout().toMillis());
+        PairSimilarityGraphBuildResult buildResult = builder.build(
+                window,
+                ClusterTestFixtures.clearEtaContext(),
+                etaLegCache);
+        PairSimilarityGraph graph = buildResult.graph();
 
         assertEquals(3, graph.orderCount());
         assertEquals(1, graph.edgeCount());
         assertEquals("order-1", graph.edges().getFirst().leftOrderId());
         assertEquals("order-2", graph.edges().getFirst().rightOrderId());
         assertTrue(graph.edges().getFirst().weight() >= properties.getPair().getScoreThreshold());
+        assertEquals(3, buildResult.candidatePairCount());
+        assertEquals(1, buildResult.gatedPairCount());
     }
 }

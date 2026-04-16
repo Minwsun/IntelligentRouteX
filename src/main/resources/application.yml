@@ -56,3 +56,7 @@ routechain:
     micro-cluster:
       time-bucket-minutes: 15
       split-score-threshold: 0.55
+    boundary-expansion:
+      min-support-score-threshold: 0.52
+      max-boundary-orders-per-cluster: 2
+      weather-tightened-support-threshold: 0.62

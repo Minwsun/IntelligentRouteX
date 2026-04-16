@@ -12,6 +12,14 @@ import com.routechain.v2.context.EtaService;
 import com.routechain.v2.context.EtaUncertaintyEstimator;
 import com.routechain.v2.context.TrafficProfileService;
 import com.routechain.v2.context.WeatherContextService;
+import com.routechain.v2.bundle.BoundaryCandidateSelector;
+import com.routechain.v2.bundle.BoundaryExpansionEngine;
+import com.routechain.v2.bundle.BundleDominancePruner;
+import com.routechain.v2.bundle.BundleFamilyEnumerator;
+import com.routechain.v2.bundle.BundleScorer;
+import com.routechain.v2.bundle.BundleSeedGenerator;
+import com.routechain.v2.bundle.BundleValidator;
+import com.routechain.v2.bundle.DispatchBundleStageService;
 import com.routechain.v2.cluster.DispatchPairClusterService;
 import com.routechain.v2.cluster.EtaLegCacheFactory;
 import com.routechain.v2.cluster.MicroClusterer;
@@ -64,7 +72,6 @@ final class TestDispatchV2Factory {
         EtaLegCacheFactory etaLegCacheFactory = configuration.etaLegCacheFactory(properties, etaService);
         PairSimilarityGraphBuilder pairSimilarityGraphBuilder = configuration.pairSimilarityGraphBuilder(
                 properties,
-                etaService,
                 pairFeatureBuilder,
                 pairSimilarityScorer);
         MicroClusterer microClusterer = configuration.microClusterer(properties);
@@ -72,12 +79,25 @@ final class TestDispatchV2Factory {
                 properties,
                 orderBuffer,
                 pairSimilarityGraphBuilder,
-                pairSimilarityScorer,
-                pairHardGateEvaluator,
-                pairFeatureBuilder,
                 etaLegCacheFactory,
                 microClusterer);
-        return configuration.dispatchV2Core(dispatchEtaContextService, dispatchPairClusterService);
+        BoundaryCandidateSelector boundaryCandidateSelector = configuration.boundaryCandidateSelector(properties);
+        BoundaryExpansionEngine boundaryExpansionEngine = configuration.boundaryExpansionEngine(properties);
+        BundleSeedGenerator bundleSeedGenerator = configuration.bundleSeedGenerator(properties);
+        BundleFamilyEnumerator bundleFamilyEnumerator = configuration.bundleFamilyEnumerator(properties);
+        BundleValidator bundleValidator = configuration.bundleValidator(properties);
+        BundleScorer bundleScorer = configuration.bundleScorer(properties);
+        BundleDominancePruner bundleDominancePruner = configuration.bundleDominancePruner();
+        DispatchBundleStageService dispatchBundleStageService = configuration.dispatchBundleStageService(
+                properties,
+                boundaryCandidateSelector,
+                boundaryExpansionEngine,
+                bundleSeedGenerator,
+                bundleFamilyEnumerator,
+                bundleValidator,
+                bundleScorer,
+                bundleDominancePruner);
+        return configuration.dispatchV2Core(dispatchEtaContextService, dispatchPairClusterService, dispatchBundleStageService);
     }
 
     static DispatchV2Request requestWithOrdersAndDriver() {

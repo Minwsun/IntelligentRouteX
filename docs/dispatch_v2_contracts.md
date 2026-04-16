@@ -17,6 +17,12 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 - `MicroCluster`
 - `MicroClusterSummary`
 - `DispatchPairClusterStage`
+- `BoundaryExpansion`
+- `BoundaryExpansionSummary`
+- `BundleFamily`
+- `BundleCandidate`
+- `BundlePoolSummary`
+- `DispatchBundleStage`
 - `WarmStartState`
 - `HotStartState`
 - `DecisionLogRecord`

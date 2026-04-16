@@ -37,7 +37,9 @@ class PairFeatureBuilderTest {
                 new EtaUncertaintyEstimator());
         EtaLegCache etaLegCache = new EtaLegCache(
                 etaService,
-                ClusterTestFixtures.request(List.of()),
+                "trace-cluster",
+                java.time.Instant.parse("2026-04-16T12:00:00Z"),
+                com.routechain.domain.WeatherProfile.CLEAR,
                 properties.getPair().getMlTimeout().toMillis());
         Order left = ClusterTestFixtures.order("order-1", 10.7750, 106.7000, 10.7820, 106.7100, "2026-04-16T12:00:00Z", false);
         Order right = ClusterTestFixtures.order("order-2", 10.7760, 106.7010, 10.7830, 106.7110, "2026-04-16T12:05:00Z", false);
@@ -70,7 +72,9 @@ class PairFeatureBuilderTest {
                 new EtaUncertaintyEstimator());
         EtaLegCache etaLegCache = new EtaLegCache(
                 etaService,
-                ClusterTestFixtures.request(List.of()),
+                "trace-cluster",
+                java.time.Instant.parse("2026-04-16T12:00:00Z"),
+                com.routechain.domain.WeatherProfile.CLEAR,
                 properties.getPair().getMlTimeout().toMillis());
 
         PairFeatureVector vector = pairFeatureBuilder.build(

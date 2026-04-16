@@ -11,10 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class DispatchV2CorePairClusterSliceTest {
+class DispatchV2CoreBundleSliceTest {
 
     @Test
-    void enabledPathReturnsPairClusterStagesAndOutputs() {
+    void enabledPathReturnsBundleStagesAndOutputs() {
         DispatchV2Core core = TestDispatchV2Factory.core(RouteChainDispatchV2Properties.defaults());
 
         DispatchV2Result result = core.dispatch(TestDispatchV2Factory.requestWithOrdersAndDriver());
@@ -22,14 +22,10 @@ class DispatchV2CorePairClusterSliceTest {
         assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool"), result.decisionStages());
         assertFalse(result.fallbackUsed());
         assertNull(result.selectedRouteId());
-        assertNotNull(result.etaContext());
-        assertNotNull(result.bufferedOrderWindow());
-        assertNotNull(result.pairGraphSummary());
-        assertNotNull(result.microClusters());
-        assertNotNull(result.microClusterSummary());
         assertNotNull(result.boundaryExpansionSummary());
         assertNotNull(result.bundlePoolSummary());
-        assertTrue(result.pairGraphSummary().candidatePairCount() > 0);
-        assertFalse(result.microClusters().isEmpty());
+        assertFalse(result.boundaryExpansions().isEmpty());
+        assertFalse(result.bundleCandidates().isEmpty());
+        assertTrue(result.bundlePoolSummary().retainedCount() > 0);
     }
 }
