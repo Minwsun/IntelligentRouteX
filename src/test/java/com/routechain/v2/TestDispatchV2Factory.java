@@ -71,7 +71,9 @@ import com.routechain.v2.integration.NoOpOpenMeteoClient;
 import com.routechain.v2.integration.NoOpGreedRlClient;
 import com.routechain.v2.integration.NoOpRouteFinderClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
+import com.routechain.v2.integration.NoOpForecastClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
+import com.routechain.v2.integration.ForecastClient;
 import com.routechain.v2.integration.GreedRlClient;
 import com.routechain.v2.integration.OpenMeteoClient;
 import com.routechain.v2.integration.RouteFinderClient;
@@ -121,6 +123,16 @@ public final class TestDispatchV2Factory {
         return harness(properties, tabularScoringClient, routeFinderClient, greedRlClient, openMeteoClient, tomTomTrafficRefineClient).core();
     }
 
+    public static DispatchV2Core core(RouteChainDispatchV2Properties properties,
+                                      TabularScoringClient tabularScoringClient,
+                                      RouteFinderClient routeFinderClient,
+                                      GreedRlClient greedRlClient,
+                                      ForecastClient forecastClient,
+                                      OpenMeteoClient openMeteoClient,
+                                      TomTomTrafficRefineClient tomTomTrafficRefineClient) {
+        return harness(properties, tabularScoringClient, routeFinderClient, greedRlClient, forecastClient, openMeteoClient, tomTomTrafficRefineClient).core();
+    }
+
     public static TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties) {
         return harness(properties, new NoOpTabularScoringClient());
     }
@@ -139,13 +151,23 @@ public final class TestDispatchV2Factory {
                                                      TabularScoringClient tabularScoringClient,
                                                      RouteFinderClient routeFinderClient,
                                                      GreedRlClient greedRlClient) {
-        return harness(properties, tabularScoringClient, routeFinderClient, greedRlClient, new NoOpOpenMeteoClient(), new NoOpTomTomTrafficRefineClient());
+        return harness(properties, tabularScoringClient, routeFinderClient, greedRlClient, new NoOpForecastClient(), new NoOpOpenMeteoClient(), new NoOpTomTomTrafficRefineClient());
     }
 
     public static TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties,
                                                      TabularScoringClient tabularScoringClient,
                                                      RouteFinderClient routeFinderClient,
                                                      GreedRlClient greedRlClient,
+                                                     OpenMeteoClient openMeteoClient,
+                                                     TomTomTrafficRefineClient tomTomTrafficRefineClient) {
+        return harness(properties, tabularScoringClient, routeFinderClient, greedRlClient, new NoOpForecastClient(), openMeteoClient, tomTomTrafficRefineClient);
+    }
+
+    public static TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties,
+                                                     TabularScoringClient tabularScoringClient,
+                                                     RouteFinderClient routeFinderClient,
+                                                     GreedRlClient greedRlClient,
+                                                     ForecastClient forecastClient,
                                                      OpenMeteoClient openMeteoClient,
                                                      TomTomTrafficRefineClient tomTomTrafficRefineClient) {
         DispatchV2Configuration configuration = new DispatchV2Configuration();
@@ -223,8 +245,16 @@ public final class TestDispatchV2Factory {
                 routeFinderClient);
         ScenarioGateEvaluator scenarioGateEvaluator = configuration.scenarioGateEvaluator(properties);
         ScenarioEvaluator scenarioEvaluator = configuration.scenarioEvaluator(properties);
+        var demandShiftFeatureBuilder = configuration.demandShiftFeatureBuilder();
+        var zoneBurstFeatureBuilder = configuration.zoneBurstFeatureBuilder();
+        var postDropShiftFeatureBuilder = configuration.postDropShiftFeatureBuilder();
         RobustUtilityAggregator robustUtilityAggregator = configuration.robustUtilityAggregator();
         DispatchScenarioService dispatchScenarioService = configuration.dispatchScenarioService(
+                properties,
+                forecastClient,
+                demandShiftFeatureBuilder,
+                zoneBurstFeatureBuilder,
+                postDropShiftFeatureBuilder,
                 scenarioGateEvaluator,
                 scenarioEvaluator,
                 robustUtilityAggregator);

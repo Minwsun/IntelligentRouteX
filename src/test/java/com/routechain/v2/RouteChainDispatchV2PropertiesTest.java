@@ -52,6 +52,10 @@ class RouteChainDispatchV2PropertiesTest {
         assertEquals(6, properties.getScenario().getMerchantDelayMinutes());
         assertEquals(0.08, properties.getScenario().getDriverDriftPenalty());
         assertEquals(0.06, properties.getScenario().getPickupQueuePenalty());
+        assertEquals(0.58, properties.getScenario().getForecast().getZoneBurstThreshold());
+        assertEquals(0.57, properties.getScenario().getForecast().getDemandShiftThreshold());
+        assertEquals(0.55, properties.getScenario().getForecast().getPostDropShiftThreshold());
+        assertEquals(0.55, properties.getScenario().getForecast().getConfidenceThreshold());
         assertFalse(properties.isEnabled());
         assertFalse(properties.isMlEnabled());
         assertFalse(properties.isSidecarRequired());
@@ -73,6 +77,10 @@ class RouteChainDispatchV2PropertiesTest {
         assertEquals(0.5, properties.getTraffic().getConfidenceThreshold());
         assertEquals(8, properties.getTraffic().getRefineBudgetPerTick());
         assertEquals(1, properties.getTraffic().getMaxRefinedLegsPerRequest());
+        assertFalse(properties.getMl().getForecast().isEnabled());
+        assertEquals("http://127.0.0.1:8096", properties.getMl().getForecast().getBaseUrl());
+        assertEquals(Duration.ofMillis(75), properties.getMl().getForecast().getConnectTimeout());
+        assertEquals(Duration.ofMillis(180), properties.getMl().getForecast().getReadTimeout());
         assertTrue(properties.getFeedback().isDecisionLogEnabled());
         assertTrue(properties.getFeedback().isSnapshotEnabled());
         assertTrue(properties.getFeedback().isReplayEnabled());

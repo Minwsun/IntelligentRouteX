@@ -21,10 +21,19 @@ public final class ScenarioEvaluator {
                                              DispatchCandidateContext context,
                                              EtaContext etaContext,
                                              ScenarioGateDecision decision) {
+        return evaluate(proposal, driverCandidate, context, etaContext, decision, ForecastScenarioContext.empty());
+    }
+
+    public ScenarioEvaluationResult evaluate(RouteProposal proposal,
+                                             DriverCandidate driverCandidate,
+                                             DispatchCandidateContext context,
+                                             EtaContext etaContext,
+                                             ScenarioGateDecision decision,
+                                             ForecastScenarioContext forecastScenarioContext) {
         if (!decision.applied()) {
             return buildSkipped(proposal, driverCandidate, context, decision);
         }
-        return evaluateApplied(proposal, driverCandidate, context, etaContext, decision);
+        return evaluateApplied(proposal, driverCandidate, context, etaContext, decision, forecastScenarioContext);
     }
 
     ScenarioEvaluationResult buildSkipped(RouteProposal proposal,
@@ -73,7 +82,8 @@ public final class ScenarioEvaluator {
                                              DriverCandidate driverCandidate,
                                              DispatchCandidateContext context,
                                              EtaContext etaContext,
-                                             ScenarioGateDecision decision) {
+                                             ScenarioGateDecision decision,
+                                             ForecastScenarioContext forecastScenarioContext) {
         double pickupEta = proposal.projectedPickupEtaMinutes();
         double completionEta = proposal.projectedCompletionEtaMinutes();
         double lateRiskBias = 0.0;
@@ -122,7 +132,30 @@ public final class ScenarioEvaluator {
                 stabilityDelta -= properties.getScenario().getPickupQueuePenalty();
                 reasons.add("pickup-queue-penalty-applied");
             }
-            case DEMAND_SHIFT, ZONE_BURST, POST_DROP_SHIFT -> throw new IllegalStateException("Skipped-only scenarios must not use evaluateApplied");
+            case DEMAND_SHIFT -> {
+                double probability = forecastScenarioContext.demandShift().probability();
+                double intensity = Math.min(1.0, probability);
+                completionEta += 1.5 * intensity;
+                lateRiskBias += 0.04 * intensity;
+                landingDelta -= 0.16 * intensity;
+                stabilityDelta -= 0.12 * intensity;
+                reasons.add("demand-shift-forecast-perturbation");
+            }
+            case ZONE_BURST -> {
+                double probability = forecastScenarioContext.zoneBurst().probability();
+                double intensity = Math.min(1.0, probability);
+                landingDelta += 0.18 * intensity;
+                stabilityDelta += 0.06 * intensity;
+                reasons.add("zone-burst-forecast-perturbation");
+            }
+            case POST_DROP_SHIFT -> {
+                double probability = forecastScenarioContext.postDropShift().probability();
+                double quantileDirection = forecastScenarioContext.postDropShift().quantiles().getOrDefault("q50", 0.0);
+                double signedLift = Math.copySign(Math.min(0.16, Math.abs(quantileDirection) * 0.08 + probability * 0.06), quantileDirection == 0.0 ? 1.0 : quantileDirection);
+                landingDelta += signedLift;
+                stabilityDelta += signedLift / 2.0;
+                reasons.add("post-drop-shift-forecast-perturbation");
+            }
         }
 
         double lateRisk = lateRisk(completionEta, context.readyTimeSpread(proposal.bundleId()), lateRiskBias);

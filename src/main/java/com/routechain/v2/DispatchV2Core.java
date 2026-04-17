@@ -116,14 +116,12 @@ public final class DispatchV2Core {
                 .toList();
         java.util.List<MlStageMetadata> mlStageMetadata = java.util.stream.Stream.of(
                         etaStage.mlStageMetadata().stream(),
-                        etaStage.liveStageMetadata().stream(),
                         pairClusterStage.mlStageMetadata().stream(),
                         bundleStage.mlStageMetadata().stream(),
                         routeCandidateStage.mlStageMetadata().stream(),
-                        routeProposalStage.mlStageMetadata().stream())
+                        routeProposalStage.mlStageMetadata().stream(),
+                        scenarioStage.mlStageMetadata().stream())
                 .flatMap(stream -> stream)
-                .filter(MlStageMetadata.class::isInstance)
-                .map(MlStageMetadata.class::cast)
                 .distinct()
                 .toList();
         java.util.List<LiveStageMetadata> liveStageMetadata = java.util.stream.Stream.of(
@@ -139,7 +137,7 @@ public final class DispatchV2Core {
                 java.util.List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector", "dispatch-executor"),
                 etaStage.etaContext(),
                 etaStage.etaStageTrace(),
-                etaStage.freshnessMetadata(),
+                scenarioStage.freshnessMetadata(),
                 pairClusterStage.bufferedOrderWindow(),
                 pairClusterStage.pairGraphSummary(),
                 pairClusterStage.microClusters(),

@@ -501,6 +501,7 @@ public class RouteChainDispatchV2Properties {
         private int merchantDelayMinutes = 6;
         private double driverDriftPenalty = 0.08;
         private double pickupQueuePenalty = 0.06;
+        private final ScenarioForecast forecast = new ScenarioForecast();
 
         public double getWeatherBadEtaMultiplier() {
             return weatherBadEtaMultiplier;
@@ -540,6 +541,49 @@ public class RouteChainDispatchV2Properties {
 
         public void setPickupQueuePenalty(double pickupQueuePenalty) {
             this.pickupQueuePenalty = pickupQueuePenalty;
+        }
+
+        public ScenarioForecast getForecast() {
+            return forecast;
+        }
+    }
+
+    public static final class ScenarioForecast {
+        private double zoneBurstThreshold = 0.58;
+        private double demandShiftThreshold = 0.57;
+        private double postDropShiftThreshold = 0.55;
+        private double confidenceThreshold = 0.55;
+
+        public double getZoneBurstThreshold() {
+            return zoneBurstThreshold;
+        }
+
+        public void setZoneBurstThreshold(double zoneBurstThreshold) {
+            this.zoneBurstThreshold = zoneBurstThreshold;
+        }
+
+        public double getDemandShiftThreshold() {
+            return demandShiftThreshold;
+        }
+
+        public void setDemandShiftThreshold(double demandShiftThreshold) {
+            this.demandShiftThreshold = demandShiftThreshold;
+        }
+
+        public double getPostDropShiftThreshold() {
+            return postDropShiftThreshold;
+        }
+
+        public void setPostDropShiftThreshold(double postDropShiftThreshold) {
+            this.postDropShiftThreshold = postDropShiftThreshold;
+        }
+
+        public double getConfidenceThreshold() {
+            return confidenceThreshold;
+        }
+
+        public void setConfidenceThreshold(double confidenceThreshold) {
+            this.confidenceThreshold = confidenceThreshold;
         }
     }
 
@@ -582,6 +626,7 @@ public class RouteChainDispatchV2Properties {
         private final Tabular tabular = new Tabular();
         private final Routefinder routefinder = new Routefinder();
         private final Greedrl greedrl = new Greedrl();
+        private final MlForecast forecast = new MlForecast();
 
         public Tabular getTabular() {
             return tabular;
@@ -593,6 +638,10 @@ public class RouteChainDispatchV2Properties {
 
         public Greedrl getGreedrl() {
             return greedrl;
+        }
+
+        public MlForecast getForecast() {
+            return forecast;
         }
     }
 
@@ -773,6 +822,45 @@ public class RouteChainDispatchV2Properties {
 
         public void setMaxProposalsPerCluster(int maxProposalsPerCluster) {
             this.maxProposalsPerCluster = maxProposalsPerCluster;
+        }
+    }
+
+    public static final class MlForecast {
+        private boolean enabled = false;
+        private String baseUrl = "http://127.0.0.1:8096";
+        private Duration connectTimeout = Duration.ofMillis(75);
+        private Duration readTimeout = Duration.ofMillis(180);
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public Duration getConnectTimeout() {
+            return connectTimeout;
+        }
+
+        public void setConnectTimeout(Duration connectTimeout) {
+            this.connectTimeout = connectTimeout;
+        }
+
+        public Duration getReadTimeout() {
+            return readTimeout;
+        }
+
+        public void setReadTimeout(Duration readTimeout) {
+            this.readTimeout = readTimeout;
         }
     }
 

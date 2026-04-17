@@ -71,8 +71,8 @@ workers:
           maxAlternatives: 2
   - worker_name: ml-forecast-worker
     model_name: chronos-2
-    model_version: pinned-placeholder
-    artifact_digest: sha256:pending
+    model_version: 2026.04.17-v1
+    artifact_digest: sha256:63eb03737be473b08eeca3ab72939b5906822cb04cd49ae6fab708ef850a8878
     rollback_artifact_digest: sha256:pending-rollback
     runtime_image: ghcr.io/minwsun/intelligentroutex/ml-forecast-worker:bootstrap
     compatibility_contract_version: dispatch-v2-ml/v1
@@ -82,6 +82,18 @@ workers:
       payload:
         schemaVersion: forecast-request/v1
         traceId: warmup-forecast
+        payload:
+          schemaVersion: zone-burst-feature-vector/v1
+          traceId: warmup-forecast
+          corridorId: corridor-warmup
+          orderCount: 3
+          urgentOrderCount: 1
+          driverCount: 2
+          averageCompletionEtaMinutes: 16.0
+          averageRouteValue: 0.68
+          averageBundleScore: 0.70
+          averagePairSupport: 0.64
+          horizonMinutes: 20
   - worker_name: ml-tabular-worker
     model_name: tabular-linear
     model_version: 2026.04.17-v1

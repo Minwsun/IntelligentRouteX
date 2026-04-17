@@ -82,8 +82,24 @@ public final class MlStageMetadataAccumulator {
         }
     }
 
+    public void accept(ForecastResult forecastResult) {
+        attempted = true;
+        applied = applied || forecastResult.applied();
+        fallbackUsed = fallbackUsed || forecastResult.fallbackUsed();
+        totalLatencyMs += forecastResult.workerMetadata().latencyMs();
+        if (sourceModel.isBlank() && !forecastResult.workerMetadata().sourceModel().isBlank()) {
+            sourceModel = forecastResult.workerMetadata().sourceModel();
+        }
+        if (modelVersion.isBlank() && !forecastResult.workerMetadata().modelVersion().isBlank()) {
+            modelVersion = forecastResult.workerMetadata().modelVersion();
+        }
+        if (artifactDigest.isBlank() && !forecastResult.workerMetadata().artifactDigest().isBlank()) {
+            artifactDigest = forecastResult.workerMetadata().artifactDigest();
+        }
+    }
+
     public Optional<MlStageMetadata> build() {
-        if (!attempted) {
+        if (!attempted || sourceModel.isBlank()) {
             return Optional.empty();
         }
         return Optional.of(new MlStageMetadata(

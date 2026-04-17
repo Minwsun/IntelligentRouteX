@@ -1,11 +1,18 @@
 package com.routechain.v2.scenario;
 
+import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
 import com.routechain.v2.LiveStageMetadata;
 import com.routechain.v2.bundle.DispatchBundleStage;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.context.FreshnessMetadata;
+import com.routechain.v2.integration.DemandShiftFeatureVector;
+import com.routechain.v2.integration.ForecastClient;
+import com.routechain.v2.integration.ForecastResult;
+import com.routechain.v2.integration.MlStageMetadataAccumulator;
+import com.routechain.v2.integration.PostDropShiftFeatureVector;
+import com.routechain.v2.integration.ZoneBurstFeatureVector;
 import com.routechain.v2.route.DispatchCandidateContext;
 import com.routechain.v2.route.DispatchRouteCandidateStage;
 import com.routechain.v2.route.DispatchRouteProposalStage;
@@ -18,13 +25,28 @@ import java.util.List;
 import java.util.Map;
 
 public final class DispatchScenarioService {
+    private final RouteChainDispatchV2Properties properties;
+    private final ForecastClient forecastClient;
+    private final DemandShiftFeatureBuilder demandShiftFeatureBuilder;
+    private final ZoneBurstFeatureBuilder zoneBurstFeatureBuilder;
+    private final PostDropShiftFeatureBuilder postDropShiftFeatureBuilder;
     private final ScenarioGateEvaluator scenarioGateEvaluator;
     private final ScenarioEvaluator scenarioEvaluator;
     private final RobustUtilityAggregator robustUtilityAggregator;
 
-    public DispatchScenarioService(ScenarioGateEvaluator scenarioGateEvaluator,
+    public DispatchScenarioService(RouteChainDispatchV2Properties properties,
+                                   ForecastClient forecastClient,
+                                   DemandShiftFeatureBuilder demandShiftFeatureBuilder,
+                                   ZoneBurstFeatureBuilder zoneBurstFeatureBuilder,
+                                   PostDropShiftFeatureBuilder postDropShiftFeatureBuilder,
+                                   ScenarioGateEvaluator scenarioGateEvaluator,
                                    ScenarioEvaluator scenarioEvaluator,
                                    RobustUtilityAggregator robustUtilityAggregator) {
+        this.properties = properties;
+        this.forecastClient = forecastClient;
+        this.demandShiftFeatureBuilder = demandShiftFeatureBuilder;
+        this.zoneBurstFeatureBuilder = zoneBurstFeatureBuilder;
+        this.postDropShiftFeatureBuilder = postDropShiftFeatureBuilder;
         this.scenarioGateEvaluator = scenarioGateEvaluator;
         this.scenarioEvaluator = scenarioEvaluator;
         this.robustUtilityAggregator = robustUtilityAggregator;
@@ -43,6 +65,14 @@ public final class DispatchScenarioService {
                 request.availableDrivers(),
                 pairClusterStage,
                 bundleStage);
+        ForecastScenarioContext forecastScenarioContext = forecastContext(
+                request,
+                etaContext,
+                freshnessMetadata,
+                context,
+                routeProposalStage,
+                routeCandidateStage,
+                bundleStage);
         Map<String, DriverCandidate> driverCandidateByKey = routeCandidateStage.driverCandidates().stream()
                 .collect(java.util.stream.Collectors.toMap(
                         candidate -> key(candidate.bundleId(), candidate.anchorOrderId(), candidate.driverId()),
@@ -55,9 +85,22 @@ public final class DispatchScenarioService {
             if (driverCandidate == null) {
                 continue;
             }
-            List<ScenarioGateDecision> decisions = scenarioGateEvaluator.gate(proposal, driverCandidate, context, etaContext, freshnessMetadata, liveStageMetadata);
+            List<ScenarioGateDecision> decisions = scenarioGateEvaluator.gate(
+                    proposal,
+                    driverCandidate,
+                    context,
+                    etaContext,
+                    forecastScenarioContext.freshnessMetadata(),
+                    liveStageMetadata,
+                    forecastScenarioContext);
             for (ScenarioGateDecision decision : decisions) {
-                ScenarioEvaluationResult result = scenarioEvaluator.evaluate(proposal, driverCandidate, context, etaContext, decision);
+                ScenarioEvaluationResult result = scenarioEvaluator.evaluate(
+                        proposal,
+                        driverCandidate,
+                        context,
+                        etaContext,
+                        decision,
+                        forecastScenarioContext);
                 evaluations.add(result.evaluation());
                 degradeReasons.addAll(result.evaluation().degradeReasons());
             }
@@ -74,7 +117,69 @@ public final class DispatchScenarioService {
                 List.copyOf(evaluations),
                 robustUtilities,
                 summarize(evaluations, robustUtilities, distinctDegradeReasons),
+                forecastScenarioContext.freshnessMetadata(),
+                forecastScenarioContext.mlStageMetadata(),
                 distinctDegradeReasons);
+    }
+
+    private ForecastScenarioContext forecastContext(DispatchV2Request request,
+                                                   EtaContext etaContext,
+                                                   FreshnessMetadata freshnessMetadata,
+                                                   DispatchCandidateContext context,
+                                                   DispatchRouteProposalStage routeProposalStage,
+                                                   DispatchRouteCandidateStage routeCandidateStage,
+                                                   DispatchBundleStage bundleStage) {
+        MlStageMetadataAccumulator metadataAccumulator = new MlStageMetadataAccumulator("scenario-evaluation");
+        DemandShiftFeatureVector demandShiftFeatures = demandShiftFeatureBuilder.build(request, etaContext, context, routeProposalStage, bundleStage);
+        ZoneBurstFeatureVector zoneBurstFeatures = zoneBurstFeatureBuilder.build(request, etaContext, context, routeProposalStage);
+        PostDropShiftFeatureVector postDropShiftFeatures = postDropShiftFeatureBuilder.build(request, etaContext, context, routeProposalStage, routeCandidateStage);
+        ForecastResult demandShift = forecastClient.forecastDemandShift(demandShiftFeatures, 180L);
+        ForecastResult zoneBurst = forecastClient.forecastZoneBurst(zoneBurstFeatures, 180L);
+        ForecastResult postDropShift = forecastClient.forecastPostDropShift(postDropShiftFeatures, 180L);
+        acceptMetadata(metadataAccumulator, demandShift);
+        acceptMetadata(metadataAccumulator, zoneBurst);
+        acceptMetadata(metadataAccumulator, postDropShift);
+        long maxForecastAgeMs = java.util.stream.LongStream.of(
+                        freshnessMetadata == null ? 0L : freshnessMetadata.forecastAgeMs(),
+                        demandShift.sourceAgeMs(),
+                        zoneBurst.sourceAgeMs(),
+                        postDropShift.sourceAgeMs())
+                .max()
+                .orElse(0L);
+        boolean forecastFresh = maxForecastAgeMs > 0L
+                && maxForecastAgeMs <= contextFreshnessMaxAgeMs();
+        FreshnessMetadata mergedFreshness = new FreshnessMetadata(
+                freshnessMetadata == null ? "freshness-metadata/v1" : freshnessMetadata.schemaVersion(),
+                freshnessMetadata == null ? 0L : freshnessMetadata.weatherAgeMs(),
+                freshnessMetadata == null ? 0L : freshnessMetadata.trafficAgeMs(),
+                maxForecastAgeMs,
+                freshnessMetadata != null && freshnessMetadata.weatherFresh(),
+                freshnessMetadata != null && freshnessMetadata.trafficFresh(),
+                forecastFresh);
+        List<String> degradeReasons = java.util.stream.Stream.of(
+                        demandShift.degradeReason(),
+                        zoneBurst.degradeReason(),
+                        postDropShift.degradeReason())
+                .filter(reason -> reason != null && !reason.isBlank())
+                .distinct()
+                .toList();
+        return new ForecastScenarioContext(
+                demandShift,
+                zoneBurst,
+                postDropShift,
+                mergedFreshness,
+                metadataAccumulator.build().map(List::of).orElse(List.of()),
+                degradeReasons);
+    }
+
+    private void acceptMetadata(MlStageMetadataAccumulator accumulator, ForecastResult forecastResult) {
+        if (!forecastResult.workerMetadata().sourceModel().isBlank()) {
+            accumulator.accept(forecastResult);
+        }
+    }
+
+    private long contextFreshnessMaxAgeMs() {
+        return properties.getContext().getFreshness().getForecastMaxAge().toMillis();
     }
 
     private ScenarioEvaluationSummary summarize(List<ScenarioEvaluation> evaluations,

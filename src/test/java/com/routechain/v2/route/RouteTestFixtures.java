@@ -35,17 +35,22 @@ import com.routechain.v2.context.TrafficProfileService;
 import com.routechain.v2.context.WeatherContextService;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
 import com.routechain.v2.integration.NoOpGreedRlClient;
+import com.routechain.v2.integration.NoOpForecastClient;
 import com.routechain.v2.integration.NoOpRouteFinderClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
+import com.routechain.v2.integration.ForecastClient;
 import com.routechain.v2.integration.GreedRlClient;
 import com.routechain.v2.integration.RouteFinderClient;
 import com.routechain.v2.integration.TabularScoringClient;
 import com.routechain.v2.scenario.DispatchScenarioService;
 import com.routechain.v2.scenario.DispatchScenarioStage;
+import com.routechain.v2.scenario.DemandShiftFeatureBuilder;
+import com.routechain.v2.scenario.PostDropShiftFeatureBuilder;
 import com.routechain.v2.scenario.RobustUtilityAggregator;
 import com.routechain.v2.scenario.ScenarioEvaluator;
 import com.routechain.v2.scenario.ScenarioGateEvaluator;
+import com.routechain.v2.scenario.ZoneBurstFeatureBuilder;
 import com.routechain.v2.executor.DispatchAssignmentBuilder;
 import com.routechain.v2.executor.DispatchExecutor;
 import com.routechain.v2.executor.DispatchExecutorService;
@@ -254,7 +259,17 @@ public final class RouteTestFixtures {
     }
 
     public static DispatchScenarioService scenarioService(RouteChainDispatchV2Properties properties) {
+        return scenarioService(properties, new NoOpForecastClient());
+    }
+
+    public static DispatchScenarioService scenarioService(RouteChainDispatchV2Properties properties,
+                                                          ForecastClient forecastClient) {
         return new DispatchScenarioService(
+                properties,
+                forecastClient,
+                new DemandShiftFeatureBuilder(),
+                new ZoneBurstFeatureBuilder(),
+                new PostDropShiftFeatureBuilder(),
                 new ScenarioGateEvaluator(properties),
                 new ScenarioEvaluator(properties),
                 new RobustUtilityAggregator());

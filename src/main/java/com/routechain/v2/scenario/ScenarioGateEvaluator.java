@@ -24,13 +24,35 @@ public final class ScenarioGateEvaluator {
                                            EtaContext etaContext,
                                            FreshnessMetadata freshnessMetadata,
                                            List<LiveStageMetadata> liveStageMetadata) {
+        return gate(proposal, driverCandidate, context, etaContext, freshnessMetadata, liveStageMetadata, ForecastScenarioContext.empty());
+    }
+
+    public List<ScenarioGateDecision> gate(RouteProposal proposal,
+                                           DriverCandidate driverCandidate,
+                                           DispatchCandidateContext context,
+                                           EtaContext etaContext,
+                                           FreshnessMetadata freshnessMetadata,
+                                           List<LiveStageMetadata> liveStageMetadata,
+                                           ForecastScenarioContext forecastScenarioContext) {
         List<ScenarioGateDecision> decisions = new ArrayList<>();
         decisions.add(new ScenarioGateDecision(ScenarioType.NORMAL, true, List.of("baseline-scenario"), List.of()));
         decisions.add(weatherSignalScenario(etaContext, freshnessMetadata, liveStageMetadata));
         decisions.add(trafficSignalScenario(etaContext, freshnessMetadata, liveStageMetadata));
-        decisions.add(skippedForecastScenario(ScenarioType.DEMAND_SHIFT));
-        decisions.add(skippedForecastScenario(ScenarioType.ZONE_BURST));
-        decisions.add(skippedForecastScenario(ScenarioType.POST_DROP_SHIFT));
+        decisions.add(forecastScenario(
+                ScenarioType.DEMAND_SHIFT,
+                forecastScenarioContext.demandShift(),
+                properties.getScenario().getForecast().getDemandShiftThreshold(),
+                "demand-shift-threshold-not-met"));
+        decisions.add(forecastScenario(
+                ScenarioType.ZONE_BURST,
+                forecastScenarioContext.zoneBurst(),
+                properties.getScenario().getForecast().getZoneBurstThreshold(),
+                "zone-burst-threshold-not-met"));
+        decisions.add(forecastScenario(
+                ScenarioType.POST_DROP_SHIFT,
+                forecastScenarioContext.postDropShift(),
+                properties.getScenario().getForecast().getPostDropShiftThreshold(),
+                "post-drop-shift-threshold-not-met"));
         decisions.add(new ScenarioGateDecision(
                 ScenarioType.MERCHANT_DELAY,
                 context.readyTimeSpread(proposal.bundleId()) >= Math.max(4, properties.getPair().getReadyGapMinutesThreshold() / 2),
@@ -97,15 +119,42 @@ public final class ScenarioGateEvaluator {
                 List.of());
     }
 
-    private ScenarioGateDecision skippedForecastScenario(ScenarioType scenario) {
+    private ScenarioGateDecision forecastScenario(ScenarioType scenario,
+                                                  com.routechain.v2.integration.ForecastResult forecastResult,
+                                                  double threshold,
+                                                  String thresholdReason) {
+        if (!forecastResult.applied()) {
+            return new ScenarioGateDecision(
+                    scenario,
+                    false,
+                    List.of(reasonForUnavailableForecast(forecastResult.degradeReason())),
+                    List.of(forecastResult.degradeReason()));
+        }
+        if (forecastResult.sourceAgeMs() > properties.getContext().getFreshness().getForecastMaxAge().toMillis()) {
+            return new ScenarioGateDecision(scenario, false, List.of("forecast-stale"), List.of("forecast-stale"));
+        }
+        if (forecastResult.confidence() < properties.getScenario().getForecast().getConfidenceThreshold()) {
+            return new ScenarioGateDecision(scenario, false, List.of("forecast-low-confidence"), List.of("forecast-low-confidence"));
+        }
+        if (forecastResult.probability() < threshold) {
+            return new ScenarioGateDecision(scenario, false, List.of(thresholdReason), List.of());
+        }
         return new ScenarioGateDecision(
                 scenario,
-                false,
-                List.of("forecast-not-integrated-yet"),
-                List.of("forecast-unavailable-scenario-skipped"));
+                true,
+                List.of("forecast-signal-present"),
+                List.of());
     }
 
     private boolean fresnessFalseOrMissing(Boolean fresh) {
         return fresh == null || !fresh;
+    }
+
+    private String reasonForUnavailableForecast(String degradeReason) {
+        return switch (degradeReason) {
+            case "forecast-stale" -> "forecast-stale";
+            case "forecast-low-confidence" -> "forecast-low-confidence";
+            default -> "forecast-unavailable";
+        };
     }
 }

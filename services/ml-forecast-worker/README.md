@@ -1,4 +1,3 @@
 # ml-forecast-worker
 
-Bootstrap worker for Chronos-2 driven forecast endpoints.
-
+Local Chronos-style forecast worker for bounded dispatch scenario inference.

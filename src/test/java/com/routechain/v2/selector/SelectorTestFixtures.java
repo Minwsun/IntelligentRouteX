@@ -1,5 +1,6 @@
 package com.routechain.v2.selector;
 
+import com.routechain.v2.context.FreshnessMetadata;
 import com.routechain.v2.route.DispatchRouteProposalStage;
 import com.routechain.v2.route.RouteProposal;
 import com.routechain.v2.route.RouteProposalSource;
@@ -116,6 +117,8 @@ final class SelectorTestFixtures {
                 List.of(),
                 robustUtilities,
                 ScenarioEvaluationSummary.empty(),
+                FreshnessMetadata.empty(),
+                List.of(),
                 List.of());
     }
 }

@@ -12,9 +12,9 @@ public final class RobustUtilityAggregator {
         weights.put(ScenarioType.NORMAL, 1.00);
         weights.put(ScenarioType.WEATHER_BAD, 0.90);
         weights.put(ScenarioType.TRAFFIC_BAD, 0.90);
-        weights.put(ScenarioType.DEMAND_SHIFT, 0.0);
-        weights.put(ScenarioType.ZONE_BURST, 0.0);
-        weights.put(ScenarioType.POST_DROP_SHIFT, 0.0);
+        weights.put(ScenarioType.DEMAND_SHIFT, 0.62);
+        weights.put(ScenarioType.ZONE_BURST, 0.66);
+        weights.put(ScenarioType.POST_DROP_SHIFT, 0.64);
         weights.put(ScenarioType.MERCHANT_DELAY, 0.75);
         weights.put(ScenarioType.DRIVER_DRIFT, 0.70);
         weights.put(ScenarioType.PICKUP_QUEUE, 0.70);

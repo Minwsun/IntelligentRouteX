@@ -56,6 +56,11 @@ routechain:
         sequence-timeout: 150ms
         max-orders-per-request: 8
         max-proposals-per-cluster: 3
+      forecast:
+        enabled: false
+        base-url: http://127.0.0.1:8096
+        connect-timeout: 75ms
+        read-timeout: 180ms
     buffer:
       hold-window: 45s
     cluster:
@@ -104,6 +109,11 @@ routechain:
       merchant-delay-minutes: 6
       driver-drift-penalty: 0.08
       pickup-queue-penalty: 0.06
+      forecast:
+        zone-burst-threshold: 0.58
+        demand-shift-threshold: 0.57
+        post-drop-shift-threshold: 0.55
+        confidence-threshold: 0.55
     selector:
       greedy-repair-enabled: true
       repair-pass-limit: 1

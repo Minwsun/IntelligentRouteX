@@ -56,9 +56,12 @@ import com.routechain.v2.route.RouteProposalPruner;
 import com.routechain.v2.route.RouteProposalValidator;
 import com.routechain.v2.route.RouteValueScorer;
 import com.routechain.v2.scenario.DispatchScenarioService;
+import com.routechain.v2.scenario.DemandShiftFeatureBuilder;
+import com.routechain.v2.scenario.PostDropShiftFeatureBuilder;
 import com.routechain.v2.scenario.RobustUtilityAggregator;
 import com.routechain.v2.scenario.ScenarioEvaluator;
 import com.routechain.v2.scenario.ScenarioGateEvaluator;
+import com.routechain.v2.scenario.ZoneBurstFeatureBuilder;
 import com.routechain.v2.executor.DispatchAssignmentBuilder;
 import com.routechain.v2.executor.DispatchExecutor;
 import com.routechain.v2.executor.DispatchExecutorService;
@@ -75,7 +78,10 @@ import com.routechain.v2.integration.NoOpOpenMeteoClient;
 import com.routechain.v2.integration.NoOpGreedRlClient;
 import com.routechain.v2.integration.NoOpRouteFinderClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
+import com.routechain.v2.integration.NoOpForecastClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
+import com.routechain.v2.integration.ForecastClient;
+import com.routechain.v2.integration.HttpForecastClient;
 import com.routechain.v2.integration.HttpOpenMeteoClient;
 import com.routechain.v2.integration.HttpTomTomTrafficRefineClient;
 import com.routechain.v2.integration.GreedRlClient;
@@ -180,6 +186,22 @@ public class DispatchV2Configuration {
                 java.nio.file.Path.of("services", "models", "model-manifest.yaml"));
         if (properties.isSidecarRequired() && !client.readyState().ready()) {
             throw new IllegalStateException("GreedRL worker is required but not ready: " + client.readyState().reason());
+        }
+        return client;
+    }
+
+    @Bean
+    ForecastClient forecastClient(RouteChainDispatchV2Properties properties) {
+        if (!properties.isMlEnabled() || !properties.getMl().getForecast().isEnabled()) {
+            return new NoOpForecastClient();
+        }
+        HttpForecastClient client = new HttpForecastClient(
+                properties.getMl().getForecast().getBaseUrl(),
+                properties.getMl().getForecast().getConnectTimeout(),
+                properties.getMl().getForecast().getReadTimeout(),
+                java.nio.file.Path.of("services", "models", "model-manifest.yaml"));
+        if (properties.isSidecarRequired() && !client.readyState().ready()) {
+            throw new IllegalStateException("Forecast worker is required but not ready: " + client.readyState().reason());
         }
         return client;
     }
@@ -413,15 +435,40 @@ public class DispatchV2Configuration {
     }
 
     @Bean
+    DemandShiftFeatureBuilder demandShiftFeatureBuilder() {
+        return new DemandShiftFeatureBuilder();
+    }
+
+    @Bean
+    ZoneBurstFeatureBuilder zoneBurstFeatureBuilder() {
+        return new ZoneBurstFeatureBuilder();
+    }
+
+    @Bean
+    PostDropShiftFeatureBuilder postDropShiftFeatureBuilder() {
+        return new PostDropShiftFeatureBuilder();
+    }
+
+    @Bean
     RobustUtilityAggregator robustUtilityAggregator() {
         return new RobustUtilityAggregator();
     }
 
     @Bean
-    DispatchScenarioService dispatchScenarioService(ScenarioGateEvaluator scenarioGateEvaluator,
+    DispatchScenarioService dispatchScenarioService(RouteChainDispatchV2Properties properties,
+                                                    ForecastClient forecastClient,
+                                                    DemandShiftFeatureBuilder demandShiftFeatureBuilder,
+                                                    ZoneBurstFeatureBuilder zoneBurstFeatureBuilder,
+                                                    PostDropShiftFeatureBuilder postDropShiftFeatureBuilder,
+                                                    ScenarioGateEvaluator scenarioGateEvaluator,
                                                     ScenarioEvaluator scenarioEvaluator,
                                                     RobustUtilityAggregator robustUtilityAggregator) {
         return new DispatchScenarioService(
+                properties,
+                forecastClient,
+                demandShiftFeatureBuilder,
+                zoneBurstFeatureBuilder,
+                postDropShiftFeatureBuilder,
                 scenarioGateEvaluator,
                 scenarioEvaluator,
                 robustUtilityAggregator);

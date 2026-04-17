@@ -1,0 +1,44 @@
+{
+  "modelVersion": "2026.04.17-v1",
+  "stages": {
+    "demand-shift": {
+      "bias": 0.16,
+      "orderWeight": 0.04,
+      "urgentWeight": 0.08,
+      "valueWeight": 0.12,
+      "completionEtaWeight": 0.006,
+      "driverWeight": 0.03,
+      "baseConfidence": 0.58,
+      "confidenceLift": 0.22,
+      "quantileScale": 1.1,
+      "direction": -1.0,
+      "sourceAgeMs": 120000
+    },
+    "zone-burst": {
+      "bias": 0.18,
+      "orderWeight": 0.05,
+      "urgentWeight": 0.07,
+      "valueWeight": 0.14,
+      "completionEtaWeight": 0.004,
+      "driverWeight": 0.025,
+      "baseConfidence": 0.6,
+      "confidenceLift": 0.2,
+      "quantileScale": 1.2,
+      "direction": 1.0,
+      "sourceAgeMs": 90000
+    },
+    "post-drop-shift": {
+      "bias": 0.14,
+      "orderWeight": 0.03,
+      "urgentWeight": 0.05,
+      "valueWeight": 0.1,
+      "completionEtaWeight": 0.005,
+      "driverWeight": 0.02,
+      "baseConfidence": 0.57,
+      "confidenceLift": 0.24,
+      "quantileScale": 1.0,
+      "direction": 1.0,
+      "sourceAgeMs": 150000
+    }
+  }
+}
