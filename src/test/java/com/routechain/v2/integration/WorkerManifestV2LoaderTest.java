@@ -46,9 +46,12 @@ class WorkerManifestV2LoaderTest {
         assertEquals("model-manifest/v2", manifest.schemaVersion());
         assertEquals("materialized/routefinder", worker.localModelRoot());
         assertEquals("materialized/routefinder/model/routefinder-model.json", worker.localArtifactPath());
-        assertEquals("LOCAL_FILE", worker.materializationMode());
+        assertEquals("HF_CHECKPOINT_PROMOTION", worker.materializationMode());
         assertTrue(worker.readyRequiresLocalLoad());
         assertTrue(worker.offlineBootSupported());
         assertEquals("sha256:fingerprint", worker.loadedModelFingerprint());
+        assertEquals("https://github.com/ai4co/routefinder.git", worker.sourceRepository());
+        assertEquals("fe0e45b6df118af03c5f42db8b93a351f7629131", worker.sourceRef());
+        assertEquals("checkpoints/100/rf-transformer.ckpt", worker.sourceCheckpointPath());
     }
 }

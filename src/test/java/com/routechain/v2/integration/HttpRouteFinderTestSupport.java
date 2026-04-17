@@ -121,10 +121,15 @@ final class HttpRouteFinderTestSupport {
                     min_supported_java_contract_version: %s
                     local_model_root: materialized/routefinder
                     local_artifact_path: materialized/routefinder/model/routefinder-model.json
-                    materialization_mode: LOCAL_FILE
+                    materialization_mode: HF_CHECKPOINT_PROMOTION
                     ready_requires_local_load: true
                     offline_boot_supported: true
                     loaded_model_fingerprint: %s
+                    source_repository: https://github.com/ai4co/routefinder.git
+                    source_ref: fe0e45b6df118af03c5f42db8b93a351f7629131
+                    source_checkpoint_path: checkpoints/100/rf-transformer.ckpt
+                    source_download_command: python scripts/download_hf.py --models --no-data
+                    source_test_command: python test.py --checkpoint checkpoints/100/rf-transformer.ckpt
                     startup_warmup_request:
                       endpoint: /route/refine
                       payload:

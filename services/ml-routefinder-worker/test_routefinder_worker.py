@@ -16,11 +16,16 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(routefinder_app)
 
 MODEL_ARTIFACT = {
-    "schemaVersion": "routefinder-model-artifact/v1",
+    "schemaVersion": "routefinder-promoted-artifact/v2",
     "modelName": "routefinder-local",
-    "modelVersion": "2026.04.17-v1",
+    "modelVersion": "2026.04.18-v2",
     "compatibilityContractVersion": "dispatch-v2-ml/v1",
     "minSupportedJavaContractVersion": "dispatch-v2-java/v1",
+    "sourceRepository": "https://github.com/ai4co/routefinder.git",
+    "sourceRef": "fe0e45b6df118af03c5f42db8b93a351f7629131",
+    "sourceCommit": "fe0e45b6df118af03c5f42db8b93a351f7629131",
+    "sourceCheckpointPath": "checkpoints/100/rf-transformer.ckpt",
+    "sourceCheckpointDigest": "sha256:checkpoint",
     "alternatives": {
         "maxGeneratedRoutes": 3,
         "baseScore": 0.60,
@@ -83,13 +88,7 @@ class RouteFinderWorkerReadyTest(unittest.TestCase):
             artifact_path = model_dir / "routefinder-model.json"
             artifact_path.write_text("{bad-json", encoding="utf-8")
             fingerprint = routefinder_app._loaded_model_fingerprint(model_dir)
-            metadata = {
-                "schemaVersion": "routefinder-materialization/v1",
-                "materializationMode": "LOCAL_FILE",
-                "loadedModelFingerprint": fingerprint,
-                "fileManifest": routefinder_app._normalized_file_manifest(model_dir),
-            }
-            (model_root / "materialization-metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+            self._write_metadata(temp_root, model_root, fingerprint, complete=True)
             manifest_path = self._write_manifest(temp_root, fingerprint=fingerprint)
             routefinder_app.MANIFEST_PATH = manifest_path
 
@@ -110,6 +109,36 @@ class RouteFinderWorkerReadyTest(unittest.TestCase):
             self.assertFalse(ready)
             self.assertEqual("warmup-failed", reason)
 
+    def test_promoted_artifact_missing_provenance_is_not_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            model_root, artifact_path, _fingerprint = self._write_materialized_model(temp_root)
+            artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+            del artifact["sourceCheckpointDigest"]
+            artifact_path.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
+            fingerprint = routefinder_app._loaded_model_fingerprint(model_root / "model")
+            self._write_metadata(temp_root, model_root, fingerprint, complete=True)
+            manifest_path = self._write_manifest(temp_root, fingerprint=fingerprint)
+            routefinder_app.MANIFEST_PATH = manifest_path
+
+            ready, reason, _manifest, _artifact, _version_payload = routefinder_app._readiness()
+
+            self.assertFalse(ready)
+            self.assertEqual("promoted-artifact-provenance-missing", reason)
+
+    def test_incomplete_materialization_metadata_is_not_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            model_root, _artifact_path, fingerprint = self._write_materialized_model(temp_root)
+            self._write_metadata(temp_root, model_root, fingerprint, complete=False)
+            manifest_path = self._write_manifest(temp_root, fingerprint=fingerprint)
+            routefinder_app.MANIFEST_PATH = manifest_path
+
+            ready, reason, _manifest, _artifact, _version_payload = routefinder_app._readiness()
+
+            self.assertFalse(ready)
+            self.assertEqual("materialization-metadata-provenance-missing", reason)
+
     def test_valid_local_model_is_ready_without_network(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -125,7 +154,7 @@ class RouteFinderWorkerReadyTest(unittest.TestCase):
             self.assertEqual(MODEL_ARTIFACT["modelVersion"], artifact["modelVersion"])
             self.assertTrue(version_payload["loadedFromLocal"])
             self.assertEqual(str(artifact_path), version_payload["localArtifactPath"])
-            self.assertEqual("LOCAL_FILE", version_payload["materializationMode"])
+            self.assertEqual("HF_CHECKPOINT_PROMOTION", version_payload["materializationMode"])
             self.assertEqual(fingerprint, version_payload["loadedModelFingerprint"])
 
     def _write_materialized_model(self, temp_root: Path) -> tuple[Path, Path, str]:
@@ -135,14 +164,31 @@ class RouteFinderWorkerReadyTest(unittest.TestCase):
         artifact_path = model_dir / "routefinder-model.json"
         artifact_path.write_text(json.dumps(MODEL_ARTIFACT, indent=2), encoding="utf-8")
         fingerprint = routefinder_app._loaded_model_fingerprint(model_dir)
+        self._write_metadata(temp_root, model_root, fingerprint, complete=True)
+        return model_root, artifact_path, fingerprint
+
+    def _write_metadata(self, temp_root: Path, model_root: Path, fingerprint: str, *, complete: bool) -> None:
+        model_dir = model_root / "model"
         metadata = {
-            "schemaVersion": "routefinder-materialization/v1",
-            "materializationMode": "LOCAL_FILE",
+            "schemaVersion": "routefinder-materialization/v2",
+            "materializerVersion": "routefinder-materializer/v1",
+            "materializationMode": "HF_CHECKPOINT_PROMOTION",
+            "sourceRepository": "https://github.com/ai4co/routefinder.git",
+            "sourceRef": "fe0e45b6df118af03c5f42db8b93a351f7629131",
+            "sourceCommit": "fe0e45b6df118af03c5f42db8b93a351f7629131",
+            "sourceDownloadCommand": "python scripts/download_hf.py --models --no-data",
+            "sourceTestCommand": "python test.py --checkpoint checkpoints/100/rf-transformer.ckpt",
+            "sourceCheckpointPath": "checkpoints/100/rf-transformer.ckpt",
+            "sourceCheckpointDigest": "sha256:checkpoint",
+            "materializedAt": "2026-04-18T00:00:00+00:00",
+            "modelArtifactPath": (model_root / "model" / "routefinder-model.json").relative_to(
+                temp_root / "services" / "models").as_posix(),
             "loadedModelFingerprint": fingerprint,
             "fileManifest": routefinder_app._normalized_file_manifest(model_dir),
         }
+        if not complete:
+            metadata["sourceCheckpointDigest"] = ""
         (model_root / "materialization-metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
-        return model_root, artifact_path, fingerprint
 
     def _write_manifest(self, temp_root: Path, *, fingerprint: str, warmup_payload: str | None = None) -> Path:
         artifact_path = temp_root / "services" / "models" / "materialized" / "routefinder" / "model" / "routefinder-model.json"
@@ -185,7 +231,7 @@ class RouteFinderWorkerReadyTest(unittest.TestCase):
             workers:
               - worker_name: ml-routefinder-worker
                 model_name: routefinder-local
-                model_version: 2026.04.17-v1
+                model_version: 2026.04.18-v2
                 artifact_digest: {artifact_digest}
                 rollback_artifact_digest: sha256:rollback
                 runtime_image: local/test
@@ -193,10 +239,15 @@ class RouteFinderWorkerReadyTest(unittest.TestCase):
                 min_supported_java_contract_version: dispatch-v2-java/v1
                 local_model_root: materialized/routefinder
                 local_artifact_path: materialized/routefinder/model/routefinder-model.json
-                materialization_mode: LOCAL_FILE
+                materialization_mode: HF_CHECKPOINT_PROMOTION
                 ready_requires_local_load: true
                 offline_boot_supported: true
                 loaded_model_fingerprint: {fingerprint}
+                source_repository: https://github.com/ai4co/routefinder.git
+                source_ref: fe0e45b6df118af03c5f42db8b93a351f7629131
+                source_checkpoint_path: checkpoints/100/rf-transformer.ckpt
+                source_download_command: python scripts/download_hf.py --models --no-data
+                source_test_command: python test.py --checkpoint checkpoints/100/rf-transformer.ckpt
                 startup_warmup_request:
                   endpoint: /route/refine
                   payload:

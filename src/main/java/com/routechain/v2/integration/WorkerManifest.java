@@ -45,6 +45,16 @@ public record WorkerManifest(
             Boolean offlineBootSupported,
             @JsonProperty("loaded_model_fingerprint")
             String loadedModelFingerprint,
+            @JsonProperty("source_repository")
+            String sourceRepository,
+            @JsonProperty("source_ref")
+            String sourceRef,
+            @JsonProperty("source_checkpoint_path")
+            String sourceCheckpointPath,
+            @JsonProperty("source_download_command")
+            String sourceDownloadCommand,
+            @JsonProperty("source_test_command")
+            String sourceTestCommand,
             @JsonProperty("startup_warmup_request")
             StartupWarmupRequest startupWarmupRequest) {
     }

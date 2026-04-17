@@ -14,6 +14,8 @@ WORKER_NAME = "ml-routefinder-worker"
 ML_CONTRACT_VERSION = "dispatch-v2-ml/v1"
 JAVA_CONTRACT_VERSION = "dispatch-v2-java/v1"
 MATERIALIZATION_METADATA_NAME = "materialization-metadata.json"
+PROMOTED_ARTIFACT_SCHEMA_VERSION = "routefinder-promoted-artifact/v2"
+MATERIALIZATION_METADATA_SCHEMA_VERSION = "routefinder-materialization/v2"
 
 app = FastAPI(title="ml-routefinder-worker")
 
@@ -86,6 +88,54 @@ def _materialization_metadata(local_model_root: Path) -> dict | None:
     if not metadata_path.exists():
         return None
     return json.loads(metadata_path.read_text(encoding="utf-8"))
+
+
+def _has_text(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _validate_materialization_metadata(metadata: dict) -> str:
+    if metadata.get("schemaVersion") != MATERIALIZATION_METADATA_SCHEMA_VERSION:
+        return "materialization-metadata-schema-mismatch"
+    required_fields = (
+        "materializerVersion",
+        "sourceRepository",
+        "sourceRef",
+        "sourceCommit",
+        "sourceDownloadCommand",
+        "sourceTestCommand",
+        "sourceCheckpointPath",
+        "sourceCheckpointDigest",
+        "materializedAt",
+        "modelArtifactPath",
+        "loadedModelFingerprint",
+    )
+    for field in required_fields:
+        if not _has_text(metadata.get(field)):
+            return "materialization-metadata-provenance-missing"
+    if not isinstance(metadata.get("fileManifest"), list) or not metadata.get("fileManifest"):
+        return "materialization-metadata-file-manifest-missing"
+    return ""
+
+
+def _validate_promoted_artifact(artifact: dict) -> str:
+    if artifact.get("schemaVersion") != PROMOTED_ARTIFACT_SCHEMA_VERSION:
+        return "promoted-artifact-schema-mismatch"
+    if artifact.get("compatibilityContractVersion") != ML_CONTRACT_VERSION:
+        return "ml-contract-incompatible"
+    if artifact.get("minSupportedJavaContractVersion") != JAVA_CONTRACT_VERSION:
+        return "java-contract-incompatible"
+    required_fields = (
+        "sourceRepository",
+        "sourceRef",
+        "sourceCommit",
+        "sourceCheckpointPath",
+        "sourceCheckpointDigest",
+    )
+    for field in required_fields:
+        if not _has_text(artifact.get(field)):
+            return "promoted-artifact-provenance-missing"
+    return ""
 
 
 def _route_payload(payload: dict) -> dict:
@@ -275,6 +325,15 @@ def _readiness() -> tuple[bool, str, dict | None, dict | None, dict]:
                 materialization_mode=materialization_mode,
                 loaded_model_fingerprint="",
             )
+        metadata_validation = _validate_materialization_metadata(metadata)
+        if metadata_validation:
+            return False, metadata_validation, manifest_entry, None, _version_payload(
+                manifest_entry,
+                artifact_path=artifact_path,
+                loaded_from_local=False,
+                materialization_mode=materialization_mode,
+                loaded_model_fingerprint="",
+            )
         model_directory = _model_directory(artifact_path)
         if not model_directory.exists():
             return False, "local-model-directory-missing", manifest_entry, None, _version_payload(
@@ -324,6 +383,26 @@ def _readiness() -> tuple[bool, str, dict | None, dict | None, dict]:
         return False, "artifact-load-failed", manifest_entry, None, version_payload
     if artifact is None:
         return False, "artifact-missing", manifest_entry, None, version_payload
+    artifact_validation = _validate_promoted_artifact(artifact)
+    if artifact_validation:
+        return False, artifact_validation, manifest_entry, artifact, version_payload
+    if ready_requires_local_load:
+        if metadata.get("sourceRepository") != artifact.get("sourceRepository"):
+            return False, "materialization-source-repository-mismatch", manifest_entry, artifact, version_payload
+        if metadata.get("sourceRef") != artifact.get("sourceRef"):
+            return False, "materialization-source-ref-mismatch", manifest_entry, artifact, version_payload
+        if metadata.get("sourceCheckpointPath") != artifact.get("sourceCheckpointPath"):
+            return False, "materialization-source-checkpoint-path-mismatch", manifest_entry, artifact, version_payload
+        if metadata.get("sourceCheckpointDigest") != artifact.get("sourceCheckpointDigest"):
+            return False, "materialization-source-checkpoint-digest-mismatch", manifest_entry, artifact, version_payload
+        if metadata.get("modelArtifactPath") != _canonical_path(manifest_entry.get("local_artifact_path")).relative_to(MANIFEST_PATH.parent).as_posix():
+            return False, "materialization-artifact-path-mismatch", manifest_entry, artifact, version_payload
+    if _has_text(manifest_entry.get("source_repository")) and artifact.get("sourceRepository") != manifest_entry.get("source_repository"):
+        return False, "source-repository-mismatch", manifest_entry, artifact, version_payload
+    if _has_text(manifest_entry.get("source_ref")) and artifact.get("sourceRef") != manifest_entry.get("source_ref"):
+        return False, "source-ref-mismatch", manifest_entry, artifact, version_payload
+    if _has_text(manifest_entry.get("source_checkpoint_path")) and artifact.get("sourceCheckpointPath") != manifest_entry.get("source_checkpoint_path"):
+        return False, "source-checkpoint-path-mismatch", manifest_entry, artifact, version_payload
     if manifest_entry.get("artifact_digest") != _artifact_digest(artifact_path):
         return False, "artifact-digest-mismatch", manifest_entry, artifact, version_payload
     if artifact.get("modelVersion") != manifest_entry.get("model_version"):
