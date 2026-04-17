@@ -43,6 +43,7 @@ public final class DispatchEtaContextService {
                             0.0,
                             List.copyOf(degradeReasons)),
                     freshnessMetadata,
+                    List.of(),
                     List.copyOf(degradeReasons));
         }
 
@@ -72,7 +73,7 @@ public final class DispatchEtaContextService {
                 estimate.weatherMultiplier(),
                 "tomtom".equals(estimate.refineSource()),
                 !estimate.degradeReasons().contains("eta-ml-disabled")
-                        && !estimate.degradeReasons().contains("eta-ml-unavailable-or-disabled-path"),
+                        && !estimate.degradeReasons().contains("eta-ml-unavailable"),
                 estimate.etaUncertainty(),
                 estimate.degradeReasons());
         return new DispatchEtaContextStage(
@@ -80,6 +81,7 @@ public final class DispatchEtaContextService {
                 etaContext,
                 etaStageTrace,
                 freshnessMetadata,
+                estimate.mlStageMetadata(),
                 estimate.degradeReasons());
     }
 

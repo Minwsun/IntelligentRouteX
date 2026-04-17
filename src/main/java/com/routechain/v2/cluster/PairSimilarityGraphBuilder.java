@@ -3,6 +3,7 @@ package com.routechain.v2.cluster;
 import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.domain.Order;
 import com.routechain.v2.EtaContext;
+import com.routechain.v2.MlStageMetadata;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -26,6 +27,7 @@ public final class PairSimilarityGraphBuilder {
                                                 EtaLegCache etaLegCache) {
         List<PairEdge> edges = new ArrayList<>();
         List<String> degradeReasons = new ArrayList<>();
+        List<MlStageMetadata> mlStageMetadata = new ArrayList<>();
         List<Order> orders = window.orders();
         int gatedPairCount = 0;
         for (int i = 0; i < orders.size(); i++) {
@@ -37,8 +39,9 @@ public final class PairSimilarityGraphBuilder {
                 if (compatibility.hardGatePassed()) {
                     gatedPairCount++;
                 }
-                if (compatibility.degradeReasons().contains("pair-ml-unavailable-or-disabled-path")) {
-                    degradeReasons.add("pair-ml-unavailable-or-disabled-path");
+                mlStageMetadata.addAll(compatibility.mlStageMetadata());
+                if (compatibility.degradeReasons().contains("pair-ml-unavailable")) {
+                    degradeReasons.add("pair-ml-unavailable");
                 }
                 if (compatibility.hardGatePassed() && compatibility.score() >= properties.getPair().getScoreThreshold()) {
                     edges.add(new PairEdge(left.orderId(), right.orderId(), compatibility.score()));
@@ -56,6 +59,7 @@ public final class PairSimilarityGraphBuilder {
                         sortedEdges),
                 Math.max(0, (orders.size() * (orders.size() - 1)) / 2),
                 gatedPairCount,
+                List.copyOf(mlStageMetadata.stream().distinct().toList()),
                 List.copyOf(degradeReasons.stream().distinct().toList()));
     }
 }

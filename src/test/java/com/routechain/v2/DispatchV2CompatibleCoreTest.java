@@ -51,10 +51,12 @@ class DispatchV2CompatibleCoreTest {
         RouteChainDispatchV2Properties properties = RouteChainDispatchV2Properties.defaults();
         properties.setEnabled(true);
         properties.setMlEnabled(true);
+        properties.getMl().getTabular().setEnabled(true);
+        properties.getMl().getTabular().setBaseUrl("http://127.0.0.1:65530");
         DispatchV2CompatibleCore core = TestDispatchV2Factory.compatibleCore(properties);
         DispatchV2Result result = core.dispatch(TestDispatchV2Factory.requestWithOrdersAndDriver());
         assertFalse(result.fallbackUsed());
-        assertTrue(result.degradeReasons().contains("eta-ml-unavailable-or-disabled-path"));
-        assertTrue(result.degradeReasons().contains("pair-ml-unavailable-or-disabled-path"));
+        assertTrue(result.degradeReasons().contains("eta-ml-unavailable"));
+        assertTrue(result.degradeReasons().contains("pair-ml-unavailable"));
     }
 }

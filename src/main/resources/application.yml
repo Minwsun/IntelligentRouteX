@@ -18,6 +18,12 @@ routechain:
     tomtom-enabled: false
     open-meteo-enabled: true
     tick: 30s
+    ml:
+      tabular:
+        enabled: false
+        base-url: http://127.0.0.1:8091
+        connect-timeout: 75ms
+        read-timeout: 150ms
     buffer:
       hold-window: 45s
     cluster:

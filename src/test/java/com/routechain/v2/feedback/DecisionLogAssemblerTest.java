@@ -23,6 +23,7 @@ class DecisionLogAssemblerTest {
         assertEquals(result.routeProposalSummary(), record.routeProposalSummary());
         assertEquals(result.globalSelectorSummary(), record.globalSelectorSummary());
         assertEquals(result.dispatchExecutionSummary(), record.dispatchExecutionSummary());
+        assertEquals(result.mlStageMetadata(), record.mlStageMetadata());
         assertEquals(
                 result.globalSelectionResult().selectedProposals().stream().map(selectedProposal -> selectedProposal.proposalId()).toList(),
                 record.selectedProposalIds());

@@ -1,16 +1,32 @@
 package com.routechain.v2.route;
 
+import com.routechain.config.RouteChainDispatchV2Properties;
+import com.routechain.v2.integration.MlStageMetadataAccumulator;
+import com.routechain.v2.integration.NoOpTabularScoringClient;
+import com.routechain.v2.integration.TabularScoreResult;
+import com.routechain.v2.integration.TabularScoringClient;
 import com.routechain.v2.bundle.BundleCandidate;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public final class RouteValueScorer {
+    private final RouteChainDispatchV2Properties properties;
+    private final TabularScoringClient tabularScoringClient;
 
-    public RouteProposalCandidate score(RouteProposalCandidate candidate, DispatchCandidateContext context) {
+    public RouteValueScorer(RouteChainDispatchV2Properties properties, TabularScoringClient tabularScoringClient) {
+        this.properties = properties;
+        this.tabularScoringClient = tabularScoringClient;
+    }
+
+    public RouteValueScorer() {
+        this(RouteChainDispatchV2Properties.defaults(), new NoOpTabularScoringClient());
+    }
+
+    public RouteValueScoringOutcome score(String traceId, RouteProposalCandidate candidate, DispatchCandidateContext context) {
         RouteProposal proposal = candidate.proposal();
         if (!proposal.feasible()) {
-            return new RouteProposalCandidate(
+            return new RouteValueScoringOutcome(new RouteProposalCandidate(
                     new RouteProposal(
                             proposal.schemaVersion(),
                             proposal.proposalId(),
@@ -28,7 +44,9 @@ public final class RouteValueScorer {
                     candidate.tupleKey(),
                     candidate.pickupAnchor(),
                     candidate.driverCandidate(),
-                    candidate.trace());
+                    candidate.trace()),
+                    List.of(),
+                    List.of());
         }
         BundleCandidate bundle = context.bundle(proposal.bundleId());
         double driverContribution = 0.32 * candidate.driverCandidate().rerankScore();
@@ -60,6 +78,37 @@ public final class RouteValueScorer {
         if (fallbackPenalty > 0.0) {
             reasons.add("fallback-simple-penalty");
         }
+        double adjustedScore = score;
+        List<String> degradeReasons = new ArrayList<>(proposal.degradeReasons());
+        MlStageMetadataAccumulator mlStageMetadataAccumulator = new MlStageMetadataAccumulator("route-proposal-pool");
+        if (properties.isMlEnabled() && properties.getMl().getTabular().isEnabled()) {
+            TabularScoreResult scoreResult = tabularScoringClient.scoreRouteValue(
+                    new RouteValueFeatureVector(
+                            "route-value-feature-vector/v1",
+                            traceId,
+                            proposal.proposalId(),
+                            proposal.bundleId(),
+                            proposal.anchorOrderId(),
+                            proposal.driverId(),
+                            proposal.source().name(),
+                            proposal.projectedPickupEtaMinutes(),
+                            proposal.projectedCompletionEtaMinutes(),
+                            score,
+                            candidate.driverCandidate().rerankScore(),
+                            bundle.score(),
+                            candidate.pickupAnchor().score(),
+                            context.averagePairSupport(bundle.orderIds()),
+                            urgencyLift,
+                            boundaryPenalty,
+                            fallbackPenalty),
+                    properties.getMl().getTabular().getReadTimeout().toMillis());
+            mlStageMetadataAccumulator.accept(scoreResult);
+            if (scoreResult.applied()) {
+                adjustedScore = Math.max(0.0, Math.min(1.0, score + scoreResult.value()));
+            } else {
+                degradeReasons.add("route-value-ml-unavailable");
+            }
+        }
         RouteProposal scored = new RouteProposal(
                 proposal.schemaVersion(),
                 proposal.proposalId(),
@@ -70,11 +119,11 @@ public final class RouteValueScorer {
                 proposal.stopOrder(),
                 proposal.projectedPickupEtaMinutes(),
                 proposal.projectedCompletionEtaMinutes(),
-                score,
+                adjustedScore,
                 true,
                 List.copyOf(reasons),
-                proposal.degradeReasons());
-        return new RouteProposalCandidate(
+                List.copyOf(degradeReasons.stream().distinct().toList()));
+        return new RouteValueScoringOutcome(new RouteProposalCandidate(
                 scored,
                 candidate.tupleKey(),
                 candidate.pickupAnchor(),
@@ -92,7 +141,13 @@ public final class RouteValueScorer {
                         urgencyLift,
                         boundaryPenalty,
                         fallbackPenalty,
-                        candidate.trace().validationReasons()));
+                        candidate.trace().validationReasons())),
+                List.copyOf(degradeReasons.stream().distinct().toList()),
+                mlStageMetadataAccumulator.build().map(List::of).orElse(List.of()));
+    }
+
+    public RouteProposalCandidate score(RouteProposalCandidate candidate, DispatchCandidateContext context) {
+        return score("route-value", candidate, context).candidate();
     }
 
     private double etaScore(double etaMinutes, double ceilingMinutes) {

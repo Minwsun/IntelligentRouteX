@@ -106,6 +106,7 @@ final class SelectorTestFixtures {
                         proposals.size(),
                         new EnumMap<>(RouteProposalSource.class),
                         List.of()),
+                List.of(),
                 List.of());
     }
 

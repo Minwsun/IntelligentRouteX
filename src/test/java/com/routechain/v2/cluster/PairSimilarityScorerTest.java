@@ -64,6 +64,7 @@ class PairSimilarityScorerTest {
     void mlEnabledWithoutWorkerKeepsDeterministicScoreAndAddsDegradeReason() {
         RouteChainDispatchV2Properties properties = RouteChainDispatchV2Properties.defaults();
         properties.setMlEnabled(true);
+        properties.getMl().getTabular().setEnabled(true);
         PairSimilarityScorer scorer = new PairSimilarityScorer(
                 properties,
                 new PairHardGateEvaluator(properties),
@@ -84,6 +85,6 @@ class PairSimilarityScorerTest {
 
         assertTrue(compatibility.hardGatePassed());
         assertTrue(compatibility.score() > 0.0);
-        assertTrue(compatibility.degradeReasons().contains("pair-ml-unavailable-or-disabled-path"));
+        assertTrue(compatibility.degradeReasons().contains("pair-ml-unavailable"));
     }
 }

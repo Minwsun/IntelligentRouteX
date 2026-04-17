@@ -3,6 +3,7 @@ package com.routechain.v2.route;
 import com.routechain.domain.WeatherProfile;
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
+import com.routechain.v2.MlStageMetadata;
 import com.routechain.v2.bundle.DispatchBundleStage;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.cluster.EtaLegCache;
@@ -53,19 +54,28 @@ public final class DispatchRouteProposalService {
         List<RouteProposalCandidate> validated = generated.stream()
                 .map(candidate -> routeProposalValidator.validate(candidate, context))
                 .toList();
-        List<RouteProposalCandidate> scored = validated.stream()
-                .map(candidate -> routeValueScorer.score(candidate, context))
+        List<RouteValueScoringOutcome> scoringOutcomes = validated.stream()
+                .map(candidate -> routeValueScorer.score(request.traceId(), candidate, context))
+                .toList();
+        List<RouteProposalCandidate> scored = scoringOutcomes.stream()
+                .map(RouteValueScoringOutcome::candidate)
                 .toList();
         List<RouteProposalCandidate> retained = routeProposalPruner.prune(scored);
         List<RouteProposal> routeProposals = retained.stream().map(RouteProposalCandidate::proposal).toList();
-        List<String> degradeReasons = scored.stream()
-                .flatMap(candidate -> candidate.proposal().degradeReasons().stream())
+        List<String> degradeReasons = java.util.stream.Stream.concat(
+                        scored.stream().flatMap(candidate -> candidate.proposal().degradeReasons().stream()),
+                        scoringOutcomes.stream().flatMap(outcome -> outcome.degradeReasons().stream()))
+                .distinct()
+                .toList();
+        List<MlStageMetadata> mlStageMetadata = scoringOutcomes.stream()
+                .flatMap(outcome -> outcome.mlStageMetadata().stream())
                 .distinct()
                 .toList();
         return new DispatchRouteProposalStage(
                 "dispatch-route-proposal-stage/v1",
                 routeProposals,
                 summarize(routeCandidateStage.driverCandidates().size(), generated, retained, degradeReasons),
+                mlStageMetadata,
                 degradeReasons);
     }
 

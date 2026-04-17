@@ -23,6 +23,7 @@ public final class DecisionLogAssembler {
                 result.scenarioEvaluationSummary(),
                 result.globalSelectorSummary(),
                 result.dispatchExecutionSummary(),
+                result.mlStageMetadata(),
                 result.globalSelectionResult().selectedProposals().stream()
                         .map(selectedProposal -> selectedProposal.proposalId())
                         .toList(),

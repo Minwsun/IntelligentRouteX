@@ -34,6 +34,7 @@ import com.routechain.v2.context.WeatherContextService;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
+import com.routechain.v2.integration.TabularScoringClient;
 import com.routechain.v2.scenario.DispatchScenarioService;
 import com.routechain.v2.scenario.DispatchScenarioStage;
 import com.routechain.v2.scenario.RobustUtilityAggregator;
@@ -144,19 +145,24 @@ public final class RouteTestFixtures {
     }
 
     public static DispatchRouteCandidateService routeService(RouteChainDispatchV2Properties properties) {
+        return routeService(properties, new NoOpTabularScoringClient());
+    }
+
+    public static DispatchRouteCandidateService routeService(RouteChainDispatchV2Properties properties,
+                                                             TabularScoringClient tabularScoringClient) {
         EtaService etaService = new EtaService(
                 properties,
                 new BaselineTravelTimeEstimator(),
                 new TrafficProfileService(properties),
                 new WeatherContextService(properties, new NoOpOpenMeteoClient()),
                 new NoOpTomTomTrafficRefineClient(),
-                new NoOpTabularScoringClient(),
+                tabularScoringClient,
                 new EtaFeatureBuilder(),
                 new EtaUncertaintyEstimator());
         EtaLegCacheFactory etaLegCacheFactory = new EtaLegCacheFactory(properties, etaService);
         return new DispatchRouteCandidateService(
                 new PickupAnchorSelector(properties),
-                new CandidateDriverShortlister(properties, new DriverRouteFeatureBuilder()),
+                new CandidateDriverShortlister(properties, new DriverRouteFeatureBuilder(), tabularScoringClient),
                 new DriverReranker(),
                 etaLegCacheFactory);
     }
@@ -168,20 +174,25 @@ public final class RouteTestFixtures {
     }
 
     public static DispatchRouteProposalService routeProposalService(RouteChainDispatchV2Properties properties) {
+        return routeProposalService(properties, new NoOpTabularScoringClient());
+    }
+
+    public static DispatchRouteProposalService routeProposalService(RouteChainDispatchV2Properties properties,
+                                                                    TabularScoringClient tabularScoringClient) {
         EtaService etaService = new EtaService(
                 properties,
                 new BaselineTravelTimeEstimator(),
                 new TrafficProfileService(properties),
                 new WeatherContextService(properties, new NoOpOpenMeteoClient()),
                 new NoOpTomTomTrafficRefineClient(),
-                new NoOpTabularScoringClient(),
+                tabularScoringClient,
                 new EtaFeatureBuilder(),
                 new EtaUncertaintyEstimator());
         EtaLegCacheFactory etaLegCacheFactory = new EtaLegCacheFactory(properties, etaService);
         return new DispatchRouteProposalService(
                 new RouteProposalEngine(),
                 new RouteProposalValidator(),
-                new RouteValueScorer(),
+                new RouteValueScorer(properties, tabularScoringClient),
                 new RouteProposalPruner(properties),
                 etaLegCacheFactory);
     }

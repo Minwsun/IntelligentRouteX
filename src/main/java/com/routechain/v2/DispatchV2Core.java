@@ -112,6 +112,14 @@ public final class DispatchV2Core {
                                 executorStage.degradeReasons().stream()))
                 .distinct()
                 .toList();
+        java.util.List<MlStageMetadata> mlStageMetadata = java.util.stream.Stream.of(
+                        etaStage.mlStageMetadata().stream(),
+                        pairClusterStage.mlStageMetadata().stream(),
+                        routeCandidateStage.mlStageMetadata().stream(),
+                        routeProposalStage.mlStageMetadata().stream())
+                .flatMap(stream -> stream)
+                .distinct()
+                .toList();
         return new DispatchV2Result(
                 "dispatch-v2-result/v1",
                 request.traceId(),
@@ -138,6 +146,7 @@ public final class DispatchV2Core {
                 scenarioStage.scenarioEvaluations(),
                 scenarioStage.robustUtilities(),
                 scenarioStage.scenarioEvaluationSummary(),
+                mlStageMetadata,
                 selectorStage.selectorCandidates(),
                 selectorStage.conflictGraph(),
                 selectorStage.globalSelectionResult(),

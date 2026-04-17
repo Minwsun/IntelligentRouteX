@@ -43,6 +43,7 @@ public final class DispatchPairClusterService {
                 graph,
                 microClusters,
                 microClusterSummary,
+                graphBuildResult.mlStageMetadata(),
                 List.copyOf(degradeReasons));
     }
 

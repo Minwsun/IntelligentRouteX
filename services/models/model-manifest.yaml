@@ -40,9 +40,9 @@ workers:
         schemaVersion: forecast-request/v1
         traceId: warmup-forecast
   - worker_name: ml-tabular-worker
-    model_name: tabpfn
-    model_version: pinned-placeholder
-    artifact_digest: sha256:pending
+    model_name: tabular-linear
+    model_version: 2026.04.17-v1
+    artifact_digest: sha256:fbd13af3d91b8077f499178632c68b1fd1c0be38a74dfb7ff80faf9a59191ac1
     rollback_artifact_digest: sha256:pending-rollback
     runtime_image: ghcr.io/minwsun/intelligentroutex/ml-tabular-worker:bootstrap
     compatibility_contract_version: dispatch-v2-ml/v1
@@ -52,4 +52,9 @@ workers:
       payload:
         schemaVersion: score-request/v1
         traceId: warmup-tabular
-
+        payload:
+          baselineMinutes: 5.0
+          trafficMultiplier: 1.0
+          weatherMultiplier: 1.0
+          distanceKm: 2.0
+          hourOfDay: 12

@@ -2,6 +2,7 @@ package com.routechain.v2.context;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.v2.DispatchV2Request;
+import com.routechain.v2.integration.MlStageMetadataAccumulator;
 import com.routechain.v2.integration.TabularScoreResult;
 import com.routechain.v2.integration.TabularScoringClient;
 import com.routechain.v2.integration.TomTomTrafficRefineClient;
@@ -93,15 +94,19 @@ public final class EtaService {
                 distanceKm);
 
         boolean mlResidualApplied = false;
+        MlStageMetadataAccumulator mlStageMetadataAccumulator = new MlStageMetadataAccumulator("eta/context");
         if (!properties.isMlEnabled()) {
+            degradeReasons.add("eta-ml-disabled");
+        } else if (!properties.getMl().getTabular().isEnabled()) {
             degradeReasons.add("eta-ml-disabled");
         } else {
             TabularScoreResult scoreResult = tabularScoringClient.scoreEtaResidual(featureVector, request.timeoutBudgetMs());
+            mlStageMetadataAccumulator.accept(scoreResult);
             if (scoreResult.applied()) {
                 adjustedMinutes += scoreResult.value();
                 mlResidualApplied = true;
             } else {
-                degradeReasons.add("eta-ml-unavailable-or-disabled-path");
+                degradeReasons.add("eta-ml-unavailable");
             }
         }
 
@@ -125,6 +130,7 @@ public final class EtaService {
                 refineSource,
                 traffic.sourceAgeMs(),
                 weather.sourceAgeMs(),
+                mlStageMetadataAccumulator.build().map(List::of).orElse(List.of()),
                 List.copyOf(degradeReasons));
     }
 
@@ -137,4 +143,3 @@ public final class EtaService {
                 Math.round(request.from().longitude() + request.to().longitude()));
     }
 }
-

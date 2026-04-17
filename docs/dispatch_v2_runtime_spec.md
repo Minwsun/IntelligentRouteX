@@ -20,6 +20,14 @@ For the current global selector slice:
 - the selector objective remains `sum(selectionScore)` across all solver modes
 - hard conflicts remain limited to overlapping `orderIds`, overlapping `driverId`, and same-`bundleId` alternatives
 
+For the current tabular ML slice:
+
+- no new decision stage is introduced
+- tabular ML augments scoring only in `eta/context`, `pair-graph`, `driver-shortlist/rerank`, and `route-proposal-pool`
+- deterministic scoring remains the fallback at each call-site
+- `global-selector` objective and selector semantics remain unchanged
+- `DispatchV2Result.mlStageMetadata` records compact per-stage ML metadata for attempted tabular scoring
+
 For the current hardening slice:
 
 - every enabled dispatch writes a decision log record through the configured feedback store
@@ -58,6 +66,10 @@ For executor summary semantics in the current slice:
 - `selector.fallbackPenalty=0.03`
 - `selector.ortools.timeout=150ms`
 - `selector.ortools.objectiveScaleFactor=1000`
+- `ml.tabular.enabled=false`
+- `ml.tabular.baseUrl=http://127.0.0.1:8091`
+- `ml.tabular.connectTimeout=75ms`
+- `ml.tabular.readTimeout=150ms`
 - `feedback.decisionLogEnabled=true`
 - `feedback.snapshotEnabled=true`
 - `feedback.replayEnabled=true`
@@ -81,6 +93,10 @@ For executor summary semantics in the current slice:
 - `routechain.dispatch-v2.selector.fallback-penalty`
 - `routechain.dispatch-v2.selector.ortools.timeout`
 - `routechain.dispatch-v2.selector.ortools.objective-scale-factor`
+- `routechain.dispatch-v2.ml.tabular.enabled`
+- `routechain.dispatch-v2.ml.tabular.base-url`
+- `routechain.dispatch-v2.ml.tabular.connect-timeout`
+- `routechain.dispatch-v2.ml.tabular.read-timeout`
 - `routechain.dispatch-v2.feedback.decision-log-enabled`
 - `routechain.dispatch-v2.feedback.snapshot-enabled`
 - `routechain.dispatch-v2.feedback.replay-enabled`

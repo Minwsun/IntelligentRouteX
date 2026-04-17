@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "tabular-model-artifact/v1",
+  "modelName": "tabular-linear",
+  "modelVersion": "2026.04.17-v1",
+  "compatibilityContractVersion": "dispatch-v2-ml/v1",
+  "minSupportedJavaContractVersion": "dispatch-v2-java/v1",
+  "stages": {
+    "eta-residual": {
+      "bias": -0.04,
+      "outputScale": 2.0,
+      "uncertaintyBias": 0.12,
+      "weights": {
+        "baselineMinutes": 0.08,
+        "trafficMultiplier": 0.30,
+        "weatherMultiplier": 0.24,
+        "distanceKm": 0.03,
+        "hourOfDay": 0.002
+      }
+    },
+    "pair": {
+      "bias": 0.01,
+      "outputScale": 0.08,
+      "uncertaintyBias": 0.10,
+      "weights": {
+        "pickupDistanceKm": -0.18,
+        "dropDistanceKm": -0.03,
+        "readyGapMinutes": -0.02,
+        "dropAngleDiffDegrees": -0.004,
+        "mergeEtaRatio": -0.22,
+        "landingCompatibility": 0.32
+      }
+    },
+    "driver-fit": {
+      "bias": 0.03,
+      "outputScale": 0.10,
+      "uncertaintyBias": 0.10,
+      "weights": {
+        "pickupEtaMinutes": -0.05,
+        "etaUncertainty": -0.10,
+        "bundleScore": 0.18,
+        "anchorScore": 0.16,
+        "bundleSupportScore": 0.14,
+        "corridorAffinity": 0.12,
+        "urgencyLift": 0.15,
+        "boundaryPenalty": -0.18,
+        "driverFitScore": 0.18
+      }
+    },
+    "route-value": {
+      "bias": 0.02,
+      "outputScale": 0.09,
+      "uncertaintyBias": 0.11,
+      "weights": {
+        "projectedPickupEtaMinutes": -0.03,
+        "projectedCompletionEtaMinutes": -0.01,
+        "deterministicRouteValue": 0.25,
+        "rerankScore": 0.18,
+        "bundleScore": 0.14,
+        "anchorScore": 0.11,
+        "averagePairSupport": 0.12,
+        "urgencyLift": 0.10,
+        "boundaryPenalty": -0.10,
+        "fallbackPenalty": -0.14
+      }
+    }
+  }
+}

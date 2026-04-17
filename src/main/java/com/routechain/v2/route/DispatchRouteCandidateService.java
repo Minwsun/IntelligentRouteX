@@ -3,6 +3,7 @@ package com.routechain.v2.route;
 import com.routechain.domain.WeatherProfile;
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
+import com.routechain.v2.MlStageMetadata;
 import com.routechain.v2.bundle.DispatchBundleStage;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.cluster.EtaLegCache;
@@ -42,19 +43,26 @@ public final class DispatchRouteCandidateService {
                 request.decisionTime(),
                 request.weatherProfile() == null ? WeatherProfile.CLEAR : request.weatherProfile());
         List<DriverCandidate> driverCandidates = new ArrayList<>();
+        List<MlStageMetadata> mlStageMetadata = new ArrayList<>();
+        List<String> stageDegradeReasons = new ArrayList<>();
         int rawShortlistedCount = 0;
         for (PickupAnchor pickupAnchor : pickupAnchors) {
-            List<DriverRouteFeatures> shortlisted = candidateDriverShortlister.shortlist(
+            DriverShortlistResult shortlistResult = candidateDriverShortlister.shortlist(
+                    request.traceId(),
                     context.availableDrivers(),
                     pickupAnchor,
                     context,
                     etaContext,
                     etaLegCache);
+            List<DriverRouteFeatures> shortlisted = shortlistResult.shortlistedFeatures();
             rawShortlistedCount += shortlisted.size();
+            stageDegradeReasons.addAll(shortlistResult.degradeReasons());
+            mlStageMetadata.addAll(shortlistResult.mlStageMetadata());
             driverCandidates.addAll(driverReranker.rerank(pickupAnchor, shortlisted));
         }
-        List<String> degradeReasons = driverCandidates.stream()
-                .flatMap(candidate -> candidate.degradeReasons().stream())
+        List<String> degradeReasons = java.util.stream.Stream.concat(
+                        driverCandidates.stream().flatMap(candidate -> candidate.degradeReasons().stream()),
+                        stageDegradeReasons.stream())
                 .distinct()
                 .toList();
         return new DispatchRouteCandidateStage(
@@ -63,6 +71,7 @@ public final class DispatchRouteCandidateService {
                 summarizeAnchors(bundleStage.bundleCandidates().size(), pickupAnchors, degradeReasons),
                 List.copyOf(driverCandidates),
                 summarizeDrivers(bundleStage.bundleCandidates().size(), pickupAnchors.size(), rawShortlistedCount, driverCandidates.size(), degradeReasons),
+                List.copyOf(mlStageMetadata.stream().distinct().toList()),
                 degradeReasons);
     }
 

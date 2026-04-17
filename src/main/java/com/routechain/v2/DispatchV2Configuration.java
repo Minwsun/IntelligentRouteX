@@ -74,6 +74,7 @@ import com.routechain.v2.selector.SelectorSolver;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
+import com.routechain.v2.integration.HttpTabularScoringClient;
 import com.routechain.v2.integration.OpenMeteoClient;
 import com.routechain.v2.integration.TabularScoringClient;
 import com.routechain.v2.integration.TomTomTrafficRefineClient;
@@ -109,8 +110,19 @@ public class DispatchV2Configuration {
     }
 
     @Bean
-    TabularScoringClient tabularScoringClient() {
-        return new NoOpTabularScoringClient();
+    TabularScoringClient tabularScoringClient(RouteChainDispatchV2Properties properties) {
+        if (!properties.isMlEnabled() || !properties.getMl().getTabular().isEnabled()) {
+            return new NoOpTabularScoringClient();
+        }
+        HttpTabularScoringClient client = new HttpTabularScoringClient(
+                properties.getMl().getTabular().getBaseUrl(),
+                properties.getMl().getTabular().getConnectTimeout(),
+                properties.getMl().getTabular().getReadTimeout(),
+                java.nio.file.Path.of("services", "models", "model-manifest.yaml"));
+        if (properties.isSidecarRequired() && !client.readyState().ready()) {
+            throw new IllegalStateException("Tabular worker is required but not ready: " + client.readyState().reason());
+        }
+        return client;
     }
 
     @Bean
@@ -268,8 +280,9 @@ public class DispatchV2Configuration {
 
     @Bean
     CandidateDriverShortlister candidateDriverShortlister(RouteChainDispatchV2Properties properties,
-                                                          DriverRouteFeatureBuilder driverRouteFeatureBuilder) {
-        return new CandidateDriverShortlister(properties, driverRouteFeatureBuilder);
+                                                          DriverRouteFeatureBuilder driverRouteFeatureBuilder,
+                                                          TabularScoringClient tabularScoringClient) {
+        return new CandidateDriverShortlister(properties, driverRouteFeatureBuilder, tabularScoringClient);
     }
 
     @Bean
@@ -300,8 +313,9 @@ public class DispatchV2Configuration {
     }
 
     @Bean
-    RouteValueScorer routeValueScorer() {
-        return new RouteValueScorer();
+    RouteValueScorer routeValueScorer(RouteChainDispatchV2Properties properties,
+                                      TabularScoringClient tabularScoringClient) {
+        return new RouteValueScorer(properties, tabularScoringClient);
     }
 
     @Bean

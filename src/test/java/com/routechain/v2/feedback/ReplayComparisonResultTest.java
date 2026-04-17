@@ -46,6 +46,7 @@ class ReplayComparisonResultTest {
                 result.scenarioEvaluationSummary(),
                 result.globalSelectorSummary(),
                 result.dispatchExecutionSummary(),
+                result.mlStageMetadata(),
                 List.of("other-proposal"),
                 List.of("other-assignment"));
 

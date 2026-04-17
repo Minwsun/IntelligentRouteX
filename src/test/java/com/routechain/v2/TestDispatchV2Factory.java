@@ -70,6 +70,7 @@ import com.routechain.v2.cluster.PairSimilarityScorer;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
+import com.routechain.v2.integration.TabularScoringClient;
 
 import java.time.Instant;
 import java.util.List;
@@ -88,7 +89,15 @@ public final class TestDispatchV2Factory {
         return harness(properties).core();
     }
 
+    public static DispatchV2Core core(RouteChainDispatchV2Properties properties, TabularScoringClient tabularScoringClient) {
+        return harness(properties, tabularScoringClient).core();
+    }
+
     public static TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties) {
+        return harness(properties, new NoOpTabularScoringClient());
+    }
+
+    public static TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties, TabularScoringClient tabularScoringClient) {
         DispatchV2Configuration configuration = new DispatchV2Configuration();
         BaselineTravelTimeEstimator baselineTravelTimeEstimator = configuration.baselineTravelTimeEstimator();
         TrafficProfileService trafficProfileService = configuration.trafficProfileService(properties);
@@ -101,7 +110,7 @@ public final class TestDispatchV2Factory {
                 trafficProfileService,
                 weatherContextService,
                 new NoOpTomTomTrafficRefineClient(),
-                new NoOpTabularScoringClient(),
+                tabularScoringClient,
                 etaFeatureBuilder,
                 etaUncertaintyEstimator);
         DispatchEtaContextService dispatchEtaContextService = configuration.dispatchEtaContextService(properties, etaService);
@@ -111,7 +120,7 @@ public final class TestDispatchV2Factory {
         PairSimilarityScorer pairSimilarityScorer = configuration.pairSimilarityScorer(
                 properties,
                 pairHardGateEvaluator,
-                new NoOpTabularScoringClient());
+                tabularScoringClient);
         EtaLegCacheFactory etaLegCacheFactory = configuration.etaLegCacheFactory(properties, etaService);
         PairSimilarityGraphBuilder pairSimilarityGraphBuilder = configuration.pairSimilarityGraphBuilder(
                 properties,
@@ -142,7 +151,7 @@ public final class TestDispatchV2Factory {
                 bundleDominancePruner);
         PickupAnchorSelector pickupAnchorSelector = configuration.pickupAnchorSelector(properties);
         DriverRouteFeatureBuilder driverRouteFeatureBuilder = configuration.driverRouteFeatureBuilder();
-        CandidateDriverShortlister candidateDriverShortlister = configuration.candidateDriverShortlister(properties, driverRouteFeatureBuilder);
+        CandidateDriverShortlister candidateDriverShortlister = configuration.candidateDriverShortlister(properties, driverRouteFeatureBuilder, tabularScoringClient);
         DriverReranker driverReranker = configuration.driverReranker();
         DispatchRouteCandidateService dispatchRouteCandidateService = configuration.dispatchRouteCandidateService(
                 pickupAnchorSelector,
@@ -151,7 +160,7 @@ public final class TestDispatchV2Factory {
                 etaLegCacheFactory);
         RouteProposalEngine routeProposalEngine = configuration.routeProposalEngine();
         RouteProposalValidator routeProposalValidator = configuration.routeProposalValidator();
-        RouteValueScorer routeValueScorer = configuration.routeValueScorer();
+        RouteValueScorer routeValueScorer = configuration.routeValueScorer(properties, tabularScoringClient);
         RouteProposalPruner routeProposalPruner = configuration.routeProposalPruner(properties);
         DispatchRouteProposalService dispatchRouteProposalService = configuration.dispatchRouteProposalService(
                 routeProposalEngine,

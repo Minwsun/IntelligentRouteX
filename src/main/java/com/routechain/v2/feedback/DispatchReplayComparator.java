@@ -53,6 +53,9 @@ public final class DispatchReplayComparator {
                 && expectedExecutedAssignmentCount != replayResult.dispatchExecutionSummary().executedAssignmentCount()) {
             mismatchReasons.add("executed-assignment-count-mismatch");
         }
+        if (referenceDecisionLog != null) {
+            ReplayMlMetadataComparator.compare(referenceDecisionLog.mlStageMetadata(), replayResult.mlStageMetadata(), mismatchReasons);
+        }
 
         return new ReplayComparisonResult(
                 "replay-comparison-result/v1",

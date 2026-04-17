@@ -1,6 +1,7 @@
 package com.routechain.v2.cluster;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
+import com.routechain.v2.integration.MlStageMetadataAccumulator;
 import com.routechain.v2.integration.TabularScoreResult;
 import com.routechain.v2.integration.TabularScoringClient;
 
@@ -30,16 +31,19 @@ public final class PairSimilarityScorer {
                     features.rightOrderId(),
                     0.0,
                     false,
+                    List.of(),
                     List.copyOf(degradeReasons));
         }
 
         double score = deterministicScore(features);
-        if (properties.isMlEnabled()) {
+        MlStageMetadataAccumulator mlStageMetadataAccumulator = new MlStageMetadataAccumulator("pair-graph");
+        if (properties.isMlEnabled() && properties.getMl().getTabular().isEnabled()) {
             TabularScoreResult scoreResult = tabularScoringClient.scorePair(features, properties.getPair().getMlTimeout().toMillis());
+            mlStageMetadataAccumulator.accept(scoreResult);
             if (scoreResult.applied()) {
                 score = Math.max(0.0, Math.min(1.0, score + scoreResult.value()));
             } else {
-                degradeReasons.add("pair-ml-unavailable-or-disabled-path");
+                degradeReasons.add("pair-ml-unavailable");
             }
         }
 
@@ -49,6 +53,7 @@ public final class PairSimilarityScorer {
                 features.rightOrderId(),
                 score,
                 true,
+                mlStageMetadataAccumulator.build().map(List::of).orElse(List.of()),
                 List.copyOf(degradeReasons));
     }
 
@@ -67,4 +72,3 @@ public final class PairSimilarityScorer {
                         + sameCorridorBonus));
     }
 }
-

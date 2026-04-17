@@ -46,9 +46,10 @@ class EtaServiceTest {
     void mlEnabledWithoutWorkerStillDispatchesWithDegradeReason() {
         RouteChainDispatchV2Properties properties = RouteChainDispatchV2Properties.defaults();
         properties.setMlEnabled(true);
+        properties.getMl().getTabular().setEnabled(true);
         EtaService service = buildService(properties);
         EtaEstimate estimate = service.estimate(request(WeatherProfile.CLEAR));
-        assertTrue(estimate.degradeReasons().contains("eta-ml-unavailable-or-disabled-path"));
+        assertTrue(estimate.degradeReasons().contains("eta-ml-unavailable"));
         assertFalse(estimate.degradeReasons().contains("eta-ml-disabled"));
     }
 
@@ -80,4 +81,3 @@ class EtaServiceTest {
                 150L);
     }
 }
-

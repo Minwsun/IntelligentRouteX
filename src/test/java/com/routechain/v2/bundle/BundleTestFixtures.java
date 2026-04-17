@@ -102,6 +102,7 @@ final class BundleTestFixtures {
                 graph(),
                 microClusters(),
                 new MicroClusterSummary("micro-cluster-summary/v1", 2, 2, 1, List.of()),
+                List.of(),
                 List.of());
     }
 
