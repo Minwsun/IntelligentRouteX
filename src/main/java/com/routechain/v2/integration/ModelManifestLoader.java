@@ -13,9 +13,9 @@ public final class ModelManifestLoader {
         this.objectMapper = new ObjectMapper(new YAMLFactory()).findAndRegisterModules();
     }
 
-    public TabularWorkerManifest load(Path manifestPath) {
+    public WorkerManifest load(Path manifestPath) {
         try {
-            return objectMapper.readValue(manifestPath.toFile(), TabularWorkerManifest.class);
+            return objectMapper.readValue(manifestPath.toFile(), WorkerManifest.class);
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to load model manifest from " + manifestPath, exception);
         }

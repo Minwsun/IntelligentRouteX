@@ -32,8 +32,10 @@ import com.routechain.v2.context.EtaUncertaintyEstimator;
 import com.routechain.v2.context.TrafficProfileService;
 import com.routechain.v2.context.WeatherContextService;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
+import com.routechain.v2.integration.NoOpRouteFinderClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
+import com.routechain.v2.integration.RouteFinderClient;
 import com.routechain.v2.integration.TabularScoringClient;
 import com.routechain.v2.scenario.DispatchScenarioService;
 import com.routechain.v2.scenario.DispatchScenarioStage;
@@ -174,11 +176,17 @@ public final class RouteTestFixtures {
     }
 
     public static DispatchRouteProposalService routeProposalService(RouteChainDispatchV2Properties properties) {
-        return routeProposalService(properties, new NoOpTabularScoringClient());
+        return routeProposalService(properties, new NoOpTabularScoringClient(), new NoOpRouteFinderClient());
     }
 
     public static DispatchRouteProposalService routeProposalService(RouteChainDispatchV2Properties properties,
                                                                     TabularScoringClient tabularScoringClient) {
+        return routeProposalService(properties, tabularScoringClient, new NoOpRouteFinderClient());
+    }
+
+    public static DispatchRouteProposalService routeProposalService(RouteChainDispatchV2Properties properties,
+                                                                    TabularScoringClient tabularScoringClient,
+                                                                    RouteFinderClient routeFinderClient) {
         EtaService etaService = new EtaService(
                 properties,
                 new BaselineTravelTimeEstimator(),
@@ -190,11 +198,13 @@ public final class RouteTestFixtures {
                 new EtaUncertaintyEstimator());
         EtaLegCacheFactory etaLegCacheFactory = new EtaLegCacheFactory(properties, etaService);
         return new DispatchRouteProposalService(
+                properties,
                 new RouteProposalEngine(),
                 new RouteProposalValidator(),
                 new RouteValueScorer(properties, tabularScoringClient),
                 new RouteProposalPruner(properties),
-                etaLegCacheFactory);
+                etaLegCacheFactory,
+                routeFinderClient);
     }
 
     public static DispatchRouteProposalStage routeProposalStage(RouteChainDispatchV2Properties properties) {

@@ -3,19 +3,20 @@ package com.routechain.v2.integration;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
+import java.util.Map;
 
-public record TabularWorkerManifest(
+public record WorkerManifest(
         String schemaVersion,
-        List<TabularWorkerManifestEntry> workers) {
+        List<WorkerManifestEntry> workers) {
 
-    public TabularWorkerManifestEntry worker(String workerName) {
+    public WorkerManifestEntry worker(String workerName) {
         return workers.stream()
                 .filter(entry -> entry.workerName().equals(workerName))
                 .findFirst()
                 .orElse(null);
     }
 
-    public record TabularWorkerManifestEntry(
+    public record WorkerManifestEntry(
             @JsonProperty("worker_name")
             String workerName,
             @JsonProperty("model_name")
@@ -38,6 +39,6 @@ public record TabularWorkerManifest(
 
     public record StartupWarmupRequest(
             String endpoint,
-            java.util.Map<String, Object> payload) {
+            Map<String, Object> payload) {
     }
 }

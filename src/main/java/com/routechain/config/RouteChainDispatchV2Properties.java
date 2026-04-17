@@ -570,9 +570,14 @@ public class RouteChainDispatchV2Properties {
 
     public static final class Ml {
         private final Tabular tabular = new Tabular();
+        private final Routefinder routefinder = new Routefinder();
 
         public Tabular getTabular() {
             return tabular;
+        }
+
+        public Routefinder getRoutefinder() {
+            return routefinder;
         }
     }
 
@@ -612,6 +617,72 @@ public class RouteChainDispatchV2Properties {
 
         public void setReadTimeout(Duration readTimeout) {
             this.readTimeout = readTimeout;
+        }
+    }
+
+    public static final class Routefinder {
+        private boolean enabled = false;
+        private String baseUrl = "http://127.0.0.1:8092";
+        private Duration connectTimeout = Duration.ofMillis(75);
+        private Duration readTimeout = Duration.ofMillis(180);
+        private Duration alternativesTimeout = Duration.ofMillis(180);
+        private Duration refineTimeout = Duration.ofMillis(150);
+        private int maxAlternativesPerDriverCandidate = 2;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public Duration getConnectTimeout() {
+            return connectTimeout;
+        }
+
+        public void setConnectTimeout(Duration connectTimeout) {
+            this.connectTimeout = connectTimeout;
+        }
+
+        public Duration getReadTimeout() {
+            return readTimeout;
+        }
+
+        public void setReadTimeout(Duration readTimeout) {
+            this.readTimeout = readTimeout;
+        }
+
+        public Duration getAlternativesTimeout() {
+            return alternativesTimeout;
+        }
+
+        public void setAlternativesTimeout(Duration alternativesTimeout) {
+            this.alternativesTimeout = alternativesTimeout;
+        }
+
+        public Duration getRefineTimeout() {
+            return refineTimeout;
+        }
+
+        public void setRefineTimeout(Duration refineTimeout) {
+            this.refineTimeout = refineTimeout;
+        }
+
+        public int getMaxAlternativesPerDriverCandidate() {
+            return maxAlternativesPerDriverCandidate;
+        }
+
+        public void setMaxAlternativesPerDriverCandidate(int maxAlternativesPerDriverCandidate) {
+            this.maxAlternativesPerDriverCandidate = maxAlternativesPerDriverCandidate;
         }
     }
 

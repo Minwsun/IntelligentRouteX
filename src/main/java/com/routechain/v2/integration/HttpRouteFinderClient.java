@@ -2,10 +2,6 @@ package com.routechain.v2.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.routechain.v2.context.EtaFeatureVector;
-import com.routechain.v2.route.DriverFitFeatureVector;
-import com.routechain.v2.route.RouteValueFeatureVector;
-import com.routechain.v2.cluster.PairFeatureVector;
 
 import java.io.IOException;
 import java.net.URI;
@@ -14,10 +10,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.Map;
+import java.util.List;
 
-public final class HttpTabularScoringClient implements TabularScoringClient {
-    private static final String WORKER_NAME = "ml-tabular-worker";
+public final class HttpRouteFinderClient implements RouteFinderClient {
+    private static final String WORKER_NAME = "ml-routefinder-worker";
     private static final String ML_CONTRACT_VERSION = "dispatch-v2-ml/v1";
     private static final String JAVA_CONTRACT_VERSION = "dispatch-v2-java/v1";
 
@@ -27,10 +23,10 @@ public final class HttpTabularScoringClient implements TabularScoringClient {
     private final Duration readTimeout;
     private final WorkerReadyState readyState;
 
-    public HttpTabularScoringClient(String baseUrl,
-                                    Duration connectTimeout,
-                                    Duration readTimeout,
-                                    Path manifestPath) {
+    public HttpRouteFinderClient(String baseUrl,
+                                 Duration connectTimeout,
+                                 Duration readTimeout,
+                                 Path manifestPath) {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(connectTimeout)
                 .build();
@@ -41,23 +37,13 @@ public final class HttpTabularScoringClient implements TabularScoringClient {
     }
 
     @Override
-    public TabularScoreResult scoreEtaResidual(EtaFeatureVector etaFeatureVector, long timeoutBudgetMs) {
-        return score("score/eta-residual", "eta/context", etaFeatureVector, timeoutBudgetMs);
+    public RouteFinderResult refineRoute(RouteFinderFeatureVector featureVector, long timeoutBudgetMs) {
+        return invoke("route/refine", featureVector, timeoutBudgetMs);
     }
 
     @Override
-    public TabularScoreResult scorePair(PairFeatureVector pairFeatureVector, long timeoutBudgetMs) {
-        return score("score/pair", "pair-graph", pairFeatureVector, timeoutBudgetMs);
-    }
-
-    @Override
-    public TabularScoreResult scoreDriverFit(DriverFitFeatureVector driverFitFeatureVector, long timeoutBudgetMs) {
-        return score("score/driver-fit", "driver-shortlist/rerank", driverFitFeatureVector, timeoutBudgetMs);
-    }
-
-    @Override
-    public TabularScoreResult scoreRouteValue(RouteValueFeatureVector routeValueFeatureVector, long timeoutBudgetMs) {
-        return score("score/route-value", "route-proposal-pool", routeValueFeatureVector, timeoutBudgetMs);
+    public RouteFinderResult generateAlternatives(RouteFinderFeatureVector featureVector, long timeoutBudgetMs) {
+        return invoke("route/alternatives", featureVector, timeoutBudgetMs);
     }
 
     @Override
@@ -65,47 +51,57 @@ public final class HttpTabularScoringClient implements TabularScoringClient {
         return readyState;
     }
 
-    private TabularScoreResult score(String path, String stageName, Object payload, long timeoutBudgetMs) {
+    private RouteFinderResult invoke(String path, RouteFinderFeatureVector featureVector, long timeoutBudgetMs) {
         if (!readyState.ready()) {
-            return TabularScoreResult.notApplied("tabular-worker-not-ready", readyState.workerMetadata());
+            return RouteFinderResult.notApplied("routefinder-worker-not-ready", readyState.workerMetadata());
         }
         try {
             HttpRequest request = HttpRequest.newBuilder(baseUri.resolve(path))
                     .header("Content-Type", "application/json")
                     .timeout(Duration.ofMillis(Math.max(1L, Math.min(timeoutBudgetMs, readTimeout.toMillis()))))
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(
-                            new TabularScoreRequestEnvelope(
-                                    "score-request/v1",
-                                    traceId(payload),
-                                    stageName,
+                            new RouteFinderRequestEnvelope(
+                                    "route-request/v1",
+                                    featureVector.traceId(),
+                                    "route-proposal-pool",
                                     timeoutBudgetMs,
                                     ML_CONTRACT_VERSION,
-                                    payload))))
+                                    featureVector))))
                     .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                return TabularScoreResult.notApplied("tabular-http-error", readyState.workerMetadata());
+                return RouteFinderResult.notApplied("routefinder-http-error", readyState.workerMetadata());
             }
-            TabularScoreResponse scoreResponse = objectMapper.readValue(response.body(), TabularScoreResponse.class);
-            if (scoreResponse.payload() == null) {
-                return TabularScoreResult.notApplied("tabular-malformed-payload", readyState.workerMetadata());
+            RouteFinderResponse routeFinderResponse = objectMapper.readValue(response.body(), RouteFinderResponse.class);
+            if (routeFinderResponse.payload() == null || routeFinderResponse.payload().routes() == null) {
+                return RouteFinderResult.notApplied("routefinder-malformed-payload", readyState.workerMetadata());
             }
-            return TabularScoreResult.applied(
-                    scoreResponse.payload().score(),
-                    scoreResponse.payload().uncertainty(),
-                    scoreResponse.fallbackUsed(),
-                    new MlWorkerMetadata(
-                            blankToExpected(scoreResponse.sourceModel(), readyState.workerMetadata().sourceModel()),
-                            blankToExpected(scoreResponse.modelVersion(), readyState.workerMetadata().modelVersion()),
-                            blankToExpected(scoreResponse.artifactDigest(), readyState.workerMetadata().artifactDigest()),
-                            scoreResponse.latencyMs()));
+            MlWorkerMetadata workerMetadata = new MlWorkerMetadata(
+                    blankToExpected(routeFinderResponse.sourceModel(), readyState.workerMetadata().sourceModel()),
+                    blankToExpected(routeFinderResponse.modelVersion(), readyState.workerMetadata().modelVersion()),
+                    blankToExpected(routeFinderResponse.artifactDigest(), readyState.workerMetadata().artifactDigest()),
+                    routeFinderResponse.latencyMs());
+            if (routeFinderResponse.fallbackUsed()) {
+                return RouteFinderResult.notApplied("routefinder-worker-fallback", workerMetadata);
+            }
+            return RouteFinderResult.applied(
+                    routeFinderResponse.payload().routes().stream()
+                            .map(route -> new RouteFinderRoute(
+                                    List.copyOf(route.stopOrder()),
+                                    route.projectedPickupEtaMinutes(),
+                                    route.projectedCompletionEtaMinutes(),
+                                    route.routeScore(),
+                                    route.traceReasons() == null ? List.of() : List.copyOf(route.traceReasons())))
+                            .toList(),
+                    false,
+                    workerMetadata);
         } catch (java.net.http.HttpTimeoutException exception) {
-            return TabularScoreResult.notApplied("tabular-timeout", readyState.workerMetadata());
+            return RouteFinderResult.notApplied("routefinder-timeout", readyState.workerMetadata());
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            return TabularScoreResult.notApplied("tabular-interrupted", readyState.workerMetadata());
+            return RouteFinderResult.notApplied("routefinder-interrupted", readyState.workerMetadata());
         } catch (IOException | RuntimeException exception) {
-            return TabularScoreResult.notApplied("tabular-unavailable", readyState.workerMetadata());
+            return RouteFinderResult.notApplied("routefinder-unavailable", readyState.workerMetadata());
         }
     }
 
@@ -173,16 +169,6 @@ public final class HttpTabularScoringClient implements TabularScoringClient {
             throw new IOException("Unexpected status " + response.statusCode() + " for " + path);
         }
         return objectMapper.readValue(response.body(), type);
-    }
-
-    private String traceId(Object payload) {
-        return switch (payload) {
-            case EtaFeatureVector ignored -> "eta-request";
-            case PairFeatureVector value -> value.leftOrderId() + "|" + value.rightOrderId();
-            case DriverFitFeatureVector value -> value.traceId();
-            case RouteValueFeatureVector value -> value.traceId();
-            default -> "unknown";
-        };
     }
 
     private String blankToExpected(String candidate, String fallback) {

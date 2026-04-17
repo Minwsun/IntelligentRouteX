@@ -13,16 +13,16 @@ final class ReplayMlMetadataComparator {
     static void compare(List<MlStageMetadata> reference,
                         List<MlStageMetadata> replay,
                         List<String> mismatchReasons) {
-        Map<String, MlStageMetadata> referenceByStage = reference.stream()
-                .collect(Collectors.toMap(MlStageMetadata::stageName, metadata -> metadata, (left, right) -> left));
-        Map<String, MlStageMetadata> replayByStage = replay.stream()
-                .collect(Collectors.toMap(MlStageMetadata::stageName, metadata -> metadata, (left, right) -> left));
-        if (!referenceByStage.keySet().equals(replayByStage.keySet())) {
+        Map<String, MlStageMetadata> referenceByIdentity = reference.stream()
+                .collect(Collectors.toMap(ReplayMlMetadataComparator::identity, metadata -> metadata, (left, right) -> left));
+        Map<String, MlStageMetadata> replayByIdentity = replay.stream()
+                .collect(Collectors.toMap(ReplayMlMetadataComparator::identity, metadata -> metadata, (left, right) -> left));
+        if (!referenceByIdentity.keySet().equals(replayByIdentity.keySet())) {
             mismatchReasons.add("ml-stage-metadata-mismatch");
         }
-        for (String stageName : referenceByStage.keySet()) {
-            MlStageMetadata referenceMetadata = referenceByStage.get(stageName);
-            MlStageMetadata replayMetadata = replayByStage.get(stageName);
+        for (String identity : referenceByIdentity.keySet()) {
+            MlStageMetadata referenceMetadata = referenceByIdentity.get(identity);
+            MlStageMetadata replayMetadata = replayByIdentity.get(identity);
             if (replayMetadata == null) {
                 continue;
             }
@@ -33,5 +33,9 @@ final class ReplayMlMetadataComparator {
                 mismatchReasons.add("ml-artifact-digest-mismatch");
             }
         }
+    }
+
+    private static String identity(MlStageMetadata metadata) {
+        return metadata.stageName() + "|" + metadata.sourceModel();
     }
 }

@@ -72,10 +72,13 @@ import com.routechain.v2.selector.OrToolsSetPackingSolver;
 import com.routechain.v2.selector.SelectorCandidateBuilder;
 import com.routechain.v2.selector.SelectorSolver;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
+import com.routechain.v2.integration.NoOpRouteFinderClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
+import com.routechain.v2.integration.HttpRouteFinderClient;
 import com.routechain.v2.integration.HttpTabularScoringClient;
 import com.routechain.v2.integration.OpenMeteoClient;
+import com.routechain.v2.integration.RouteFinderClient;
 import com.routechain.v2.integration.TabularScoringClient;
 import com.routechain.v2.integration.TomTomTrafficRefineClient;
 import org.springframework.context.annotation.Bean;
@@ -121,6 +124,22 @@ public class DispatchV2Configuration {
                 java.nio.file.Path.of("services", "models", "model-manifest.yaml"));
         if (properties.isSidecarRequired() && !client.readyState().ready()) {
             throw new IllegalStateException("Tabular worker is required but not ready: " + client.readyState().reason());
+        }
+        return client;
+    }
+
+    @Bean
+    RouteFinderClient routeFinderClient(RouteChainDispatchV2Properties properties) {
+        if (!properties.isMlEnabled() || !properties.getMl().getRoutefinder().isEnabled()) {
+            return new NoOpRouteFinderClient();
+        }
+        HttpRouteFinderClient client = new HttpRouteFinderClient(
+                properties.getMl().getRoutefinder().getBaseUrl(),
+                properties.getMl().getRoutefinder().getConnectTimeout(),
+                properties.getMl().getRoutefinder().getReadTimeout(),
+                java.nio.file.Path.of("services", "models", "model-manifest.yaml"));
+        if (properties.isSidecarRequired() && !client.readyState().ready()) {
+            throw new IllegalStateException("RouteFinder worker is required but not ready: " + client.readyState().reason());
         }
         return client;
     }
@@ -324,17 +343,21 @@ public class DispatchV2Configuration {
     }
 
     @Bean
-    DispatchRouteProposalService dispatchRouteProposalService(RouteProposalEngine routeProposalEngine,
+    DispatchRouteProposalService dispatchRouteProposalService(RouteChainDispatchV2Properties properties,
+                                                              RouteProposalEngine routeProposalEngine,
                                                               RouteProposalValidator routeProposalValidator,
                                                               RouteValueScorer routeValueScorer,
                                                               RouteProposalPruner routeProposalPruner,
-                                                              EtaLegCacheFactory etaLegCacheFactory) {
+                                                              EtaLegCacheFactory etaLegCacheFactory,
+                                                              RouteFinderClient routeFinderClient) {
         return new DispatchRouteProposalService(
+                properties,
                 routeProposalEngine,
                 routeProposalValidator,
                 routeValueScorer,
                 routeProposalPruner,
-                etaLegCacheFactory);
+                etaLegCacheFactory,
+                routeFinderClient);
     }
 
     @Bean

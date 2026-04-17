@@ -32,3 +32,10 @@ For the current tabular slice, Java currently uses only:
 - `POST /score/route-value`
 
 `global-value` remains out of runtime scope for now.
+
+For the current RouteFinder slice, Java also uses:
+
+- `POST /route/refine`
+- `POST /route/alternatives`
+
+RouteFinder remains bounded to `route-proposal-pool` tuple refinement and alternatives only. It does not own validation, pruning, selector scoring, or execution semantics.

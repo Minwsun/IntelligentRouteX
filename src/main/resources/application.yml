@@ -24,6 +24,14 @@ routechain:
         base-url: http://127.0.0.1:8091
         connect-timeout: 75ms
         read-timeout: 150ms
+      routefinder:
+        enabled: false
+        base-url: http://127.0.0.1:8092
+        connect-timeout: 75ms
+        read-timeout: 180ms
+        alternatives-timeout: 180ms
+        refine-timeout: 150ms
+        max-alternatives-per-driver-candidate: 2
     buffer:
       hold-window: 45s
     cluster:

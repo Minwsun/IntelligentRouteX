@@ -1,6 +1,6 @@
 package com.routechain.v2.integration;
 
-public record TabularWorkerReadyResponse(
+public record WorkerReadyResponse(
         String schemaVersion,
         boolean ready,
         String reason) {

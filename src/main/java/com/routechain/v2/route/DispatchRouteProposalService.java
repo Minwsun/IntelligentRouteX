@@ -1,5 +1,6 @@
 package com.routechain.v2.route;
 
+import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.domain.WeatherProfile;
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
@@ -8,28 +9,40 @@ import com.routechain.v2.bundle.DispatchBundleStage;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.cluster.EtaLegCache;
 import com.routechain.v2.cluster.EtaLegCacheFactory;
+import com.routechain.v2.integration.MlStageMetadataAccumulator;
+import com.routechain.v2.integration.RouteFinderClient;
+import com.routechain.v2.integration.RouteFinderFeatureVector;
+import com.routechain.v2.integration.RouteFinderResult;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 
 public final class DispatchRouteProposalService {
+    private final RouteChainDispatchV2Properties properties;
     private final RouteProposalEngine routeProposalEngine;
     private final RouteProposalValidator routeProposalValidator;
     private final RouteValueScorer routeValueScorer;
     private final RouteProposalPruner routeProposalPruner;
     private final EtaLegCacheFactory etaLegCacheFactory;
+    private final RouteFinderClient routeFinderClient;
 
-    public DispatchRouteProposalService(RouteProposalEngine routeProposalEngine,
+    public DispatchRouteProposalService(RouteChainDispatchV2Properties properties,
+                                        RouteProposalEngine routeProposalEngine,
                                         RouteProposalValidator routeProposalValidator,
                                         RouteValueScorer routeValueScorer,
                                         RouteProposalPruner routeProposalPruner,
-                                        EtaLegCacheFactory etaLegCacheFactory) {
+                                        EtaLegCacheFactory etaLegCacheFactory,
+                                        RouteFinderClient routeFinderClient) {
+        this.properties = properties;
         this.routeProposalEngine = routeProposalEngine;
         this.routeProposalValidator = routeProposalValidator;
         this.routeValueScorer = routeValueScorer;
         this.routeProposalPruner = routeProposalPruner;
         this.etaLegCacheFactory = etaLegCacheFactory;
+        this.routeFinderClient = routeFinderClient;
     }
 
     public DispatchRouteProposalStage evaluate(DispatchV2Request request,
@@ -46,11 +59,14 @@ public final class DispatchRouteProposalService {
                 request.traceId(),
                 request.decisionTime(),
                 request.weatherProfile() == null ? WeatherProfile.CLEAR : request.weatherProfile());
-        List<RouteProposalCandidate> generated = routeProposalEngine.generate(
+        List<RouteProposalCandidate> deterministicGenerated = routeProposalEngine.generate(
                 routeCandidateStage.driverCandidates(),
                 routeCandidateStage.pickupAnchors(),
                 context,
                 etaLegCache);
+        RouteFinderGenerationOutcome routeFinderGeneration = generateRouteFinderProposals(request.traceId(), deterministicGenerated, context);
+        List<RouteProposalCandidate> generated = new ArrayList<>(deterministicGenerated);
+        generated.addAll(routeFinderGeneration.generatedCandidates());
         List<RouteProposalCandidate> validated = generated.stream()
                 .map(candidate -> routeProposalValidator.validate(candidate, context))
                 .toList();
@@ -62,13 +78,17 @@ public final class DispatchRouteProposalService {
                 .toList();
         List<RouteProposalCandidate> retained = routeProposalPruner.prune(scored);
         List<RouteProposal> routeProposals = retained.stream().map(RouteProposalCandidate::proposal).toList();
-        List<String> degradeReasons = java.util.stream.Stream.concat(
+        List<String> degradeReasons = java.util.stream.Stream.of(
+                        routeFinderGeneration.degradeReasons().stream(),
                         scored.stream().flatMap(candidate -> candidate.proposal().degradeReasons().stream()),
                         scoringOutcomes.stream().flatMap(outcome -> outcome.degradeReasons().stream()))
+                .flatMap(stream -> stream)
                 .distinct()
                 .toList();
-        List<MlStageMetadata> mlStageMetadata = scoringOutcomes.stream()
-                .flatMap(outcome -> outcome.mlStageMetadata().stream())
+        List<MlStageMetadata> mlStageMetadata = java.util.stream.Stream.of(
+                        routeFinderGeneration.mlStageMetadata().stream(),
+                        scoringOutcomes.stream().flatMap(outcome -> outcome.mlStageMetadata().stream()))
+                .flatMap(stream -> stream)
                 .distinct()
                 .toList();
         return new DispatchRouteProposalStage(
@@ -77,6 +97,132 @@ public final class DispatchRouteProposalService {
                 summarize(routeCandidateStage.driverCandidates().size(), generated, retained, degradeReasons),
                 mlStageMetadata,
                 degradeReasons);
+    }
+
+    private RouteFinderGenerationOutcome generateRouteFinderProposals(String traceId,
+                                                                      List<RouteProposalCandidate> deterministicGenerated,
+                                                                      DispatchCandidateContext context) {
+        if (!properties.isMlEnabled() || !properties.getMl().getRoutefinder().isEnabled()) {
+            return RouteFinderGenerationOutcome.empty();
+        }
+        Map<RouteProposalTupleKey, List<RouteProposalCandidate>> candidatesByTuple = deterministicGenerated.stream()
+                .collect(java.util.stream.Collectors.groupingBy(
+                        RouteProposalCandidate::tupleKey,
+                        java.util.LinkedHashMap::new,
+                        java.util.stream.Collectors.toList()));
+        MlStageMetadataAccumulator mlStageMetadataAccumulator = new MlStageMetadataAccumulator("route-proposal-pool");
+        List<RouteProposalCandidate> generatedCandidates = new ArrayList<>();
+        List<String> degradeReasons = new ArrayList<>();
+        for (List<RouteProposalCandidate> tupleCandidates : candidatesByTuple.values()) {
+            RouteProposalCandidate seed = selectSeed(tupleCandidates);
+            if (seed == null) {
+                continue;
+            }
+            RouteFinderFeatureVector featureVector = featureVector(traceId, seed, context);
+            RouteFinderResult alternatives = routeFinderClient.generateAlternatives(
+                    featureVector,
+                    properties.getMl().getRoutefinder().getAlternativesTimeout().toMillis());
+            mlStageMetadataAccumulator.accept(alternatives);
+            if (alternatives.applied()) {
+                generatedCandidates.addAll(alternatives.routes().stream()
+                        .limit(Math.max(1, properties.getMl().getRoutefinder().getMaxAlternativesPerDriverCandidate()))
+                        .map(route -> routeProposalEngine.externalCandidate(
+                                seed.driverCandidate(),
+                                seed.pickupAnchor(),
+                                RouteProposalSource.ML_PROPOSAL,
+                                route.stopOrder(),
+                                route.projectedPickupEtaMinutes(),
+                                route.projectedCompletionEtaMinutes(),
+                                mergeReasons("routefinder-alternative", route.traceReasons()),
+                                List.of()))
+                        .toList());
+            } else {
+                degradeReasons.add("routefinder-ml-unavailable");
+            }
+            RouteFinderResult refined = routeFinderClient.refineRoute(
+                    featureVector,
+                    properties.getMl().getRoutefinder().getRefineTimeout().toMillis());
+            mlStageMetadataAccumulator.accept(refined);
+            if (refined.applied()) {
+                refined.routes().stream().findFirst()
+                        .map(route -> routeProposalEngine.externalCandidate(
+                                seed.driverCandidate(),
+                                seed.pickupAnchor(),
+                                RouteProposalSource.ML_REFINED,
+                                route.stopOrder(),
+                                route.projectedPickupEtaMinutes(),
+                                route.projectedCompletionEtaMinutes(),
+                                mergeReasons("routefinder-refined", route.traceReasons()),
+                                List.of()))
+                        .ifPresent(generatedCandidates::add);
+            } else {
+                degradeReasons.add("routefinder-ml-unavailable");
+            }
+        }
+        return new RouteFinderGenerationOutcome(
+                List.copyOf(generatedCandidates),
+                mlStageMetadataAccumulator.build().map(List::of).orElse(List.of()),
+                List.copyOf(degradeReasons.stream().distinct().toList()));
+    }
+
+    private RouteFinderFeatureVector featureVector(String traceId,
+                                                   RouteProposalCandidate seed,
+                                                   DispatchCandidateContext context) {
+        return new RouteFinderFeatureVector(
+                "routefinder-feature-vector/v1",
+                traceId,
+                seed.proposal().bundleId(),
+                seed.proposal().anchorOrderId(),
+                seed.proposal().driverId(),
+                seed.proposal().source().name(),
+                seed.proposal().stopOrder(),
+                context.bundle(seed.proposal().bundleId()).orderIds().stream().sorted().toList(),
+                seed.proposal().projectedPickupEtaMinutes(),
+                seed.proposal().projectedCompletionEtaMinutes(),
+                seed.driverCandidate().rerankScore(),
+                context.bundleScore(seed.proposal().bundleId()),
+                seed.pickupAnchor().score(),
+                context.averagePairSupport(context.bundle(seed.proposal().bundleId()).orderIds()),
+                context.bundle(seed.proposal().bundleId()).boundaryCross(),
+                Math.max(1, properties.getMl().getRoutefinder().getMaxAlternativesPerDriverCandidate()));
+    }
+
+    private RouteProposalCandidate selectSeed(List<RouteProposalCandidate> tupleCandidates) {
+        return tupleCandidates.stream()
+                .sorted(Comparator.comparingInt((RouteProposalCandidate candidate) -> sourcePriority(candidate.proposal().source()))
+                        .thenComparingDouble(candidate -> candidate.proposal().projectedPickupEtaMinutes())
+                        .thenComparing(candidate -> candidate.proposal().proposalId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private int sourcePriority(RouteProposalSource source) {
+        return switch (source) {
+            case HEURISTIC_FAST -> 0;
+            case HEURISTIC_SAFE -> 1;
+            case FALLBACK_SIMPLE -> 2;
+            case ML_PROPOSAL -> 3;
+            case ML_REFINED -> 4;
+        };
+    }
+
+    private List<String> mergeReasons(String baseReason, List<String> traceReasons) {
+        List<String> reasons = new ArrayList<>();
+        reasons.add(baseReason);
+        if (traceReasons != null) {
+            reasons.addAll(traceReasons);
+        }
+        return List.copyOf(reasons.stream().distinct().toList());
+    }
+
+    private record RouteFinderGenerationOutcome(
+            List<RouteProposalCandidate> generatedCandidates,
+            List<MlStageMetadata> mlStageMetadata,
+            List<String> degradeReasons) {
+
+        private static RouteFinderGenerationOutcome empty() {
+            return new RouteFinderGenerationOutcome(List.of(), List.of(), List.of());
+        }
     }
 
     private RouteProposalSummary summarize(int driverCandidateCount,

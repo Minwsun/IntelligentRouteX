@@ -68,8 +68,10 @@ import com.routechain.v2.cluster.PairHardGateEvaluator;
 import com.routechain.v2.cluster.PairSimilarityGraphBuilder;
 import com.routechain.v2.cluster.PairSimilarityScorer;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
+import com.routechain.v2.integration.NoOpRouteFinderClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
+import com.routechain.v2.integration.RouteFinderClient;
 import com.routechain.v2.integration.TabularScoringClient;
 
 import java.time.Instant;
@@ -93,11 +95,23 @@ public final class TestDispatchV2Factory {
         return harness(properties, tabularScoringClient).core();
     }
 
+    public static DispatchV2Core core(RouteChainDispatchV2Properties properties,
+                                      TabularScoringClient tabularScoringClient,
+                                      RouteFinderClient routeFinderClient) {
+        return harness(properties, tabularScoringClient, routeFinderClient).core();
+    }
+
     public static TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties) {
         return harness(properties, new NoOpTabularScoringClient());
     }
 
     public static TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties, TabularScoringClient tabularScoringClient) {
+        return harness(properties, tabularScoringClient, new NoOpRouteFinderClient());
+    }
+
+    public static TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties,
+                                                     TabularScoringClient tabularScoringClient,
+                                                     RouteFinderClient routeFinderClient) {
         DispatchV2Configuration configuration = new DispatchV2Configuration();
         BaselineTravelTimeEstimator baselineTravelTimeEstimator = configuration.baselineTravelTimeEstimator();
         TrafficProfileService trafficProfileService = configuration.trafficProfileService(properties);
@@ -163,11 +177,13 @@ public final class TestDispatchV2Factory {
         RouteValueScorer routeValueScorer = configuration.routeValueScorer(properties, tabularScoringClient);
         RouteProposalPruner routeProposalPruner = configuration.routeProposalPruner(properties);
         DispatchRouteProposalService dispatchRouteProposalService = configuration.dispatchRouteProposalService(
+                properties,
                 routeProposalEngine,
                 routeProposalValidator,
                 routeValueScorer,
                 routeProposalPruner,
-                etaLegCacheFactory);
+                etaLegCacheFactory,
+                routeFinderClient);
         ScenarioGateEvaluator scenarioGateEvaluator = configuration.scenarioGateEvaluator(properties);
         ScenarioEvaluator scenarioEvaluator = configuration.scenarioEvaluator(properties);
         RobustUtilityAggregator robustUtilityAggregator = configuration.robustUtilityAggregator();

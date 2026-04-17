@@ -2,7 +2,7 @@ package com.routechain.v2.integration;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-public record TabularWorkerVersionResponse(
+public record WorkerVersionResponse(
         String schemaVersion,
         String worker,
         String model,

@@ -28,6 +28,15 @@ For the current tabular ML slice:
 - `global-selector` objective and selector semantics remain unchanged
 - `DispatchV2Result.mlStageMetadata` records compact per-stage ML metadata for attempted tabular scoring
 
+For the current RouteFinder slice:
+
+- no new decision stage is introduced
+- `route-proposal-pool` still begins with deterministic proposal generation
+- RouteFinder may add bounded `ML_PROPOSAL` and `ML_REFINED` sources per `(bundle, anchor, driver)` tuple
+- all RouteFinder outputs still pass through the existing validator, route-value scorer, and pruner
+- deterministic proposals remain available when RouteFinder is disabled or unavailable
+- replay compares ML metadata by `stageName + sourceModel` so tabular and RouteFinder metadata can coexist inside `route-proposal-pool`
+
 For the current hardening slice:
 
 - every enabled dispatch writes a decision log record through the configured feedback store
@@ -70,6 +79,13 @@ For executor summary semantics in the current slice:
 - `ml.tabular.baseUrl=http://127.0.0.1:8091`
 - `ml.tabular.connectTimeout=75ms`
 - `ml.tabular.readTimeout=150ms`
+- `ml.routefinder.enabled=false`
+- `ml.routefinder.baseUrl=http://127.0.0.1:8092`
+- `ml.routefinder.connectTimeout=75ms`
+- `ml.routefinder.readTimeout=180ms`
+- `ml.routefinder.alternativesTimeout=180ms`
+- `ml.routefinder.refineTimeout=150ms`
+- `ml.routefinder.maxAlternativesPerDriverCandidate=2`
 - `feedback.decisionLogEnabled=true`
 - `feedback.snapshotEnabled=true`
 - `feedback.replayEnabled=true`
@@ -97,6 +113,13 @@ For executor summary semantics in the current slice:
 - `routechain.dispatch-v2.ml.tabular.base-url`
 - `routechain.dispatch-v2.ml.tabular.connect-timeout`
 - `routechain.dispatch-v2.ml.tabular.read-timeout`
+- `routechain.dispatch-v2.ml.routefinder.enabled`
+- `routechain.dispatch-v2.ml.routefinder.base-url`
+- `routechain.dispatch-v2.ml.routefinder.connect-timeout`
+- `routechain.dispatch-v2.ml.routefinder.read-timeout`
+- `routechain.dispatch-v2.ml.routefinder.alternatives-timeout`
+- `routechain.dispatch-v2.ml.routefinder.refine-timeout`
+- `routechain.dispatch-v2.ml.routefinder.max-alternatives-per-driver-candidate`
 - `routechain.dispatch-v2.feedback.decision-log-enabled`
 - `routechain.dispatch-v2.feedback.snapshot-enabled`
 - `routechain.dispatch-v2.feedback.replay-enabled`

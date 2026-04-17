@@ -61,6 +61,10 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 - `ReplayRequestRecord`
 - `ReplayComparisonResult`
 - `ReplayRunResult`
+- `MlStageMetadata`
+- `WorkerManifest`
+- `RouteFinderFeatureVector`
+- `RouteFinderResult`
 
 ## Internal-Only Contracts
 

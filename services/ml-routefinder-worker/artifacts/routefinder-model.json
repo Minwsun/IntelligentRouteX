@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "routefinder-model-artifact/v1",
+  "modelName": "routefinder-local",
+  "modelVersion": "2026.04.17-v1",
+  "compatibilityContractVersion": "dispatch-v2-ml/v1",
+  "minSupportedJavaContractVersion": "dispatch-v2-java/v1",
+  "alternatives": {
+    "maxGeneratedRoutes": 3,
+    "baseScore": 0.60,
+    "supportWeight": 0.16,
+    "rerankWeight": 0.12,
+    "bundleWeight": 0.10,
+    "anchorWeight": 0.08,
+    "disruptionPenalty": 0.12,
+    "boundaryPenalty": 0.06,
+    "pickupShiftPerSwap": 1.2,
+    "completionShiftPerSwap": 2.5,
+    "lexicalTieBreakScale": 0.01
+  },
+  "refine": {
+    "pickupImprovementMinutes": 0.6,
+    "completionImprovementMinutes": 1.4,
+    "scoreLift": 0.05
+  }
+}

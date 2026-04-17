@@ -38,6 +38,46 @@ public final class RouteProposalEngine {
         return List.copyOf(generated);
     }
 
+    public RouteProposalCandidate externalCandidate(DriverCandidate driverCandidate,
+                                                    PickupAnchor pickupAnchor,
+                                                    RouteProposalSource source,
+                                                    List<String> stopOrder,
+                                                    double projectedPickupEtaMinutes,
+                                                    double projectedCompletionEtaMinutes,
+                                                    List<String> reasons,
+                                                    List<String> degradeReasons) {
+        RouteProposalTupleKey tupleKey = new RouteProposalTupleKey(driverCandidate.bundleId(), pickupAnchor.anchorOrderId(), driverCandidate.driverId());
+        RouteProposal proposal = baseProposal(
+                driverCandidate,
+                pickupAnchor,
+                source,
+                stopOrder,
+                projectedPickupEtaMinutes,
+                projectedCompletionEtaMinutes,
+                false,
+                reasons,
+                degradeReasons);
+        return new RouteProposalCandidate(
+                proposal,
+                tupleKey,
+                pickupAnchor,
+                driverCandidate,
+                new RouteProposalTrace(
+                        tupleKey,
+                        source,
+                        stopOrderSignature(stopOrder),
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        source == RouteProposalSource.FALLBACK_SIMPLE ? 0.05 : 0.0,
+                        List.of()));
+    }
+
     static String stopOrderSignature(List<String> stopOrder) {
         return String.join(">", stopOrder);
     }
@@ -70,6 +110,8 @@ public final class RouteProposalEngine {
             case HEURISTIC_FAST -> List.of("fast-pickup-priority");
             case HEURISTIC_SAFE -> List.of("safe-support-priority");
             case FALLBACK_SIMPLE -> List.of("fallback-anchor-first");
+            case ML_PROPOSAL -> List.of("routefinder-ml-proposal");
+            case ML_REFINED -> List.of("routefinder-ml-refined");
         };
         List<String> degradeReasons = new ArrayList<>(pickupEstimate.degradeReasons());
         degradeReasons.addAll(projection.degradeReasons());

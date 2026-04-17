@@ -14,9 +14,9 @@ workers:
         schemaVersion: bundle-proposal-request/v1
         traceId: warmup-greedrl
   - worker_name: ml-routefinder-worker
-    model_name: routefinder
-    model_version: pinned-placeholder
-    artifact_digest: sha256:pending
+    model_name: routefinder-local
+    model_version: 2026.04.17-v1
+    artifact_digest: sha256:bb5dba77f63868135f1de84af967a7ca3c2a5c5fc310ea903e688d8b6de2944d
     rollback_artifact_digest: sha256:pending-rollback
     runtime_image: ghcr.io/minwsun/intelligentroutex/ml-routefinder-worker:bootstrap
     compatibility_contract_version: dispatch-v2-ml/v1
@@ -24,8 +24,31 @@ workers:
     startup_warmup_request:
       endpoint: /route/refine
       payload:
-        schemaVersion: route-alternatives-request/v1
+        schemaVersion: route-request/v1
         traceId: warmup-routefinder
+        payload:
+          schemaVersion: routefinder-feature-vector/v1
+          traceId: warmup-routefinder
+          bundleId: bundle-warmup
+          anchorOrderId: order-1
+          driverId: driver-1
+          baselineSource: HEURISTIC_FAST
+          baselineStopOrder:
+            - order-1
+            - order-2
+            - order-3
+          bundleOrderIds:
+            - order-1
+            - order-2
+            - order-3
+          projectedPickupEtaMinutes: 5.0
+          projectedCompletionEtaMinutes: 18.0
+          rerankScore: 0.7
+          bundleScore: 0.8
+          anchorScore: 0.75
+          averagePairSupport: 0.65
+          boundaryCross: false
+          maxAlternatives: 2
   - worker_name: ml-forecast-worker
     model_name: chronos-2
     model_version: pinned-placeholder

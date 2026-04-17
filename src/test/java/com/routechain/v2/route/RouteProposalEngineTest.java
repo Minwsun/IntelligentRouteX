@@ -43,7 +43,9 @@ class RouteProposalEngineTest {
         List<RouteProposalCandidate> second = engine.generate(routeCandidateStage.driverCandidates(), routeCandidateStage.pickupAnchors(), context, etaLegCache);
 
         assertEquals(first.stream().map(candidate -> candidate.proposal().proposalId()).toList(), second.stream().map(candidate -> candidate.proposal().proposalId()).toList());
-        assertEquals(EnumSet.allOf(RouteProposalSource.class), first.stream().map(candidate -> candidate.proposal().source()).collect(java.util.stream.Collectors.toCollection(() -> EnumSet.noneOf(RouteProposalSource.class))));
+        assertEquals(
+                EnumSet.of(RouteProposalSource.HEURISTIC_FAST, RouteProposalSource.HEURISTIC_SAFE, RouteProposalSource.FALLBACK_SIMPLE),
+                first.stream().map(candidate -> candidate.proposal().source()).collect(java.util.stream.Collectors.toCollection(() -> EnumSet.noneOf(RouteProposalSource.class))));
         assertTrue(first.stream().allMatch(candidate -> routeCandidateStage.driverCandidates().stream().anyMatch(driverCandidate ->
                 driverCandidate.bundleId().equals(candidate.proposal().bundleId())
                         && driverCandidate.anchorOrderId().equals(candidate.proposal().anchorOrderId())
