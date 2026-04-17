@@ -14,13 +14,16 @@ public final class ExecutionConflictValidator {
         List<String> rejectedProposalIds = new ArrayList<>();
         List<String> degradeReasons = new ArrayList<>();
         for (ResolvedSelectedProposal resolved : resolvedSelectedProposals) {
-            boolean driverConflict = !seenDrivers.add(resolved.selectorCandidate().driverId());
-            boolean orderConflict = resolved.selectorCandidate().orderIds().stream().anyMatch(orderId -> !seenOrders.add(orderId));
+            boolean driverConflict = seenDrivers.contains(resolved.selectorCandidate().driverId());
+            boolean orderConflict = resolved.selectorCandidate().orderIds().stream()
+                    .anyMatch(seenOrders::contains);
             if (driverConflict || orderConflict) {
                 rejectedProposalIds.add(resolved.selectedProposal().proposalId());
                 degradeReasons.add("executor-conflict-validation-failed");
                 continue;
             }
+            seenDrivers.add(resolved.selectorCandidate().driverId());
+            seenOrders.addAll(resolved.selectorCandidate().orderIds());
             accepted.add(resolved);
         }
         return new ExecutionConflictValidationResult(

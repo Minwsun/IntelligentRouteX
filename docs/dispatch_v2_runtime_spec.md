@@ -10,6 +10,12 @@ The current runtime result must only report stages that actually ran. For the cu
 
 For this hardened executor slice, `DispatchV2Result.selectedRouteId` remains intentionally `null`. The runtime may emit multiple executed assignments, so a single selected route id is not yet considered a safe execution semantic.
 
+For executor summary semantics in the current slice:
+
+- `skippedProposalCount = selectedProposalCount - executedAssignmentCount`
+- `resolvedButRejectedCount` counts only proposals that resolved successfully but were rejected during defensive conflict validation
+- `resolvedButRejectedCount` is therefore narrower than `skippedProposalCount`, not a synonym for it
+
 ## Runtime Defaults
 
 - `tick=30s`

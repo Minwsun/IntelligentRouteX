@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertIterableEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExecutionConflictValidatorTest {
@@ -82,5 +83,116 @@ class ExecutionConflictValidatorTest {
         assertEquals(1, result.acceptedProposals().size());
         assertEquals(firstResolved.selectedProposal().proposalId(), result.acceptedProposals().getFirst().selectedProposal().proposalId());
         assertTrue(result.degradeReasons().contains("executor-conflict-validation-failed"));
+    }
+
+    @Test
+    void rejectedProposalDoesNotReserveOrdersOrDriverForLaterIndependentProposal() {
+        ResolvedSelectedProposal accepted = resolvedProposal(
+                "proposal-1",
+                1,
+                0.90,
+                "driver-1",
+                List.of("order-a"));
+        ResolvedSelectedProposal rejected = resolvedProposal(
+                "proposal-2",
+                2,
+                0.80,
+                "driver-2",
+                List.of("order-b", "order-a"));
+        ResolvedSelectedProposal laterIndependent = resolvedProposal(
+                "proposal-3",
+                3,
+                0.70,
+                "driver-3",
+                List.of("order-b"));
+
+        ExecutionConflictValidationResult result = new ExecutionConflictValidator()
+                .validate(List.of(accepted, rejected, laterIndependent));
+
+        assertEquals(2, result.acceptedProposals().size());
+        assertIterableEquals(
+                List.of("proposal-1", "proposal-3"),
+                result.acceptedProposals().stream()
+                        .map(resolved -> resolved.selectedProposal().proposalId())
+                        .toList());
+        assertIterableEquals(List.of("proposal-2"), result.trace().conflictRejectedProposalIds());
+        assertTrue(result.degradeReasons().contains("executor-conflict-validation-failed"));
+    }
+
+    private ResolvedSelectedProposal resolvedProposal(String proposalId,
+                                                      int selectionRank,
+                                                      double selectionScore,
+                                                      String driverId,
+                                                      List<String> orderIds) {
+        return new ResolvedSelectedProposal(
+                new SelectedProposal(
+                        "selected-proposal/v1",
+                        proposalId,
+                        selectionRank,
+                        selectionScore,
+                        List.of("selected")),
+                new SelectorCandidate(
+                        "selector-candidate/v1",
+                        proposalId,
+                        "bundle-" + proposalId,
+                        orderIds.getFirst(),
+                        driverId,
+                        orderIds,
+                        0.75,
+                        0.70,
+                        com.routechain.v2.route.RouteProposalSource.HEURISTIC_FAST,
+                        "cluster-" + proposalId,
+                        false,
+                        selectionScore,
+                        true,
+                        List.of("candidate"),
+                        List.of()),
+                new RouteProposal(
+                        "route-proposal/v1",
+                        proposalId,
+                        "bundle-" + proposalId,
+                        orderIds.getFirst(),
+                        driverId,
+                        com.routechain.v2.route.RouteProposalSource.HEURISTIC_FAST,
+                        List.copyOf(orderIds),
+                        8.0,
+                        18.0,
+                        0.65,
+                        true,
+                        List.of("route"),
+                        List.of()),
+                new com.routechain.v2.bundle.BundleCandidate(
+                        "bundle-candidate/v1",
+                        "bundle-" + proposalId,
+                        com.routechain.v2.bundle.BundleFamily.COMPACT_CLIQUE,
+                        "cluster-" + proposalId,
+                        false,
+                        List.of(),
+                        List.copyOf(orderIds),
+                        String.join("|", orderIds),
+                        orderIds.getFirst(),
+                        "corridor-" + proposalId,
+                        0.60,
+                        true,
+                        List.of()),
+                new com.routechain.v2.route.PickupAnchor(
+                        "pickup-anchor/v1",
+                        "bundle-" + proposalId,
+                        String.join("|", orderIds),
+                        orderIds.getFirst(),
+                        1,
+                        0.50,
+                        List.of("anchor")),
+                new com.routechain.v2.route.DriverCandidate(
+                        "driver-candidate/v1",
+                        "bundle-" + proposalId,
+                        orderIds.getFirst(),
+                        driverId,
+                        1,
+                        9.0,
+                        0.55,
+                        0.58,
+                        List.of("driver"),
+                        List.of()));
     }
 }

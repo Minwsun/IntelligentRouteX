@@ -66,3 +66,8 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 ## Rule
 
 No contract may change shape without a `schemaVersion` bump and matching replay/snapshot migration handling.
+
+## Executor Summary Semantics
+
+- `DispatchExecutionSummary.skippedProposalCount` means `selectedProposalCount - executedAssignmentCount`
+- `DispatchExecutionSummary.resolvedButRejectedCount` counts only the resolved subset rejected by executor conflict validation
