@@ -10,6 +10,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DispatchV2CoreSelectorSliceTest {
@@ -22,7 +23,7 @@ class DispatchV2CoreSelectorSliceTest {
 
         assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector", "dispatch-executor"), result.decisionStages());
         assertFalse(result.fallbackUsed());
-        assertEquals(result.assignments().getFirst().proposalId(), result.selectedRouteId());
+        assertNull(result.selectedRouteId());
         assertFalse(result.selectorCandidates().isEmpty());
         assertTrue(result.globalSelectionResult().selectedCount() > 0);
         assertTrue(result.globalSelectorSummary().selectedCount() > 0);

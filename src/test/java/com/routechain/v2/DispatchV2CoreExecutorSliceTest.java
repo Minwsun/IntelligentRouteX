@@ -10,6 +10,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DispatchV2CoreExecutorSliceTest {
@@ -23,8 +24,8 @@ class DispatchV2CoreExecutorSliceTest {
         assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector", "dispatch-executor"), result.decisionStages());
         assertFalse(result.fallbackUsed());
         assertFalse(result.assignments().isEmpty());
-        assertEquals(result.assignments().getFirst().proposalId(), result.selectedRouteId());
-        assertTrue(result.dispatchExecutionSummary().assignmentCount() > 0);
+        assertNull(result.selectedRouteId());
+        assertTrue(result.dispatchExecutionSummary().executedAssignmentCount() > 0);
 
         Set<String> drivers = new HashSet<>();
         Set<String> orders = new HashSet<>();

@@ -9,48 +9,52 @@ import com.routechain.v2.selector.SelectedProposal;
 import com.routechain.v2.selector.SelectorCandidate;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class DispatchExecutorOrphanSelectedProposalTest {
+class ResolvedSelectedProposalTest {
 
     @Test
-    void missingSelectorOrRouteContextDoesNotEmitAssignmentAndRecordsDegradeReason() {
+    void resolvesFullContextForCompatibleSelectedProposalAndFailsWhenARequiredComponentIsMissing() {
         RouteChainDispatchV2Properties properties = RouteChainDispatchV2Properties.defaults();
         var pairClusterStage = RouteTestFixtures.pairClusterStage(properties);
         var bundleStage = RouteTestFixtures.bundleStage(properties, pairClusterStage);
+        var routeCandidateStage = RouteTestFixtures.routeCandidateStage(properties);
+        var routeProposalStage = RouteTestFixtures.routeProposalStage(properties);
         DispatchSelectorStage selectorStage = RouteTestFixtures.selectorStage(properties);
         DispatchCandidateContext context = new DispatchCandidateContext(
                 pairClusterStage.bufferedOrderWindow().orders(),
                 RouteTestFixtures.request().availableDrivers(),
                 pairClusterStage,
                 bundleStage);
-        var routeCandidateStage = RouteTestFixtures.routeCandidateStage(properties);
+        SelectedProposalResolver resolver = new SelectedProposalResolver();
         SelectedProposal selectedProposal = selectorStage.globalSelectionResult().selectedProposals().getFirst();
         SelectorCandidate selectorCandidate = selectorStage.selectorCandidates().stream()
                 .filter(candidate -> candidate.proposalId().equals(selectedProposal.proposalId()))
                 .findFirst()
                 .orElseThrow();
-        RouteProposal routeProposal = RouteTestFixtures.routeProposalStage(properties).routeProposals().stream()
+        RouteProposal routeProposal = routeProposalStage.routeProposals().stream()
                 .filter(proposal -> proposal.proposalId().equals(selectedProposal.proposalId()))
                 .findFirst()
                 .orElseThrow();
-        SelectedProposalResolver resolver = new SelectedProposalResolver();
 
-        SelectedProposalResolveResult missingSelector = resolver.resolve(
+        SelectedProposalResolveResult resolved = resolver.resolve(
                 selectedProposal,
-                java.util.Map.of(),
-                java.util.Map.of(routeProposal.proposalId(), routeProposal),
+                Map.of(selectorCandidate.proposalId(), selectorCandidate),
+                Map.of(routeProposal.proposalId(), routeProposal),
                 routeCandidateStage,
                 context);
         SelectedProposalResolveResult missingRoute = resolver.resolve(
                 selectedProposal,
-                java.util.Map.of(selectorCandidate.proposalId(), selectorCandidate),
-                java.util.Map.of(),
+                Map.of(selectorCandidate.proposalId(), selectorCandidate),
+                Map.of(),
                 routeCandidateStage,
                 context);
 
-        assertTrue(missingSelector.resolvedProposal().isEmpty());
-        assertTrue(missingSelector.degradeReasons().contains("executor-missing-selected-proposal-context"));
+        assertTrue(resolved.resolvedProposal().isPresent());
+        assertEquals(selectedProposal.proposalId(), resolved.resolvedProposal().orElseThrow().routeProposal().proposalId());
         assertTrue(missingRoute.resolvedProposal().isEmpty());
         assertTrue(missingRoute.degradeReasons().contains("executor-missing-selected-proposal-context"));
     }

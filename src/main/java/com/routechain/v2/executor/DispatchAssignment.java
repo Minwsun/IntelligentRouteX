@@ -7,6 +7,7 @@ import java.util.List;
 
 public record DispatchAssignment(
         String schemaVersion,
+        String assignmentId,
         String proposalId,
         String bundleId,
         String anchorOrderId,
@@ -14,9 +15,12 @@ public record DispatchAssignment(
         List<String> orderIds,
         List<String> stopOrder,
         ExecutionActionType actionType,
+        com.routechain.v2.route.RouteProposalSource routeSource,
         int selectionRank,
         double selectionScore,
         double robustUtility,
+        double projectedPickupEtaMinutes,
+        double projectedCompletionEtaMinutes,
         double routeValue,
         String clusterId,
         boolean boundaryCross,

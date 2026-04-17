@@ -16,6 +16,7 @@ class DispatchExecutorServiceTest {
         RouteChainDispatchV2Properties properties = RouteChainDispatchV2Properties.defaults();
         var pairClusterStage = RouteTestFixtures.pairClusterStage(properties);
         var bundleStage = RouteTestFixtures.bundleStage(properties, pairClusterStage);
+        var routeCandidateStage = RouteTestFixtures.routeCandidateStage(properties);
         var routeProposalStage = RouteTestFixtures.routeProposalStage(properties);
         var selectorStage = RouteTestFixtures.selectorStage(properties);
         DispatchExecutorService service = RouteTestFixtures.executorService(properties);
@@ -24,12 +25,13 @@ class DispatchExecutorServiceTest {
                 RouteTestFixtures.request(),
                 pairClusterStage,
                 bundleStage,
+                routeCandidateStage,
                 routeProposalStage,
                 selectorStage);
 
         assertFalse(stage.assignments().isEmpty());
         assertNotNull(stage.dispatchExecutionSummary());
-        assertEquals(stage.assignments().getFirst().proposalId(), stage.selectedRouteId());
         assertTrue(stage.assignments().stream().allMatch(assignment -> assignment.actionType() == ExecutionActionType.ASSIGN_DRIVER));
+        assertEquals(stage.assignments().size(), stage.dispatchExecutionSummary().executedAssignmentCount());
     }
 }

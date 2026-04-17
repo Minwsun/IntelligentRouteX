@@ -6,9 +6,11 @@ record DispatchExecutionTrace(
         List<String> missingContextProposalIds,
         List<String> executorOrdering,
         List<String> assignmentBuildReasons,
-        String selectedRouteIdReason) {
+        List<String> conflictRejectedProposalIds,
+        List<String> emittedAssignmentIds,
+        String summaryReason) {
 
     static DispatchExecutionTrace empty() {
-        return new DispatchExecutionTrace(List.of(), List.of(), List.of(), "no-selection");
+        return new DispatchExecutionTrace(List.of(), List.of(), List.of(), List.of(), List.of(), "no-selection");
     }
 }

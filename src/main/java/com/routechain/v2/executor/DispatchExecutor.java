@@ -1,6 +1,7 @@
 package com.routechain.v2.executor;
 
 import com.routechain.v2.route.DispatchCandidateContext;
+import com.routechain.v2.route.DispatchRouteCandidateStage;
 import com.routechain.v2.route.RouteProposal;
 import com.routechain.v2.selector.GlobalSelectionResult;
 import com.routechain.v2.selector.SelectedProposal;
@@ -12,15 +13,22 @@ import java.util.List;
 import java.util.Map;
 
 public final class DispatchExecutor {
+    private final SelectedProposalResolver selectedProposalResolver;
+    private final ExecutionConflictValidator executionConflictValidator;
     private final DispatchAssignmentBuilder dispatchAssignmentBuilder;
 
-    public DispatchExecutor(DispatchAssignmentBuilder dispatchAssignmentBuilder) {
+    public DispatchExecutor(SelectedProposalResolver selectedProposalResolver,
+                            ExecutionConflictValidator executionConflictValidator,
+                            DispatchAssignmentBuilder dispatchAssignmentBuilder) {
+        this.selectedProposalResolver = selectedProposalResolver;
+        this.executionConflictValidator = executionConflictValidator;
         this.dispatchAssignmentBuilder = dispatchAssignmentBuilder;
     }
 
     public DispatchExecutorResult execute(GlobalSelectionResult globalSelectionResult,
                                           List<SelectorCandidate> selectorCandidates,
                                           List<RouteProposal> routeProposals,
+                                          DispatchRouteCandidateStage routeCandidateStage,
                                           DispatchCandidateContext context) {
         Map<String, SelectorCandidate> selectorCandidateByProposalId = selectorCandidates.stream()
                 .collect(java.util.stream.Collectors.toMap(SelectorCandidate::proposalId, candidate -> candidate, (left, right) -> left));
@@ -33,34 +41,49 @@ public final class DispatchExecutor {
                         .thenComparing(SelectedProposal::proposalId))
                 .toList();
 
-        List<DispatchAssignment> assignments = new ArrayList<>();
         List<String> missingContextProposalIds = new ArrayList<>();
         List<String> ordering = new ArrayList<>();
-        List<String> assignmentBuildReasons = new ArrayList<>();
+        List<ResolvedSelectedProposal> resolvedSelectedProposals = new ArrayList<>();
         List<String> degradeReasons = new ArrayList<>();
 
         for (SelectedProposal selectedProposal : orderedSelectedProposals) {
             ordering.add(selectedProposal.proposalId());
-            DispatchAssignmentBuildResult buildResult = dispatchAssignmentBuilder.build(
+            SelectedProposalResolveResult resolveResult = selectedProposalResolver.resolve(
                     selectedProposal,
-                    selectorCandidateByProposalId.get(selectedProposal.proposalId()),
-                    routeProposalById.get(selectedProposal.proposalId()),
+                    selectorCandidateByProposalId,
+                    routeProposalById,
+                    routeCandidateStage,
                     context);
-            buildResult.assignment().ifPresent(assignments::add);
-            missingContextProposalIds.addAll(buildResult.trace().missingContextProposalIds());
-            assignmentBuildReasons.addAll(buildResult.trace().assignmentBuildReasons());
-            degradeReasons.addAll(buildResult.degradeReasons());
+            resolveResult.resolvedProposal().ifPresent(resolvedSelectedProposals::add);
+            missingContextProposalIds.addAll(resolveResult.trace().missingContextProposalIds());
+            degradeReasons.addAll(resolveResult.degradeReasons());
         }
 
-        String selectedRouteId = assignments.isEmpty() ? null : assignments.getFirst().proposalId();
+        ExecutionConflictValidationResult validationResult = executionConflictValidator.validate(resolvedSelectedProposals);
+        List<String> assignmentBuildReasons = new ArrayList<>();
+        List<String> emittedAssignmentIds = new ArrayList<>();
+        List<DispatchAssignment> assignments = new ArrayList<>();
+        for (ResolvedSelectedProposal resolvedSelectedProposal : validationResult.acceptedProposals()) {
+            DispatchAssignmentBuildResult buildResult = dispatchAssignmentBuilder.build(resolvedSelectedProposal, context);
+            buildResult.assignment().ifPresent(assignments::add);
+            assignmentBuildReasons.addAll(buildResult.trace().assignmentBuildReasons());
+            emittedAssignmentIds.addAll(buildResult.trace().emittedAssignmentIds());
+            degradeReasons.addAll(buildResult.degradeReasons());
+        }
+        degradeReasons.addAll(validationResult.degradeReasons());
+
         return new DispatchExecutorResult(
                 List.copyOf(assignments),
-                selectedRouteId,
+                globalSelectionResult.selectedCount(),
+                resolvedSelectedProposals.size(),
+                validationResult.trace().conflictRejectedProposalIds().size(),
                 new DispatchExecutionTrace(
                         List.copyOf(missingContextProposalIds),
                         List.copyOf(ordering),
                         List.copyOf(assignmentBuildReasons),
-                        selectedRouteId == null ? "no-executed-assignment" : "selected-route-id-from-first-executed-assignment"),
+                        validationResult.trace().conflictRejectedProposalIds(),
+                        List.copyOf(emittedAssignmentIds),
+                        assignments.isEmpty() ? "no-executed-assignment" : "executed-assignments-emitted"),
                 degradeReasons.stream().distinct().toList());
     }
 }

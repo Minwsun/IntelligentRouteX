@@ -41,6 +41,8 @@ import com.routechain.v2.scenario.ScenarioGateEvaluator;
 import com.routechain.v2.executor.DispatchAssignmentBuilder;
 import com.routechain.v2.executor.DispatchExecutor;
 import com.routechain.v2.executor.DispatchExecutorService;
+import com.routechain.v2.executor.ExecutionConflictValidator;
+import com.routechain.v2.executor.SelectedProposalResolver;
 import com.routechain.v2.selector.ConflictGraphBuilder;
 import com.routechain.v2.selector.DispatchSelectorService;
 import com.routechain.v2.selector.GlobalSelector;
@@ -365,8 +367,20 @@ public class DispatchV2Configuration {
     }
 
     @Bean
-    DispatchExecutor dispatchExecutor(DispatchAssignmentBuilder dispatchAssignmentBuilder) {
-        return new DispatchExecutor(dispatchAssignmentBuilder);
+    SelectedProposalResolver selectedProposalResolver() {
+        return new SelectedProposalResolver();
+    }
+
+    @Bean
+    ExecutionConflictValidator executionConflictValidator() {
+        return new ExecutionConflictValidator();
+    }
+
+    @Bean
+    DispatchExecutor dispatchExecutor(SelectedProposalResolver selectedProposalResolver,
+                                      ExecutionConflictValidator executionConflictValidator,
+                                      DispatchAssignmentBuilder dispatchAssignmentBuilder) {
+        return new DispatchExecutor(selectedProposalResolver, executionConflictValidator, dispatchAssignmentBuilder);
     }
 
     @Bean

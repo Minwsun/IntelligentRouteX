@@ -43,6 +43,8 @@ import com.routechain.v2.executor.DispatchAssignmentBuilder;
 import com.routechain.v2.executor.DispatchExecutor;
 import com.routechain.v2.executor.DispatchExecutorService;
 import com.routechain.v2.executor.DispatchExecutorStage;
+import com.routechain.v2.executor.ExecutionConflictValidator;
+import com.routechain.v2.executor.SelectedProposalResolver;
 import com.routechain.v2.selector.ConflictGraphBuilder;
 import com.routechain.v2.selector.DispatchSelectorService;
 import com.routechain.v2.selector.DispatchSelectorStage;
@@ -263,18 +265,23 @@ public final class RouteTestFixtures {
     }
 
     public static DispatchExecutorService executorService(RouteChainDispatchV2Properties properties) {
-        return new DispatchExecutorService(new DispatchExecutor(new DispatchAssignmentBuilder()));
+        return new DispatchExecutorService(new DispatchExecutor(
+                new SelectedProposalResolver(),
+                new ExecutionConflictValidator(),
+                new DispatchAssignmentBuilder()));
     }
 
     public static DispatchExecutorStage executorStage(RouteChainDispatchV2Properties properties) {
         DispatchPairClusterStage pairClusterStage = pairClusterStage(properties);
         DispatchBundleStage bundleStage = bundleStage(properties, pairClusterStage);
+        DispatchRouteCandidateStage routeCandidateStage = routeCandidateStage(properties);
         DispatchRouteProposalStage routeProposalStage = routeProposalStage(properties);
         DispatchSelectorStage selectorStage = selectorStage(properties);
         return executorService(properties).evaluate(
                 request(),
                 pairClusterStage,
                 bundleStage,
+                routeCandidateStage,
                 routeProposalStage,
                 selectorStage);
     }

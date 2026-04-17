@@ -60,6 +60,7 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 - `PairEdge`
 - `SelectorCandidateIdentityKey`
 - `SelectorDecisionTrace`
+- `ResolvedSelectedProposal`
 - `DispatchExecutionTrace`
 
 ## Rule

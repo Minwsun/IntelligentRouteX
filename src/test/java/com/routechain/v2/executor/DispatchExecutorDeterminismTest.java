@@ -17,10 +17,11 @@ class DispatchExecutorDeterminismTest {
         var selectorStage = RouteTestFixtures.selectorStage(properties);
         DispatchExecutorService service = RouteTestFixtures.executorService(properties);
 
-        DispatchExecutorStage first = service.evaluate(RouteTestFixtures.request(), pairClusterStage, bundleStage, routeProposalStage, selectorStage);
-        DispatchExecutorStage second = service.evaluate(RouteTestFixtures.request(), pairClusterStage, bundleStage, routeProposalStage, selectorStage);
+        var routeCandidateStage = RouteTestFixtures.routeCandidateStage(properties);
+        DispatchExecutorStage first = service.evaluate(RouteTestFixtures.request(), pairClusterStage, bundleStage, routeCandidateStage, routeProposalStage, selectorStage);
+        DispatchExecutorStage second = service.evaluate(RouteTestFixtures.request(), pairClusterStage, bundleStage, routeCandidateStage, routeProposalStage, selectorStage);
 
         assertEquals(first.assignments(), second.assignments());
-        assertEquals(first.selectedRouteId(), second.selectedRouteId());
+        assertEquals(first.dispatchExecutionSummary(), second.dispatchExecutionSummary());
     }
 }

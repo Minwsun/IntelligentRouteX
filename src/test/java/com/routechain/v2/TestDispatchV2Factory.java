@@ -37,6 +37,8 @@ import com.routechain.v2.scenario.ScenarioGateEvaluator;
 import com.routechain.v2.executor.DispatchAssignmentBuilder;
 import com.routechain.v2.executor.DispatchExecutor;
 import com.routechain.v2.executor.DispatchExecutorService;
+import com.routechain.v2.executor.ExecutionConflictValidator;
+import com.routechain.v2.executor.SelectedProposalResolver;
 import com.routechain.v2.selector.ConflictGraphBuilder;
 import com.routechain.v2.selector.DispatchSelectorService;
 import com.routechain.v2.selector.GlobalSelector;
@@ -158,7 +160,12 @@ final class TestDispatchV2Factory {
                 conflictGraphBuilder,
                 globalSelector);
         DispatchAssignmentBuilder dispatchAssignmentBuilder = configuration.dispatchAssignmentBuilder();
-        DispatchExecutor dispatchExecutor = configuration.dispatchExecutor(dispatchAssignmentBuilder);
+        SelectedProposalResolver selectedProposalResolver = configuration.selectedProposalResolver();
+        ExecutionConflictValidator executionConflictValidator = configuration.executionConflictValidator();
+        DispatchExecutor dispatchExecutor = configuration.dispatchExecutor(
+                selectedProposalResolver,
+                executionConflictValidator,
+                dispatchAssignmentBuilder);
         DispatchExecutorService dispatchExecutorService = configuration.dispatchExecutorService(dispatchExecutor);
         return configuration.dispatchV2Core(
                 dispatchEtaContextService,

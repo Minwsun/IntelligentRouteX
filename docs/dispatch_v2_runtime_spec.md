@@ -8,6 +8,8 @@
 
 The current runtime result must only report stages that actually ran. For the current executor slice, `DispatchV2Result.decisionStages` must be exactly `["eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector", "dispatch-executor"]` on the enabled path.
 
+For this hardened executor slice, `DispatchV2Result.selectedRouteId` remains intentionally `null`. The runtime may emit multiple executed assignments, so a single selected route id is not yet considered a safe execution semantic.
+
 ## Runtime Defaults
 
 - `tick=30s`

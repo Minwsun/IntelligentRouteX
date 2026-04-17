@@ -8,6 +8,5 @@ public record DispatchExecutorStage(
         String schemaVersion,
         List<DispatchAssignment> assignments,
         DispatchExecutionSummary dispatchExecutionSummary,
-        String selectedRouteId,
         List<String> degradeReasons) implements SchemaVersioned {
 }

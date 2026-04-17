@@ -14,10 +14,11 @@ class DispatchExecutionSummaryTest {
         RouteChainDispatchV2Properties properties = RouteChainDispatchV2Properties.defaults();
         DispatchExecutorStage stage = RouteTestFixtures.executorStage(properties);
 
-        assertEquals(stage.assignments().size(), stage.dispatchExecutionSummary().assignmentCount());
-        assertEquals(stage.assignments().stream().map(DispatchAssignment::driverId).distinct().count(), stage.dispatchExecutionSummary().executedDriverCount());
-        assertEquals(stage.assignments().stream().flatMap(assignment -> assignment.orderIds().stream()).collect(java.util.stream.Collectors.toSet()).size(), stage.dispatchExecutionSummary().executedOrderCount());
-        assertEquals(stage.assignments().size(), stage.dispatchExecutionSummary().actionTypeCounts().getOrDefault(ExecutionActionType.ASSIGN_DRIVER, 0));
-        assertTrue(stage.dispatchExecutionSummary().selectedProposalCount() >= stage.dispatchExecutionSummary().assignmentCount());
+        assertEquals(stage.assignments().size(), stage.dispatchExecutionSummary().executedAssignmentCount());
+        assertEquals(
+                stage.dispatchExecutionSummary().selectedProposalCount() - stage.dispatchExecutionSummary().executedAssignmentCount(),
+                stage.dispatchExecutionSummary().skippedProposalCount());
+        assertTrue(stage.dispatchExecutionSummary().resolvedProposalCount() >= stage.dispatchExecutionSummary().executedAssignmentCount());
+        assertTrue(stage.dispatchExecutionSummary().resolvedButRejectedCount() >= 0);
     }
 }

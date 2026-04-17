@@ -75,6 +75,7 @@ public final class DispatchV2Core {
                 request,
                 pairClusterStage,
                 bundleStage,
+                routeCandidateStage,
                 routeProposalStage,
                 selectorStage);
         java.util.List<String> degradeReasons = java.util.stream.Stream.concat(
@@ -98,7 +99,7 @@ public final class DispatchV2Core {
                 "dispatch-v2-result/v1",
                 request.traceId(),
                 false,
-                executorStage.selectedRouteId(),
+                null,
                 java.util.List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector", "dispatch-executor"),
                 etaStage.etaContext(),
                 etaStage.etaStageTrace(),

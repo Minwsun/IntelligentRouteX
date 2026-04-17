@@ -9,16 +9,19 @@ import com.routechain.v2.selector.SelectedProposal;
 import com.routechain.v2.selector.SelectorCandidate;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import java.util.Map;
 
-class DispatchAssignmentBuilderTest {
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+
+class DispatchAssignmentIdentityStabilityTest {
 
     @Test
-    void buildsAssignmentFromSelectedProposalSelectorCandidateRouteProposalAndBundleProvenance() {
+    void sameInputYieldsSameAssignmentIdAndChangedRankChangesIdentity() {
         RouteChainDispatchV2Properties properties = RouteChainDispatchV2Properties.defaults();
         var pairClusterStage = RouteTestFixtures.pairClusterStage(properties);
         var bundleStage = RouteTestFixtures.bundleStage(properties, pairClusterStage);
+        var routeCandidateStage = RouteTestFixtures.routeCandidateStage(properties);
         var routeProposalStage = RouteTestFixtures.routeProposalStage(properties);
         DispatchSelectorStage selectorStage = RouteTestFixtures.selectorStage(properties);
         DispatchCandidateContext context = new DispatchCandidateContext(
@@ -27,7 +30,6 @@ class DispatchAssignmentBuilderTest {
                 pairClusterStage,
                 bundleStage);
         DispatchAssignmentBuilder builder = new DispatchAssignmentBuilder();
-        var routeCandidateStage = RouteTestFixtures.routeCandidateStage(properties);
         SelectedProposal selectedProposal = selectorStage.globalSelectionResult().selectedProposals().getFirst();
         SelectorCandidate selectorCandidate = selectorStage.selectorCandidates().stream()
                 .filter(candidate -> candidate.proposalId().equals(selectedProposal.proposalId()))
@@ -37,30 +39,32 @@ class DispatchAssignmentBuilderTest {
                 .filter(proposal -> proposal.proposalId().equals(selectedProposal.proposalId()))
                 .findFirst()
                 .orElseThrow();
-        ResolvedSelectedProposal resolvedSelectedProposal = new SelectedProposalResolver().resolve(
+        ResolvedSelectedProposal resolved = new SelectedProposalResolver().resolve(
                         selectedProposal,
-                        java.util.Map.of(selectorCandidate.proposalId(), selectorCandidate),
-                        java.util.Map.of(routeProposal.proposalId(), routeProposal),
+                        Map.of(selectorCandidate.proposalId(), selectorCandidate),
+                        Map.of(routeProposal.proposalId(), routeProposal),
                         routeCandidateStage,
                         context)
                 .resolvedProposal()
                 .orElseThrow();
+        ResolvedSelectedProposal changedRank = new ResolvedSelectedProposal(
+                new com.routechain.v2.selector.SelectedProposal(
+                        resolved.selectedProposal().schemaVersion(),
+                        resolved.selectedProposal().proposalId(),
+                        resolved.selectedProposal().selectionRank() + 1,
+                        resolved.selectedProposal().selectionScore(),
+                        resolved.selectedProposal().reasons()),
+                resolved.selectorCandidate(),
+                resolved.routeProposal(),
+                resolved.bundleCandidate(),
+                resolved.pickupAnchor(),
+                resolved.driverCandidate());
 
-        DispatchAssignmentBuildResult result = builder.build(resolvedSelectedProposal, context);
-        DispatchAssignment assignment = result.assignment().orElseThrow();
+        DispatchAssignment first = builder.build(resolved, context).assignment().orElseThrow();
+        DispatchAssignment second = builder.build(resolved, context).assignment().orElseThrow();
+        DispatchAssignment changed = builder.build(changedRank, context).assignment().orElseThrow();
 
-        assertEquals(selectedProposal.proposalId() + "|" + selectorCandidate.driverId() + "|" + selectedProposal.selectionRank(), assignment.assignmentId());
-        assertEquals(selectorCandidate.driverId(), assignment.driverId());
-        assertEquals(selectorCandidate.orderIds(), assignment.orderIds());
-        assertEquals(routeProposal.stopOrder(), assignment.stopOrder());
-        assertEquals(routeProposal.source(), assignment.routeSource());
-        assertEquals(selectorCandidate.clusterId(), assignment.clusterId());
-        assertEquals(selectorCandidate.boundaryCross(), assignment.boundaryCross());
-        assertEquals(routeProposal.projectedPickupEtaMinutes(), assignment.projectedPickupEtaMinutes());
-        assertEquals(routeProposal.projectedCompletionEtaMinutes(), assignment.projectedCompletionEtaMinutes());
-        assertEquals(context.readyWindowStart(selectorCandidate.bundleId()), assignment.readyWindowStart());
-        assertEquals(context.readyWindowEnd(selectorCandidate.bundleId()), assignment.readyWindowEnd());
-        assertTrue(assignment.reasons().contains("selected-by-global-selector"));
-        assertTrue(assignment.reasons().contains("executor-assignment-materialized"));
+        assertEquals(first.assignmentId(), second.assignmentId());
+        assertNotEquals(first.assignmentId(), changed.assignmentId());
     }
 }

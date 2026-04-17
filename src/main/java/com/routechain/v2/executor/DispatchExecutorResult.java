@@ -4,7 +4,9 @@ import java.util.List;
 
 record DispatchExecutorResult(
         List<DispatchAssignment> assignments,
-        String selectedRouteId,
+        int selectedProposalCount,
+        int resolvedProposalCount,
+        int resolvedButRejectedCount,
         DispatchExecutionTrace trace,
         List<String> degradeReasons) {
 }
