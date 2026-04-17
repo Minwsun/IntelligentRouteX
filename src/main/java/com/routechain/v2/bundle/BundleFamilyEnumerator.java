@@ -48,6 +48,7 @@ public final class BundleFamilyEnumerator {
         return new BundleCandidate(
                 "bundle-candidate/v1",
                 "%s|%s|%s".formatted(family.name(), orderSetSignature, seedOrderId),
+                BundleProposalSource.DETERMINISTIC_FAMILY,
                 family,
                 seed.cluster().clusterId(),
                 family == BundleFamily.BOUNDARY_CROSS,

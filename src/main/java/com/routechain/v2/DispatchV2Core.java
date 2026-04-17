@@ -115,6 +115,7 @@ public final class DispatchV2Core {
         java.util.List<MlStageMetadata> mlStageMetadata = java.util.stream.Stream.of(
                         etaStage.mlStageMetadata().stream(),
                         pairClusterStage.mlStageMetadata().stream(),
+                        bundleStage.mlStageMetadata().stream(),
                         routeCandidateStage.mlStageMetadata().stream(),
                         routeProposalStage.mlStageMetadata().stream())
                 .flatMap(stream -> stream)

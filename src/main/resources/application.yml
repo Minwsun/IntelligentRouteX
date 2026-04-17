@@ -32,6 +32,15 @@ routechain:
         alternatives-timeout: 180ms
         refine-timeout: 150ms
         max-alternatives-per-driver-candidate: 2
+      greedrl:
+        enabled: false
+        base-url: http://127.0.0.1:8093
+        connect-timeout: 75ms
+        read-timeout: 180ms
+        bundle-timeout: 180ms
+        sequence-timeout: 150ms
+        max-orders-per-request: 8
+        max-proposals-per-cluster: 3
     buffer:
       hold-window: 45s
     cluster:

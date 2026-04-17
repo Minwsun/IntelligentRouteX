@@ -1,6 +1,7 @@
 package com.routechain.v2.bundle;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
+import com.routechain.v2.integration.NoOpGreedRlClient;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,6 +29,7 @@ class BoundaryExpansionSummaryTest {
                 new BundleFamilyEnumerator(properties),
                 new BundleValidator(properties),
                 new BundleScorer(properties),
-                new BundleDominancePruner());
+                new BundleDominancePruner(),
+                new NoOpGreedRlClient());
     }
 }

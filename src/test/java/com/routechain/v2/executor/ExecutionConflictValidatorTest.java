@@ -164,6 +164,7 @@ class ExecutionConflictValidatorTest {
                 new com.routechain.v2.bundle.BundleCandidate(
                         "bundle-candidate/v1",
                         "bundle-" + proposalId,
+                        com.routechain.v2.bundle.BundleProposalSource.DETERMINISTIC_FAMILY,
                         com.routechain.v2.bundle.BundleFamily.COMPACT_CLIQUE,
                         "cluster-" + proposalId,
                         false,

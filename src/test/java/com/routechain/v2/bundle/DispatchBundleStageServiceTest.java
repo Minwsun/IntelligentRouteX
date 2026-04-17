@@ -1,6 +1,7 @@
 package com.routechain.v2.bundle;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
+import com.routechain.v2.integration.NoOpGreedRlClient;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -18,7 +19,8 @@ class DispatchBundleStageServiceTest {
                 new BundleFamilyEnumerator(RouteChainDispatchV2Properties.defaults()),
                 new BundleValidator(RouteChainDispatchV2Properties.defaults()),
                 new BundleScorer(RouteChainDispatchV2Properties.defaults()),
-                new BundleDominancePruner());
+                new BundleDominancePruner(),
+                new NoOpGreedRlClient());
 
         DispatchBundleStage stage = service.evaluate(
                 BundleTestFixtures.clearEtaContext(),

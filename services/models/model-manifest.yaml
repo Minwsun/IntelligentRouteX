@@ -2,8 +2,8 @@ schemaVersion: model-manifest/v1
 workers:
   - worker_name: ml-greedrl-worker
     model_name: greedrl
-    model_version: pinned-placeholder
-    artifact_digest: sha256:pending
+    model_version: 2026.04.17-v1
+    artifact_digest: sha256:5711fb82a853ac2771f86ba476dac273f51bb95d7f466ac00f628afb4cd7c236
     rollback_artifact_digest: sha256:pending-rollback
     runtime_image: ghcr.io/minwsun/intelligentroutex/ml-greedrl-worker:bootstrap
     compatibility_contract_version: dispatch-v2-ml/v1
@@ -11,8 +11,28 @@ workers:
     startup_warmup_request:
       endpoint: /bundle/propose
       payload:
-        schemaVersion: bundle-proposal-request/v1
+        schemaVersion: greedrl-request/v1
         traceId: warmup-greedrl
+        payload:
+          schemaVersion: greedrl-bundle-feature-vector/v1
+          traceId: warmup-greedrl
+          clusterId: cluster-warmup
+          workingOrderIds:
+            - order-1
+            - order-2
+            - order-3
+          prioritizedOrderIds:
+            - order-1
+            - order-2
+            - order-3
+          acceptedBoundaryOrderIds:
+            - order-3
+          supportScoreByOrder:
+            order-1: 0.8
+            order-2: 0.74
+            order-3: 0.68
+          bundleMaxSize: 3
+          maxProposals: 2
   - worker_name: ml-routefinder-worker
     model_name: routefinder-local
     model_version: 2026.04.17-v1

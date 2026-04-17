@@ -68,9 +68,11 @@ import com.routechain.v2.cluster.PairHardGateEvaluator;
 import com.routechain.v2.cluster.PairSimilarityGraphBuilder;
 import com.routechain.v2.cluster.PairSimilarityScorer;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
+import com.routechain.v2.integration.NoOpGreedRlClient;
 import com.routechain.v2.integration.NoOpRouteFinderClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
+import com.routechain.v2.integration.GreedRlClient;
 import com.routechain.v2.integration.RouteFinderClient;
 import com.routechain.v2.integration.TabularScoringClient;
 
@@ -101,6 +103,13 @@ public final class TestDispatchV2Factory {
         return harness(properties, tabularScoringClient, routeFinderClient).core();
     }
 
+    public static DispatchV2Core core(RouteChainDispatchV2Properties properties,
+                                      TabularScoringClient tabularScoringClient,
+                                      RouteFinderClient routeFinderClient,
+                                      GreedRlClient greedRlClient) {
+        return harness(properties, tabularScoringClient, routeFinderClient, greedRlClient).core();
+    }
+
     public static TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties) {
         return harness(properties, new NoOpTabularScoringClient());
     }
@@ -112,6 +121,13 @@ public final class TestDispatchV2Factory {
     public static TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties,
                                                      TabularScoringClient tabularScoringClient,
                                                      RouteFinderClient routeFinderClient) {
+        return harness(properties, tabularScoringClient, routeFinderClient, new NoOpGreedRlClient());
+    }
+
+    public static TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties,
+                                                     TabularScoringClient tabularScoringClient,
+                                                     RouteFinderClient routeFinderClient,
+                                                     GreedRlClient greedRlClient) {
         DispatchV2Configuration configuration = new DispatchV2Configuration();
         BaselineTravelTimeEstimator baselineTravelTimeEstimator = configuration.baselineTravelTimeEstimator();
         TrafficProfileService trafficProfileService = configuration.trafficProfileService(properties);
@@ -162,7 +178,8 @@ public final class TestDispatchV2Factory {
                 bundleFamilyEnumerator,
                 bundleValidator,
                 bundleScorer,
-                bundleDominancePruner);
+                bundleDominancePruner,
+                greedRlClient);
         PickupAnchorSelector pickupAnchorSelector = configuration.pickupAnchorSelector(properties);
         DriverRouteFeatureBuilder driverRouteFeatureBuilder = configuration.driverRouteFeatureBuilder();
         CandidateDriverShortlister candidateDriverShortlister = configuration.candidateDriverShortlister(properties, driverRouteFeatureBuilder, tabularScoringClient);

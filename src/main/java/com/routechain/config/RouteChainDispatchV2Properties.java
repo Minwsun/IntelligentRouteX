@@ -571,6 +571,7 @@ public class RouteChainDispatchV2Properties {
     public static final class Ml {
         private final Tabular tabular = new Tabular();
         private final Routefinder routefinder = new Routefinder();
+        private final Greedrl greedrl = new Greedrl();
 
         public Tabular getTabular() {
             return tabular;
@@ -578,6 +579,10 @@ public class RouteChainDispatchV2Properties {
 
         public Routefinder getRoutefinder() {
             return routefinder;
+        }
+
+        public Greedrl getGreedrl() {
+            return greedrl;
         }
     }
 
@@ -683,6 +688,81 @@ public class RouteChainDispatchV2Properties {
 
         public void setMaxAlternativesPerDriverCandidate(int maxAlternativesPerDriverCandidate) {
             this.maxAlternativesPerDriverCandidate = maxAlternativesPerDriverCandidate;
+        }
+    }
+
+    public static final class Greedrl {
+        private boolean enabled = false;
+        private String baseUrl = "http://127.0.0.1:8093";
+        private Duration connectTimeout = Duration.ofMillis(75);
+        private Duration readTimeout = Duration.ofMillis(180);
+        private Duration bundleTimeout = Duration.ofMillis(180);
+        private Duration sequenceTimeout = Duration.ofMillis(150);
+        private int maxOrdersPerRequest = 8;
+        private int maxProposalsPerCluster = 3;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public Duration getConnectTimeout() {
+            return connectTimeout;
+        }
+
+        public void setConnectTimeout(Duration connectTimeout) {
+            this.connectTimeout = connectTimeout;
+        }
+
+        public Duration getReadTimeout() {
+            return readTimeout;
+        }
+
+        public void setReadTimeout(Duration readTimeout) {
+            this.readTimeout = readTimeout;
+        }
+
+        public Duration getBundleTimeout() {
+            return bundleTimeout;
+        }
+
+        public void setBundleTimeout(Duration bundleTimeout) {
+            this.bundleTimeout = bundleTimeout;
+        }
+
+        public Duration getSequenceTimeout() {
+            return sequenceTimeout;
+        }
+
+        public void setSequenceTimeout(Duration sequenceTimeout) {
+            this.sequenceTimeout = sequenceTimeout;
+        }
+
+        public int getMaxOrdersPerRequest() {
+            return maxOrdersPerRequest;
+        }
+
+        public void setMaxOrdersPerRequest(int maxOrdersPerRequest) {
+            this.maxOrdersPerRequest = maxOrdersPerRequest;
+        }
+
+        public int getMaxProposalsPerCluster() {
+            return maxProposalsPerCluster;
+        }
+
+        public void setMaxProposalsPerCluster(int maxProposalsPerCluster) {
+            this.maxProposalsPerCluster = maxProposalsPerCluster;
         }
     }
 

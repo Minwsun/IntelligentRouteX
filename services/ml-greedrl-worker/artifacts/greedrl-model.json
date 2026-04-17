@@ -1,0 +1,15 @@
+{
+  "modelVersion": "2026.04.17-v1",
+  "bundleProposal": {
+    "maxBundleSize": 4,
+    "maxGeneratedProposals": 3,
+    "perOrderBonus": 0.08,
+    "boundaryBonus": 0.12,
+    "lexicalTieBreakScale": 0.01
+  },
+  "sequenceProposal": {
+    "maxGeneratedSequences": 2,
+    "baseScore": 0.73,
+    "decayPerAlternative": 0.05
+  }
+}

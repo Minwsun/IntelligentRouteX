@@ -36,6 +36,7 @@ public final class BundleScorer {
         return new BundleCandidate(
                 candidate.schemaVersion(),
                 candidate.bundleId(),
+                candidate.proposalSource(),
                 candidate.family(),
                 candidate.clusterId(),
                 candidate.boundaryCross(),

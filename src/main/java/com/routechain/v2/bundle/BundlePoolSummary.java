@@ -11,6 +11,7 @@ public record BundlePoolSummary(
         int candidateCount,
         int retainedCount,
         Map<BundleFamily, Integer> familyCounts,
+        Map<BundleProposalSource, Integer> sourceCounts,
         int maxBundleSize,
         List<String> degradeReasons) implements SchemaVersioned {
 
@@ -20,6 +21,7 @@ public record BundlePoolSummary(
                 0,
                 0,
                 new EnumMap<>(BundleFamily.class),
+                new EnumMap<>(BundleProposalSource.class),
                 0,
                 List.of());
     }

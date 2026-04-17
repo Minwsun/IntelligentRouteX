@@ -72,9 +72,12 @@ import com.routechain.v2.selector.OrToolsSetPackingSolver;
 import com.routechain.v2.selector.SelectorCandidateBuilder;
 import com.routechain.v2.selector.SelectorSolver;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
+import com.routechain.v2.integration.NoOpGreedRlClient;
 import com.routechain.v2.integration.NoOpRouteFinderClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
+import com.routechain.v2.integration.GreedRlClient;
+import com.routechain.v2.integration.HttpGreedRlClient;
 import com.routechain.v2.integration.HttpRouteFinderClient;
 import com.routechain.v2.integration.HttpTabularScoringClient;
 import com.routechain.v2.integration.OpenMeteoClient;
@@ -140,6 +143,22 @@ public class DispatchV2Configuration {
                 java.nio.file.Path.of("services", "models", "model-manifest.yaml"));
         if (properties.isSidecarRequired() && !client.readyState().ready()) {
             throw new IllegalStateException("RouteFinder worker is required but not ready: " + client.readyState().reason());
+        }
+        return client;
+    }
+
+    @Bean
+    GreedRlClient greedRlClient(RouteChainDispatchV2Properties properties) {
+        if (!properties.isMlEnabled() || !properties.getMl().getGreedrl().isEnabled()) {
+            return new NoOpGreedRlClient();
+        }
+        HttpGreedRlClient client = new HttpGreedRlClient(
+                properties.getMl().getGreedrl().getBaseUrl(),
+                properties.getMl().getGreedrl().getConnectTimeout(),
+                properties.getMl().getGreedrl().getReadTimeout(),
+                java.nio.file.Path.of("services", "models", "model-manifest.yaml"));
+        if (properties.isSidecarRequired() && !client.readyState().ready()) {
+            throw new IllegalStateException("GreedRL worker is required but not ready: " + client.readyState().reason());
         }
         return client;
     }
@@ -275,7 +294,8 @@ public class DispatchV2Configuration {
                                                           BundleFamilyEnumerator bundleFamilyEnumerator,
                                                           BundleValidator bundleValidator,
                                                           BundleScorer bundleScorer,
-                                                          BundleDominancePruner bundleDominancePruner) {
+                                                          BundleDominancePruner bundleDominancePruner,
+                                                          GreedRlClient greedRlClient) {
         return new DispatchBundleStageService(
                 properties,
                 boundaryCandidateSelector,
@@ -284,7 +304,8 @@ public class DispatchV2Configuration {
                 bundleFamilyEnumerator,
                 bundleValidator,
                 bundleScorer,
-                bundleDominancePruner);
+                bundleDominancePruner,
+                greedRlClient);
     }
 
     @Bean

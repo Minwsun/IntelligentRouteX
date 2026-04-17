@@ -3,11 +3,17 @@ package com.routechain.v2.bundle;
 import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.v2.EtaContext;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
+import com.routechain.v2.integration.GreedRlBundleCandidate;
+import com.routechain.v2.integration.GreedRlBundleFeatureVector;
+import com.routechain.v2.integration.GreedRlBundleResult;
+import com.routechain.v2.integration.GreedRlClient;
+import com.routechain.v2.integration.MlStageMetadataAccumulator;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 public final class DispatchBundleStageService {
     private final RouteChainDispatchV2Properties properties;
@@ -18,6 +24,7 @@ public final class DispatchBundleStageService {
     private final BundleValidator bundleValidator;
     private final BundleScorer bundleScorer;
     private final BundleDominancePruner bundleDominancePruner;
+    private final GreedRlClient greedRlClient;
 
     public DispatchBundleStageService(RouteChainDispatchV2Properties properties,
                                       BoundaryCandidateSelector boundaryCandidateSelector,
@@ -26,7 +33,8 @@ public final class DispatchBundleStageService {
                                       BundleFamilyEnumerator bundleFamilyEnumerator,
                                       BundleValidator bundleValidator,
                                       BundleScorer bundleScorer,
-                                      BundleDominancePruner bundleDominancePruner) {
+                                      BundleDominancePruner bundleDominancePruner,
+                                      GreedRlClient greedRlClient) {
         this.properties = properties;
         this.boundaryCandidateSelector = boundaryCandidateSelector;
         this.boundaryExpansionEngine = boundaryExpansionEngine;
@@ -35,6 +43,7 @@ public final class DispatchBundleStageService {
         this.bundleValidator = bundleValidator;
         this.bundleScorer = bundleScorer;
         this.bundleDominancePruner = bundleDominancePruner;
+        this.greedRlClient = greedRlClient;
     }
 
     public DispatchBundleStage evaluate(EtaContext etaContext, DispatchPairClusterStage pairClusterStage) {
@@ -57,8 +66,17 @@ public final class DispatchBundleStageService {
                 boundaryExpansions);
         List<BundleSeed> seeds = bundleSeedGenerator.generate(pairClusterStage.microClusters(), context);
         List<BundleCandidate> feasibleCandidates = new ArrayList<>();
+        MlStageMetadataAccumulator greedRlMetadata = new MlStageMetadataAccumulator("bundle-pool");
         for (BundleSeed seed : seeds) {
-            List<BundleCandidate> familyCandidates = bundleFamilyEnumerator.enumerate(seed, context).stream()
+            List<BundleCandidate> generatedCandidates = new ArrayList<>(bundleFamilyEnumerator.enumerate(seed, context));
+            GreedRlBundleResult greedRlResult = proposeGreedRlBundles(seed);
+            greedRlMetadata.accept(greedRlResult);
+            if (greedRlResult.applied()) {
+                generatedCandidates.addAll(toBundleCandidates(seed, context, greedRlResult.proposals()));
+            } else if (!greedRlResult.degradeReason().isBlank() && !"greedrl-client-disabled".equals(greedRlResult.degradeReason())) {
+                degradeReasons.add(mapGreedRlDegradeReason(greedRlResult.degradeReason()));
+            }
+            List<BundleCandidate> familyCandidates = generatedCandidates.stream()
                     .map(candidate -> bundleValidator.validate(candidate, context))
                     .filter(BundleCandidate::feasible)
                     .map(candidate -> bundleScorer.score(candidate, context))
@@ -68,13 +86,16 @@ public final class DispatchBundleStageService {
             feasibleCandidates.addAll(familyCandidates);
         }
         Map<BundleFamily, Integer> familyCounts = new EnumMap<>(BundleFamily.class);
+        Map<BundleProposalSource, Integer> sourceCounts = new EnumMap<>(BundleProposalSource.class);
         feasibleCandidates.forEach(candidate -> familyCounts.merge(candidate.family(), 1, Integer::sum));
+        feasibleCandidates.forEach(candidate -> sourceCounts.merge(candidate.proposalSource(), 1, Integer::sum));
         List<BundleCandidate> retained = bundleDominancePruner.prune(feasibleCandidates);
         BundlePoolSummary bundlePoolSummary = new BundlePoolSummary(
                 "bundle-pool-summary/v1",
                 feasibleCandidates.size(),
                 retained.size(),
                 familyCounts,
+                sourceCounts,
                 retained.stream().mapToInt(candidate -> candidate.orderIds().size()).max().orElse(0),
                 List.copyOf(degradeReasons));
         return new DispatchBundleStage(
@@ -83,7 +104,95 @@ public final class DispatchBundleStageService {
                 boundaryExpansionSummary,
                 retained,
                 bundlePoolSummary,
+                greedRlMetadata.build().stream().toList(),
                 List.copyOf(degradeReasons));
+    }
+
+    private GreedRlBundleResult proposeGreedRlBundles(BundleSeed seed) {
+        if (!properties.isMlEnabled() || !properties.getMl().getGreedrl().isEnabled()) {
+            return GreedRlBundleResult.notApplied("greedrl-client-disabled");
+        }
+        if (seed.workingOrderIds().size() > properties.getMl().getGreedrl().getMaxOrdersPerRequest()) {
+            return GreedRlBundleResult.notApplied("greedrl-scope-too-large");
+        }
+        return greedRlClient.proposeBundles(
+                new GreedRlBundleFeatureVector(
+                        "greedrl-bundle-feature-vector/v1",
+                        seed.cluster().clusterId(),
+                        seed.cluster().clusterId(),
+                        List.copyOf(seed.workingOrderIds()),
+                        List.copyOf(seed.prioritizedOrderIds()),
+                        List.copyOf(seed.acceptedBoundaryOrderIds()),
+                        Map.copyOf(seed.supportScoreByOrder()),
+                        properties.getBundle().getMaxSize(),
+                        properties.getMl().getGreedrl().getMaxProposalsPerCluster()),
+                properties.getMl().getGreedrl().getBundleTimeout().toMillis());
+    }
+
+    private List<BundleCandidate> toBundleCandidates(BundleSeed seed,
+                                                     BundleContext context,
+                                                     List<GreedRlBundleCandidate> proposals) {
+        return proposals.stream()
+                .map(proposal -> toBundleCandidate(seed, context, proposal))
+                .flatMap(Optional::stream)
+                .toList();
+    }
+
+    private Optional<BundleCandidate> toBundleCandidate(BundleSeed seed,
+                                                        BundleContext context,
+                                                        GreedRlBundleCandidate proposal) {
+        List<String> distinctOrders = proposal.orderIds().stream()
+                .filter(seed.workingOrderIds()::contains)
+                .distinct()
+                .sorted()
+                .limit(properties.getBundle().getMaxSize())
+                .toList();
+        if (distinctOrders.isEmpty()) {
+            return Optional.empty();
+        }
+        String orderSetSignature = context.orderSetSignature(distinctOrders);
+        String seedOrderId = distinctOrders.getFirst();
+        String corridorSignature = "%d:%d".formatted(
+                Math.round(context.order(seedOrderId).dropoffPoint().latitude() - context.order(seedOrderId).pickupPoint().latitude()),
+                Math.round(context.order(seedOrderId).dropoffPoint().longitude() - context.order(seedOrderId).pickupPoint().longitude()));
+        List<String> acceptedBoundaryOrderIds = proposal.acceptedBoundaryOrderIds().stream()
+                .filter(seed.acceptedBoundaryOrderIds()::contains)
+                .distinct()
+                .sorted()
+                .toList();
+        return Optional.of(new BundleCandidate(
+                "bundle-candidate/v1",
+                "GREEDRL|%s|%s".formatted(orderSetSignature, seed.cluster().clusterId()),
+                BundleProposalSource.GREEDRL_PROPOSAL,
+                parseFamily(proposal.family()),
+                seed.cluster().clusterId(),
+                proposal.boundaryCross(),
+                acceptedBoundaryOrderIds,
+                distinctOrders,
+                orderSetSignature,
+                seedOrderId,
+                corridorSignature,
+                0.0,
+                false,
+                List.of()));
+    }
+
+    private BundleFamily parseFamily(String family) {
+        if (family == null || family.isBlank()) {
+            return BundleFamily.COMPACT_CLIQUE;
+        }
+        try {
+            return BundleFamily.valueOf(family);
+        } catch (IllegalArgumentException exception) {
+            return BundleFamily.COMPACT_CLIQUE;
+        }
+    }
+
+    private String mapGreedRlDegradeReason(String greedRlReason) {
+        if ("greedrl-scope-too-large".equals(greedRlReason)) {
+            return greedRlReason;
+        }
+        return "greedrl-ml-unavailable";
     }
 
     private BoundaryExpansionSummary summarizeBoundaryExpansions(List<BoundaryExpansion> expansions, List<String> degradeReasons) {

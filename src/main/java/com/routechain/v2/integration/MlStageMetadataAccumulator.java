@@ -50,6 +50,38 @@ public final class MlStageMetadataAccumulator {
         }
     }
 
+    public void accept(GreedRlBundleResult greedRlBundleResult) {
+        attempted = true;
+        applied = applied || greedRlBundleResult.applied();
+        fallbackUsed = fallbackUsed || greedRlBundleResult.fallbackUsed();
+        totalLatencyMs += greedRlBundleResult.workerMetadata().latencyMs();
+        if (sourceModel.isBlank() && !greedRlBundleResult.workerMetadata().sourceModel().isBlank()) {
+            sourceModel = greedRlBundleResult.workerMetadata().sourceModel();
+        }
+        if (modelVersion.isBlank() && !greedRlBundleResult.workerMetadata().modelVersion().isBlank()) {
+            modelVersion = greedRlBundleResult.workerMetadata().modelVersion();
+        }
+        if (artifactDigest.isBlank() && !greedRlBundleResult.workerMetadata().artifactDigest().isBlank()) {
+            artifactDigest = greedRlBundleResult.workerMetadata().artifactDigest();
+        }
+    }
+
+    public void accept(GreedRlSequenceResult greedRlSequenceResult) {
+        attempted = true;
+        applied = applied || greedRlSequenceResult.applied();
+        fallbackUsed = fallbackUsed || greedRlSequenceResult.fallbackUsed();
+        totalLatencyMs += greedRlSequenceResult.workerMetadata().latencyMs();
+        if (sourceModel.isBlank() && !greedRlSequenceResult.workerMetadata().sourceModel().isBlank()) {
+            sourceModel = greedRlSequenceResult.workerMetadata().sourceModel();
+        }
+        if (modelVersion.isBlank() && !greedRlSequenceResult.workerMetadata().modelVersion().isBlank()) {
+            modelVersion = greedRlSequenceResult.workerMetadata().modelVersion();
+        }
+        if (artifactDigest.isBlank() && !greedRlSequenceResult.workerMetadata().artifactDigest().isBlank()) {
+            artifactDigest = greedRlSequenceResult.workerMetadata().artifactDigest();
+        }
+    }
+
     public Optional<MlStageMetadata> build() {
         if (!attempted) {
             return Optional.empty();

@@ -7,6 +7,7 @@ import java.util.List;
 public record BundleCandidate(
         String schemaVersion,
         String bundleId,
+        BundleProposalSource proposalSource,
         BundleFamily family,
         String clusterId,
         boolean boundaryCross,

@@ -32,9 +32,11 @@ import com.routechain.v2.context.EtaUncertaintyEstimator;
 import com.routechain.v2.context.TrafficProfileService;
 import com.routechain.v2.context.WeatherContextService;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
+import com.routechain.v2.integration.NoOpGreedRlClient;
 import com.routechain.v2.integration.NoOpRouteFinderClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
+import com.routechain.v2.integration.GreedRlClient;
 import com.routechain.v2.integration.RouteFinderClient;
 import com.routechain.v2.integration.TabularScoringClient;
 import com.routechain.v2.scenario.DispatchScenarioService;
@@ -124,6 +126,12 @@ public final class RouteTestFixtures {
     }
 
     public static DispatchBundleStage bundleStage(RouteChainDispatchV2Properties properties, DispatchPairClusterStage pairClusterStage) {
+        return bundleStage(properties, pairClusterStage, new NoOpGreedRlClient());
+    }
+
+    public static DispatchBundleStage bundleStage(RouteChainDispatchV2Properties properties,
+                                                  DispatchPairClusterStage pairClusterStage,
+                                                  GreedRlClient greedRlClient) {
         return new DispatchBundleStageService(
                 properties,
                 new BoundaryCandidateSelector(properties),
@@ -132,7 +140,8 @@ public final class RouteTestFixtures {
                 new BundleFamilyEnumerator(properties),
                 new BundleValidator(properties),
                 new BundleScorer(properties),
-                new BundleDominancePruner())
+                new BundleDominancePruner(),
+                greedRlClient)
                 .evaluate(etaContext(), pairClusterStage);
     }
 

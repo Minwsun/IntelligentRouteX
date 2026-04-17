@@ -19,6 +19,7 @@ class BundleValidatorTest {
         BundleCandidate candidate = new BundleCandidate(
                 "bundle-candidate/v1",
                 "id",
+                BundleProposalSource.DETERMINISTIC_FAMILY,
                 BundleFamily.COMPACT_CLIQUE,
                 "cluster-001",
                 false,
