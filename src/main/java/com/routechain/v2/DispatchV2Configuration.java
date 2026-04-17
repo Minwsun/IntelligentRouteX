@@ -364,8 +364,8 @@ public class DispatchV2Configuration {
     }
 
     @Bean
-    SelectorSolver selectorSolver() {
-        return new OrToolsSetPackingSolver();
+    SelectorSolver selectorSolver(RouteChainDispatchV2Properties properties) {
+        return new OrToolsSetPackingSolver(properties);
     }
 
     @Bean

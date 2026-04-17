@@ -12,6 +12,14 @@ For this hardened executor slice, `DispatchV2Result.selectedRouteId` remains int
 
 Decision log, snapshot, replay recording, and warm/hot start hardening run after the 12-stage decision pipeline. They do not appear in `DispatchV2Result.decisionStages`.
 
+For the current global selector slice:
+
+- `SelectionSolverMode.GREEDY_REPAIR` is used when `selectorOrtoolsEnabled=false`
+- `SelectionSolverMode.ORTOOLS` is used only when the OR-Tools backend solves successfully
+- `SelectionSolverMode.DEGRADED_GREEDY` is used when OR-Tools is enabled but unavailable, times out, or fails
+- the selector objective remains `sum(selectionScore)` across all solver modes
+- hard conflicts remain limited to overlapping `orderIds`, overlapping `driverId`, and same-`bundleId` alternatives
+
 For the current hardening slice:
 
 - every enabled dispatch writes a decision log record through the configured feedback store
@@ -48,6 +56,8 @@ For executor summary semantics in the current slice:
 - `selector.greedyRepairEnabled=true`
 - `selector.repairPassLimit=1`
 - `selector.fallbackPenalty=0.03`
+- `selector.ortools.timeout=150ms`
+- `selector.ortools.objectiveScaleFactor=1000`
 - `feedback.decisionLogEnabled=true`
 - `feedback.snapshotEnabled=true`
 - `feedback.replayEnabled=true`
@@ -69,6 +79,8 @@ For executor summary semantics in the current slice:
 - `routechain.dispatch-v2.selector.greedy-repair-enabled`
 - `routechain.dispatch-v2.selector.repair-pass-limit`
 - `routechain.dispatch-v2.selector.fallback-penalty`
+- `routechain.dispatch-v2.selector.ortools.timeout`
+- `routechain.dispatch-v2.selector.ortools.objective-scale-factor`
 - `routechain.dispatch-v2.feedback.decision-log-enabled`
 - `routechain.dispatch-v2.feedback.snapshot-enabled`
 - `routechain.dispatch-v2.feedback.replay-enabled`

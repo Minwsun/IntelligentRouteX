@@ -70,3 +70,6 @@ routechain:
       greedy-repair-enabled: true
       repair-pass-limit: 1
       fallback-penalty: 0.03
+      ortools:
+        timeout: 150ms
+        objective-scale-factor: 1000

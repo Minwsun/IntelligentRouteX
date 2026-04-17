@@ -57,8 +57,8 @@ import com.routechain.v2.selector.ConflictGraphBuilder;
 import com.routechain.v2.selector.DispatchSelectorService;
 import com.routechain.v2.selector.GlobalSelector;
 import com.routechain.v2.selector.GreedyRepairSelector;
-import com.routechain.v2.selector.OrToolsSetPackingSolver;
 import com.routechain.v2.selector.SelectorCandidateBuilder;
+import com.routechain.v2.selector.SelectorSolver;
 import com.routechain.v2.cluster.DispatchPairClusterService;
 import com.routechain.v2.cluster.EtaLegCacheFactory;
 import com.routechain.v2.cluster.MicroClusterer;
@@ -169,10 +169,11 @@ public final class TestDispatchV2Factory {
         SelectorCandidateBuilder selectorCandidateBuilder = configuration.selectorCandidateBuilder(properties);
         ConflictGraphBuilder conflictGraphBuilder = configuration.conflictGraphBuilder();
         GreedyRepairSelector greedyRepairSelector = configuration.greedyRepairSelector();
+        SelectorSolver selectorSolver = configuration.selectorSolver(properties);
         GlobalSelector globalSelector = configuration.globalSelector(
                 properties,
                 greedyRepairSelector,
-                new OrToolsSetPackingSolver());
+                selectorSolver);
         DispatchSelectorService dispatchSelectorService = configuration.dispatchSelectorService(
                 selectorCandidateBuilder,
                 conflictGraphBuilder,

@@ -1,7 +1,6 @@
 package com.routechain.v2.selector;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -17,7 +16,7 @@ public final class GreedyRepairSelector {
         Map<String, Set<String>> adjacency = adjacency(conflictGraph);
         List<SelectorCandidateEnvelope> rankedCandidates = candidateEnvelopes.stream()
                 .filter(envelope -> envelope.candidate().feasible())
-                .sorted(candidateComparator())
+                .sorted(SelectorCandidateRanking.comparator())
                 .toList();
 
         List<SelectorCandidateEnvelope> selected = new ArrayList<>();
@@ -68,21 +67,13 @@ public final class GreedyRepairSelector {
             }
         }
 
-        List<SelectorCandidateEnvelope> rankedSelection = selected.stream().sorted(candidateComparator()).toList();
-        List<SelectedProposal> selectedProposals = new ArrayList<>();
-        for (int index = 0; index < rankedSelection.size(); index++) {
-            SelectorCandidate selectorCandidate = rankedSelection.get(index).candidate();
-            selectedProposals.add(new SelectedProposal(
-                    "selected-proposal/v1",
-                    selectorCandidate.proposalId(),
-                    index + 1,
-                    selectorCandidate.selectionScore(),
-                    selectionReasons.getOrDefault(selectorCandidate.proposalId(), List.of("selected"))));
-        }
-        double objectiveValue = rankedSelection.stream()
-                .map(SelectorCandidateEnvelope::candidate)
-                .mapToDouble(SelectorCandidate::selectionScore)
-                .sum();
+        List<SelectorCandidateEnvelope> rankedSelection = selected.stream()
+                .sorted(SelectorCandidateRanking.comparator())
+                .toList();
+        List<SelectedProposal> selectedProposals = SelectorCandidateRanking.toSelectedProposals(
+                rankedSelection,
+                proposalId -> selectionReasons.getOrDefault(proposalId, List.of("selected")));
+        double objectiveValue = SelectorCandidateRanking.objectiveValue(rankedSelection);
         return new SelectorSelectionOutcome(
                 new GlobalSelectionResult(
                         "global-selection-result/v1",
@@ -93,15 +84,6 @@ public final class GreedyRepairSelector {
                         objectiveValue,
                         List.of()),
                 new SelectorDecisionTrace(List.of(), List.copyOf(conflictFilteredCandidates), List.copyOf(repairSwapReplacements)));
-    }
-
-    private Comparator<SelectorCandidateEnvelope> candidateComparator() {
-        return Comparator
-                .comparingDouble((SelectorCandidateEnvelope envelope) -> envelope.candidate().selectionScore()).reversed()
-                .thenComparing(Comparator.comparingDouble((SelectorCandidateEnvelope envelope) -> envelope.candidate().robustUtility()).reversed())
-                .thenComparing(Comparator.comparingDouble((SelectorCandidateEnvelope envelope) -> envelope.candidate().routeValue()).reversed())
-                .thenComparingDouble(SelectorCandidateEnvelope::projectedPickupEtaMinutes)
-                .thenComparing(envelope -> envelope.candidate().proposalId());
     }
 
     private List<String> conflictsWithSelected(SelectorCandidateEnvelope candidateEnvelope,

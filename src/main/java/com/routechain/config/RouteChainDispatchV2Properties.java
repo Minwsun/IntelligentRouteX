@@ -532,6 +532,7 @@ public class RouteChainDispatchV2Properties {
         private boolean greedyRepairEnabled = true;
         private int repairPassLimit = 1;
         private double fallbackPenalty = 0.03;
+        private final Ortools ortools = new Ortools();
 
         public boolean isGreedyRepairEnabled() {
             return greedyRepairEnabled;
@@ -555,6 +556,31 @@ public class RouteChainDispatchV2Properties {
 
         public void setFallbackPenalty(double fallbackPenalty) {
             this.fallbackPenalty = fallbackPenalty;
+        }
+
+        public Ortools getOrtools() {
+            return ortools;
+        }
+    }
+
+    public static final class Ortools {
+        private Duration timeout = Duration.ofMillis(150);
+        private int objectiveScaleFactor = 1_000;
+
+        public Duration getTimeout() {
+            return timeout;
+        }
+
+        public void setTimeout(Duration timeout) {
+            this.timeout = timeout;
+        }
+
+        public int getObjectiveScaleFactor() {
+            return objectiveScaleFactor;
+        }
+
+        public void setObjectiveScaleFactor(int objectiveScaleFactor) {
+            this.objectiveScaleFactor = objectiveScaleFactor;
         }
     }
 

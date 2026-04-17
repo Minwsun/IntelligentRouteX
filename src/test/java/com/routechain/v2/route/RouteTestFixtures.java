@@ -52,6 +52,7 @@ import com.routechain.v2.selector.GlobalSelector;
 import com.routechain.v2.selector.GreedyRepairSelector;
 import com.routechain.v2.selector.OrToolsSetPackingSolver;
 import com.routechain.v2.selector.SelectorCandidateBuilder;
+import com.routechain.v2.selector.SelectorSolver;
 
 import java.time.Instant;
 import java.util.List;
@@ -242,10 +243,11 @@ public final class RouteTestFixtures {
     }
 
     public static DispatchSelectorService selectorService(RouteChainDispatchV2Properties properties) {
+        SelectorSolver selectorSolver = new OrToolsSetPackingSolver(properties);
         return new DispatchSelectorService(
                 new SelectorCandidateBuilder(properties),
                 new ConflictGraphBuilder(),
-                new GlobalSelector(properties, new GreedyRepairSelector(), new OrToolsSetPackingSolver()));
+                new GlobalSelector(properties, new GreedyRepairSelector(), selectorSolver));
     }
 
     public static DispatchSelectorStage selectorStage(RouteChainDispatchV2Properties properties) {
