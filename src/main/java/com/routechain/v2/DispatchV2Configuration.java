@@ -18,13 +18,18 @@ import com.routechain.v2.feedback.DispatchReplayRunner;
 import com.routechain.v2.feedback.FeedbackStorageMode;
 import com.routechain.v2.feedback.FileDecisionLogWriter;
 import com.routechain.v2.feedback.FileReplayStore;
+import com.routechain.v2.feedback.FileReuseStateStore;
 import com.routechain.v2.feedback.FileSnapshotStore;
 import com.routechain.v2.feedback.HotStartManager;
 import com.routechain.v2.feedback.InMemoryDecisionLogWriter;
 import com.routechain.v2.feedback.InMemoryReplayStore;
+import com.routechain.v2.feedback.InMemoryReuseStateStore;
 import com.routechain.v2.feedback.InMemorySnapshotStore;
 import com.routechain.v2.feedback.PostDispatchHardeningService;
 import com.routechain.v2.feedback.ReplayStore;
+import com.routechain.v2.feedback.ReuseStateBuilder;
+import com.routechain.v2.feedback.ReuseStateService;
+import com.routechain.v2.feedback.ReuseStateStore;
 import com.routechain.v2.feedback.SnapshotBuilder;
 import com.routechain.v2.feedback.SnapshotService;
 import com.routechain.v2.feedback.SnapshotStore;
@@ -580,6 +585,28 @@ public class DispatchV2Configuration {
     }
 
     @Bean
+    ReuseStateBuilder reuseStateBuilder() {
+        return new ReuseStateBuilder();
+    }
+
+    @Bean
+    ReuseStateStore reuseStateStore(RouteChainDispatchV2Properties properties) {
+        if (properties.getFeedback().getStorageMode() == FeedbackStorageMode.FILE) {
+            return new FileReuseStateStore(
+                    java.nio.file.Path.of(properties.getFeedback().getBaseDir()),
+                    properties.getFeedback().getRetention().getMaxFiles());
+        }
+        return new InMemoryReuseStateStore();
+    }
+
+    @Bean
+    ReuseStateService reuseStateService(RouteChainDispatchV2Properties properties,
+                                        ReuseStateBuilder reuseStateBuilder,
+                                        ReuseStateStore reuseStateStore) {
+        return new ReuseStateService(properties, reuseStateBuilder, reuseStateStore);
+    }
+
+    @Bean
     ReplayStore replayStore(RouteChainDispatchV2Properties properties) {
         if (properties.getFeedback().getStorageMode() == FeedbackStorageMode.FILE) {
             return new FileReplayStore(
@@ -600,19 +627,21 @@ public class DispatchV2Configuration {
     }
 
     @Bean
-    HotStartManager hotStartManager(RouteChainDispatchV2Properties properties) {
-        return new HotStartManager(properties);
+    HotStartManager hotStartManager(RouteChainDispatchV2Properties properties, ReuseStateService reuseStateService) {
+        return new HotStartManager(properties, reuseStateService);
     }
 
     @Bean
     PostDispatchHardeningService postDispatchHardeningService(DispatchReplayRecorder dispatchReplayRecorder,
                                                               DecisionLogService decisionLogService,
                                                               SnapshotService snapshotService,
+                                                              ReuseStateService reuseStateService,
                                                               HotStartManager hotStartManager) {
         return new PostDispatchHardeningService(
                 dispatchReplayRecorder,
                 decisionLogService,
                 snapshotService,
+                reuseStateService,
                 hotStartManager);
     }
 

@@ -22,6 +22,9 @@ import com.routechain.v2.feedback.DispatchReplayRunner;
 import com.routechain.v2.feedback.HotStartManager;
 import com.routechain.v2.feedback.PostDispatchHardeningService;
 import com.routechain.v2.feedback.ReplayStore;
+import com.routechain.v2.feedback.ReuseStateBuilder;
+import com.routechain.v2.feedback.ReuseStateService;
+import com.routechain.v2.feedback.ReuseStateStore;
 import com.routechain.v2.feedback.SnapshotBuilder;
 import com.routechain.v2.feedback.SnapshotService;
 import com.routechain.v2.feedback.SnapshotStore;
@@ -284,14 +287,18 @@ public final class TestDispatchV2Factory {
         SnapshotBuilder snapshotBuilder = configuration.snapshotBuilder();
         SnapshotStore snapshotStore = configuration.snapshotStore(properties);
         SnapshotService snapshotService = configuration.snapshotService(properties, snapshotBuilder, snapshotStore);
+        ReuseStateBuilder reuseStateBuilder = configuration.reuseStateBuilder();
+        ReuseStateStore reuseStateStore = configuration.reuseStateStore(properties);
+        ReuseStateService reuseStateService = configuration.reuseStateService(properties, reuseStateBuilder, reuseStateStore);
         ReplayStore replayStore = configuration.replayStore(properties);
         DispatchReplayRecorder dispatchReplayRecorder = configuration.dispatchReplayRecorder(properties, replayStore);
         WarmStartManager warmStartManager = configuration.warmStartManager(properties, snapshotService);
-        HotStartManager hotStartManager = configuration.hotStartManager(properties);
+        HotStartManager hotStartManager = configuration.hotStartManager(properties, reuseStateService);
         PostDispatchHardeningService postDispatchHardeningService = configuration.postDispatchHardeningService(
                 dispatchReplayRecorder,
                 decisionLogService,
                 snapshotService,
+                reuseStateService,
                 hotStartManager);
         DispatchV2Core core = configuration.dispatchV2Core(
                 dispatchEtaContextService,
@@ -324,7 +331,9 @@ public final class TestDispatchV2Factory {
                 dispatchReplayLoader,
                 dispatchReplayRunner,
                 warmStartManager,
-                hotStartManager);
+                hotStartManager,
+                reuseStateService,
+                reuseStateStore);
     }
 
     public static DispatchV2Request requestWithOrdersAndDriver() {
@@ -373,6 +382,8 @@ public final class TestDispatchV2Factory {
             DispatchReplayLoader dispatchReplayLoader,
             DispatchReplayRunner dispatchReplayRunner,
             WarmStartManager warmStartManager,
-            HotStartManager hotStartManager) {
+            HotStartManager hotStartManager,
+            ReuseStateService reuseStateService,
+            ReuseStateStore reuseStateStore) {
     }
 }

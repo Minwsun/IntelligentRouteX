@@ -16,6 +16,8 @@ import com.routechain.v2.cluster.DispatchPairClusterService;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.context.DispatchEtaContextService;
 import com.routechain.v2.context.DispatchEtaContextStage;
+import com.routechain.v2.feedback.HotStartAppliedReuse;
+import com.routechain.v2.feedback.HotStartReusePlan;
 import com.routechain.v2.feedback.PostDispatchHardeningService;
 import com.routechain.v2.feedback.WarmStartManager;
 
@@ -54,25 +56,53 @@ public final class DispatchV2Core {
     }
 
     public DispatchV2Result dispatch(DispatchV2Request request) {
-        DispatchV2Result pipelineResult = executePipeline(request);
-        return postDispatchHardeningService.apply(request, pipelineResult);
+        DispatchPipelineExecution execution = executePipeline(request, true);
+        HotStartAppliedReuse appliedReuse = new HotStartAppliedReuse(
+                "hot-start-applied-reuse/v1",
+                execution.pairClusterStage().hotStartReuseSummary().reused(),
+                execution.bundleStage().hotStartReuseSummary().reused(),
+                execution.routeProposalStage().hotStartReuseSummary().reused(),
+                execution.bundleStage().hotStartReuseSummary().reusedCount(),
+                execution.routeProposalStage().hotStartReuseSummary().reusedCount(),
+                java.util.stream.Stream.of(
+                                execution.pairClusterStage().hotStartReuseSummary().degradeReasons().stream(),
+                                execution.bundleStage().hotStartReuseSummary().degradeReasons().stream(),
+                                execution.routeProposalStage().hotStartReuseSummary().degradeReasons().stream())
+                        .flatMap(stream -> stream)
+                        .distinct()
+                        .toList());
+        return postDispatchHardeningService.apply(
+                request,
+                execution,
+                execution.hotStartReusePlan(),
+                appliedReuse);
     }
 
     public DispatchV2Result dispatchForReplay(DispatchV2Request request) {
-        return executePipeline(request);
+        return executePipeline(request, false).result();
     }
 
-    private DispatchV2Result executePipeline(DispatchV2Request request) {
+    private DispatchPipelineExecution executePipeline(DispatchV2Request request, boolean allowHotStartReuse) {
         DispatchEtaContextStage etaStage = dispatchEtaContextService.evaluate(request);
-        DispatchPairClusterStage pairClusterStage = dispatchPairClusterService.evaluate(request, etaStage.etaContext());
-        DispatchBundleStage bundleStage = dispatchBundleStageService.evaluate(etaStage.etaContext(), pairClusterStage);
+        HotStartReusePlan reusePlan = allowHotStartReuse
+                ? postDispatchHardeningService.planHotStartReuse(etaStage.etaContext())
+                : HotStartReusePlan.none();
+        DispatchPairClusterStage pairClusterStage = dispatchPairClusterService.evaluate(
+                request,
+                etaStage.etaContext(),
+                reusePlan.pairClusterReuseInput());
+        DispatchBundleStage bundleStage = dispatchBundleStageService.evaluate(
+                etaStage.etaContext(),
+                pairClusterStage,
+                reusePlan.bundleReuseInput());
         DispatchRouteCandidateStage routeCandidateStage = dispatchRouteCandidateService.evaluate(request, etaStage.etaContext(), pairClusterStage, bundleStage);
         DispatchRouteProposalStage routeProposalStage = dispatchRouteProposalService.evaluate(
                 request,
                 etaStage.etaContext(),
                 pairClusterStage,
                 bundleStage,
-                routeCandidateStage);
+                routeCandidateStage,
+                reusePlan.routeProposalReuseInput());
         DispatchScenarioStage scenarioStage = dispatchScenarioService.evaluate(
                 request,
                 etaStage.etaContext(),
@@ -129,7 +159,7 @@ public final class DispatchV2Core {
                 .flatMap(stream -> stream)
                 .distinct()
                 .toList();
-        return new DispatchV2Result(
+        DispatchV2Result result = new DispatchV2Result(
                 "dispatch-v2-result/v1",
                 request.traceId(),
                 false,
@@ -164,7 +194,35 @@ public final class DispatchV2Core {
                 executorStage.assignments(),
                 executorStage.dispatchExecutionSummary(),
                 warmStartManager.currentState(),
-                HotStartState.empty(),
+                new HotStartState(
+                        "hot-start-state/v2",
+                        reusePlan.previousTraceId(),
+                        reusePlan.reuseState() == null ? java.util.List.of() : reusePlan.reuseState().clusterSignatures(),
+                        reusePlan.reuseState() == null ? java.util.List.of() : reusePlan.reuseState().bundleSignatures(),
+                        reusePlan.reuseState() == null ? java.util.List.of() : reusePlan.reuseState().routeProposals().stream()
+                                .map(proposal -> proposal.proposalId()
+                                        + "|" + proposal.bundleId()
+                                        + "|" + proposal.driverId()
+                                        + "|" + String.join(",", proposal.stopOrder()))
+                                .sorted()
+                                .toList(),
+                        java.util.List.of(),
+                        reusePlan.reuseEligible(),
+                        false,
+                        false,
+                        false,
+                        0,
+                        0,
+                        reusePlan.degradeReasons()),
                 degradeReasons);
+        return new DispatchPipelineExecution(
+                result,
+                reusePlan,
+                etaStage,
+                pairClusterStage,
+                bundleStage,
+                routeCandidateStage,
+                routeProposalStage,
+                scenarioStage);
     }
 }

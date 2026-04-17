@@ -5,6 +5,7 @@ import com.routechain.domain.Order;
 import com.routechain.domain.WeatherProfile;
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
+import com.routechain.v2.HotStartReuseSummary;
 import com.routechain.v2.cluster.BufferedOrderWindow;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.cluster.MicroCluster;
@@ -102,6 +103,7 @@ final class BundleTestFixtures {
                 graph(),
                 microClusters(),
                 new MicroClusterSummary("micro-cluster-summary/v1", 2, 2, 1, List.of()),
+                HotStartReuseSummary.none(),
                 List.of(),
                 List.of());
     }

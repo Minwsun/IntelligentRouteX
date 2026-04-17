@@ -17,6 +17,7 @@ class DispatchReplayIsolationTest {
         DispatchV2Result firstProductionResult = harness.core().dispatch(originalRequest);
         DecisionLogRecord latestDecisionLogBeforeReplay = harness.decisionLogService().latest();
         DispatchRuntimeSnapshot latestSnapshotBeforeReplay = harness.snapshotService().loadLatest().snapshot();
+        DispatchRuntimeReuseState latestReuseStateBeforeReplay = harness.reuseStateService().loadLatest().reuseState();
 
         DispatchV2Request replayOnlyRequest = new DispatchV2Request(
                 originalRequest.schemaVersion(),
@@ -34,6 +35,7 @@ class DispatchReplayIsolationTest {
         assertEquals(replayOnlyRequest.traceId(), replayRunResult.replayRequestRecord().traceId());
         assertEquals(latestDecisionLogBeforeReplay, harness.decisionLogService().latest());
         assertEquals(latestSnapshotBeforeReplay, harness.snapshotService().loadLatest().snapshot());
+        assertEquals(latestReuseStateBeforeReplay, harness.reuseStateService().loadLatest().reuseState());
         assertEquals(firstProductionResult.traceId(), secondProductionResult.hotStartState().previousTraceId());
     }
 }

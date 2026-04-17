@@ -2,7 +2,9 @@ package com.routechain.v2.bundle;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.v2.EtaContext;
+import com.routechain.v2.HotStartReuseSummary;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
+import com.routechain.v2.feedback.ReuseStateBuilder;
 import com.routechain.v2.integration.GreedRlBundleCandidate;
 import com.routechain.v2.integration.GreedRlBundleFeatureVector;
 import com.routechain.v2.integration.GreedRlBundleResult;
@@ -47,6 +49,50 @@ public final class DispatchBundleStageService {
     }
 
     public DispatchBundleStage evaluate(EtaContext etaContext, DispatchPairClusterStage pairClusterStage) {
+        return evaluate(etaContext, pairClusterStage, null);
+    }
+
+    public DispatchBundleStage evaluate(EtaContext etaContext,
+                                        DispatchPairClusterStage pairClusterStage,
+                                        BundleReuseInput reuseInput) {
+        if (reuseInput != null && reuseInput.reuseState() != null) {
+            List<String> reuseDegradeReasons = new ArrayList<>();
+            if (!ReuseStateBuilder.etaContextSignature(etaContext).equals(reuseInput.reuseState().etaContextSignature())) {
+                reuseDegradeReasons.add("hot-start-eta-signature-drift");
+            }
+            if (!ReuseStateBuilder.clusterSignatures(pairClusterStage.microClusters()).equals(reuseInput.reuseState().clusterSignatures())) {
+                reuseDegradeReasons.add("hot-start-cluster-signature-drift");
+            }
+            if (reuseDegradeReasons.isEmpty()
+                    && reuseInput.reuseState().bundleCandidates() != null
+                    && reuseInput.reuseState().bundlePoolSummary() != null) {
+                return new DispatchBundleStage(
+                        "dispatch-bundle-stage/v1",
+                        reuseInput.reuseState().boundaryExpansions(),
+                        reuseInput.reuseState().boundaryExpansionSummary(),
+                        reuseInput.reuseState().bundleCandidates(),
+                        reuseInput.reuseState().bundlePoolSummary(),
+                        HotStartReuseSummary.reused(reuseInput.reuseState().bundleCandidates().size()),
+                        reuseInput.reuseState().bundleMlStageMetadata(),
+                        reuseInput.reuseState().bundleDegradeReasons());
+            }
+            DispatchBundleStage freshStage = evaluateFresh(etaContext, pairClusterStage);
+            List<String> degradeReasons = new ArrayList<>(freshStage.degradeReasons());
+            degradeReasons.addAll(reuseDegradeReasons);
+            return new DispatchBundleStage(
+                    freshStage.schemaVersion(),
+                    freshStage.boundaryExpansions(),
+                    freshStage.boundaryExpansionSummary(),
+                    freshStage.bundleCandidates(),
+                    freshStage.bundlePoolSummary(),
+                    HotStartReuseSummary.none().withDegradeReasons(reuseDegradeReasons),
+                    freshStage.mlStageMetadata(),
+                    List.copyOf(degradeReasons.stream().distinct().toList()));
+        }
+        return evaluateFresh(etaContext, pairClusterStage);
+    }
+
+    private DispatchBundleStage evaluateFresh(EtaContext etaContext, DispatchPairClusterStage pairClusterStage) {
         Map<String, List<BoundaryCandidate>> boundaryCandidates = boundaryCandidateSelector.select(
                 pairClusterStage.bufferedOrderWindow(),
                 pairClusterStage.microClusters(),
@@ -104,6 +150,7 @@ public final class DispatchBundleStageService {
                 boundaryExpansionSummary,
                 retained,
                 bundlePoolSummary,
+                HotStartReuseSummary.none(),
                 greedRlMetadata.build().stream().toList(),
                 List.copyOf(degradeReasons));
     }

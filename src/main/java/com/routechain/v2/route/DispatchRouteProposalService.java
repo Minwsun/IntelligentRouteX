@@ -4,11 +4,15 @@ import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.domain.WeatherProfile;
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
+import com.routechain.v2.HotStartReuseSummary;
 import com.routechain.v2.MlStageMetadata;
+import com.routechain.v2.bundle.BundleCandidate;
 import com.routechain.v2.bundle.DispatchBundleStage;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.cluster.EtaLegCache;
 import com.routechain.v2.cluster.EtaLegCacheFactory;
+import com.routechain.v2.feedback.ReuseStateBuilder;
+import com.routechain.v2.feedback.RouteProposalTupleReuseEntry;
 import com.routechain.v2.integration.MlStageMetadataAccumulator;
 import com.routechain.v2.integration.RouteFinderClient;
 import com.routechain.v2.integration.RouteFinderFeatureVector;
@@ -19,6 +23,7 @@ import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public final class DispatchRouteProposalService {
     private final RouteChainDispatchV2Properties properties;
@@ -50,6 +55,15 @@ public final class DispatchRouteProposalService {
                                                DispatchPairClusterStage pairClusterStage,
                                                DispatchBundleStage bundleStage,
                                                DispatchRouteCandidateStage routeCandidateStage) {
+        return evaluate(request, etaContext, pairClusterStage, bundleStage, routeCandidateStage, null);
+    }
+
+    public DispatchRouteProposalStage evaluate(DispatchV2Request request,
+                                               EtaContext etaContext,
+                                               DispatchPairClusterStage pairClusterStage,
+                                               DispatchBundleStage bundleStage,
+                                               DispatchRouteCandidateStage routeCandidateStage,
+                                               RouteProposalReuseInput reuseInput) {
         DispatchCandidateContext context = new DispatchCandidateContext(
                 pairClusterStage.bufferedOrderWindow().orders(),
                 request.availableDrivers(),
@@ -59,26 +73,32 @@ public final class DispatchRouteProposalService {
                 request.traceId(),
                 request.decisionTime(),
                 request.weatherProfile() == null ? WeatherProfile.CLEAR : request.weatherProfile());
+        RouteReusePreparation reusePreparation = prepareReuse(bundleStage, routeCandidateStage, reuseInput);
         List<RouteProposalCandidate> deterministicGenerated = routeProposalEngine.generate(
-                routeCandidateStage.driverCandidates(),
+                reusePreparation.freshDriverCandidates(),
                 routeCandidateStage.pickupAnchors(),
                 context,
                 etaLegCache);
         RouteFinderGenerationOutcome routeFinderGeneration = generateRouteFinderProposals(request.traceId(), deterministicGenerated, context);
-        List<RouteProposalCandidate> generated = new ArrayList<>(deterministicGenerated);
+        List<RouteProposalCandidate> generated = new ArrayList<>(reusePreparation.reusedCandidates());
+        generated.addAll(deterministicGenerated);
         generated.addAll(routeFinderGeneration.generatedCandidates());
-        List<RouteProposalCandidate> validated = generated.stream()
+        List<RouteProposalCandidate> validatedFresh = java.util.stream.Stream.concat(
+                        deterministicGenerated.stream(),
+                        routeFinderGeneration.generatedCandidates().stream())
                 .map(candidate -> routeProposalValidator.validate(candidate, context))
                 .toList();
-        List<RouteValueScoringOutcome> scoringOutcomes = validated.stream()
+        List<RouteValueScoringOutcome> scoringOutcomes = validatedFresh.stream()
                 .map(candidate -> routeValueScorer.score(request.traceId(), candidate, context))
                 .toList();
-        List<RouteProposalCandidate> scored = scoringOutcomes.stream()
+        List<RouteProposalCandidate> scored = new ArrayList<>(reusePreparation.reusedCandidates());
+        scored.addAll(scoringOutcomes.stream()
                 .map(RouteValueScoringOutcome::candidate)
-                .toList();
+                .toList());
         List<RouteProposalCandidate> retained = routeProposalPruner.prune(scored);
         List<RouteProposal> routeProposals = retained.stream().map(RouteProposalCandidate::proposal).toList();
         List<String> degradeReasons = java.util.stream.Stream.of(
+                        reusePreparation.degradeReasons().stream(),
                         routeFinderGeneration.degradeReasons().stream(),
                         scored.stream().flatMap(candidate -> candidate.proposal().degradeReasons().stream()),
                         scoringOutcomes.stream().flatMap(outcome -> outcome.degradeReasons().stream()))
@@ -95,8 +115,90 @@ public final class DispatchRouteProposalService {
                 "dispatch-route-proposal-stage/v1",
                 routeProposals,
                 summarize(routeCandidateStage.driverCandidates().size(), generated, retained, degradeReasons),
+                new HotStartReuseSummary(
+                        "hot-start-reuse-summary/v1",
+                        !reusePreparation.reusedCandidates().isEmpty(),
+                        reusePreparation.reusedCandidates().size(),
+                        reusePreparation.degradeReasons()),
                 mlStageMetadata,
                 degradeReasons);
+    }
+
+    private RouteReusePreparation prepareReuse(DispatchBundleStage bundleStage,
+                                               DispatchRouteCandidateStage routeCandidateStage,
+                                               RouteProposalReuseInput reuseInput) {
+        if (reuseInput == null || reuseInput.reuseState() == null) {
+            return RouteReusePreparation.empty(routeCandidateStage.driverCandidates());
+        }
+        Map<String, BundleCandidate> bundlesById = bundleStage.bundleCandidates().stream()
+                .collect(java.util.stream.Collectors.toMap(BundleCandidate::bundleId, bundle -> bundle, (left, right) -> left));
+        Map<String, PickupAnchor> anchorsByKey = routeCandidateStage.pickupAnchors().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        anchor -> ReuseStateBuilder.tupleKey(anchor.bundleId(), anchor.anchorOrderId(), null),
+                        anchor -> anchor,
+                        (left, right) -> left));
+        Map<String, RouteProposalTupleReuseEntry> storedByKey = reuseInput.reuseState().routeProposalTuples().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        entry -> ReuseStateBuilder.tupleKey(entry.bundleId(), entry.anchorOrderId(), entry.driverId()),
+                        entry -> entry,
+                        (left, right) -> left,
+                        java.util.LinkedHashMap::new));
+        List<RouteProposalCandidate> reusedCandidates = new ArrayList<>();
+        List<DriverCandidate> freshDriverCandidates = new ArrayList<>();
+        List<String> degradeReasons = new ArrayList<>();
+        boolean tupleDrift = false;
+        for (DriverCandidate driverCandidate : routeCandidateStage.driverCandidates()) {
+            String key = ReuseStateBuilder.tupleKey(driverCandidate.bundleId(), driverCandidate.anchorOrderId(), driverCandidate.driverId());
+            PickupAnchor pickupAnchor = anchorsByKey.get(ReuseStateBuilder.tupleKey(driverCandidate.bundleId(), driverCandidate.anchorOrderId(), null));
+            BundleCandidate bundle = bundlesById.get(driverCandidate.bundleId());
+            RouteProposalTupleReuseEntry stored = storedByKey.get(key);
+            if (bundle == null || pickupAnchor == null || stored == null) {
+                freshDriverCandidates.add(driverCandidate);
+                tupleDrift = true;
+                continue;
+            }
+            String currentSignature = ReuseStateBuilder.routeProposalTupleSignature(bundle, pickupAnchor, driverCandidate);
+            if (!Objects.equals(currentSignature, stored.tupleSignature())) {
+                freshDriverCandidates.add(driverCandidate);
+                tupleDrift = true;
+                continue;
+            }
+            reusedCandidates.addAll(stored.routeProposals().stream()
+                    .map(proposal -> reusedCandidate(proposal, pickupAnchor, driverCandidate))
+                    .toList());
+        }
+        if (tupleDrift) {
+            degradeReasons.add("hot-start-route-tuple-drift");
+        }
+        return new RouteReusePreparation(
+                List.copyOf(reusedCandidates),
+                List.copyOf(freshDriverCandidates),
+                List.copyOf(degradeReasons));
+    }
+
+    private RouteProposalCandidate reusedCandidate(RouteProposal proposal,
+                                                   PickupAnchor pickupAnchor,
+                                                   DriverCandidate driverCandidate) {
+        RouteProposalTupleKey tupleKey = new RouteProposalTupleKey(proposal.bundleId(), proposal.anchorOrderId(), proposal.driverId());
+        return new RouteProposalCandidate(
+                proposal,
+                tupleKey,
+                pickupAnchor,
+                driverCandidate,
+                new RouteProposalTrace(
+                        tupleKey,
+                        proposal.source(),
+                        RouteProposalEngine.stopOrderSignature(proposal.stopOrder()),
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        List.of("hot-start-route-reused")));
     }
 
     private RouteFinderGenerationOutcome generateRouteFinderProposals(String traceId,
@@ -222,6 +324,16 @@ public final class DispatchRouteProposalService {
 
         private static RouteFinderGenerationOutcome empty() {
             return new RouteFinderGenerationOutcome(List.of(), List.of(), List.of());
+        }
+    }
+
+    private record RouteReusePreparation(
+            List<RouteProposalCandidate> reusedCandidates,
+            List<DriverCandidate> freshDriverCandidates,
+            List<String> degradeReasons) {
+
+        private static RouteReusePreparation empty(List<DriverCandidate> allDrivers) {
+            return new RouteReusePreparation(List.of(), List.copyOf(allDrivers), List.of());
         }
     }
 

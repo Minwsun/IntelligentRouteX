@@ -1,6 +1,7 @@
 package com.routechain.v2.selector;
 
 import com.routechain.v2.context.FreshnessMetadata;
+import com.routechain.v2.HotStartReuseSummary;
 import com.routechain.v2.route.DispatchRouteProposalStage;
 import com.routechain.v2.route.RouteProposal;
 import com.routechain.v2.route.RouteProposalSource;
@@ -107,6 +108,7 @@ final class SelectorTestFixtures {
                         proposals.size(),
                         new EnumMap<>(RouteProposalSource.class),
                         List.of()),
+                HotStartReuseSummary.none(),
                 List.of(),
                 List.of());
     }

@@ -3,6 +3,8 @@ package com.routechain.v2.cluster;
 import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
+import com.routechain.v2.HotStartReuseSummary;
+import com.routechain.v2.feedback.ReuseStateBuilder;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,7 +27,56 @@ public final class DispatchPairClusterService {
     }
 
     public DispatchPairClusterStage evaluate(DispatchV2Request request, EtaContext etaContext) {
+        return evaluate(request, etaContext, null);
+    }
+
+    public DispatchPairClusterStage evaluate(DispatchV2Request request,
+                                             EtaContext etaContext,
+                                             PairClusterReuseInput reuseInput) {
         BufferedOrderWindow bufferedOrderWindow = orderBuffer.buffer(request);
+        if (reuseInput != null && reuseInput.reuseState() != null) {
+            List<String> reuseDegradeReasons = new ArrayList<>();
+            if (!ReuseStateBuilder.etaContextSignature(etaContext).equals(reuseInput.reuseState().etaContextSignature())) {
+                reuseDegradeReasons.add("hot-start-eta-signature-drift");
+            }
+            if (!ReuseStateBuilder.bufferedOrderWindowSignature(bufferedOrderWindow)
+                    .equals(reuseInput.reuseState().bufferedOrderWindowSignature())) {
+                reuseDegradeReasons.add("hot-start-buffer-signature-drift");
+            }
+            if (reuseDegradeReasons.isEmpty()
+                    && reuseInput.reuseState().pairSimilarityGraph() != null
+                    && reuseInput.reuseState().pairGraphSummary() != null) {
+                return new DispatchPairClusterStage(
+                        "dispatch-pair-cluster-stage/v1",
+                        bufferedOrderWindow,
+                        reuseInput.reuseState().pairGraphSummary(),
+                        reuseInput.reuseState().pairSimilarityGraph(),
+                        reuseInput.reuseState().microClusters(),
+                        reuseInput.reuseState().microClusterSummary(),
+                        HotStartReuseSummary.reused(reuseInput.reuseState().microClusters().size()),
+                        reuseInput.reuseState().pairClusterMlStageMetadata(),
+                        reuseInput.reuseState().pairClusterDegradeReasons());
+            }
+            DispatchPairClusterStage freshStage = evaluateFresh(request, etaContext, bufferedOrderWindow);
+            List<String> degradeReasons = new ArrayList<>(freshStage.degradeReasons());
+            degradeReasons.addAll(reuseDegradeReasons);
+            return new DispatchPairClusterStage(
+                    freshStage.schemaVersion(),
+                    freshStage.bufferedOrderWindow(),
+                    freshStage.pairGraphSummary(),
+                    freshStage.pairSimilarityGraph(),
+                    freshStage.microClusters(),
+                    freshStage.microClusterSummary(),
+                    HotStartReuseSummary.none().withDegradeReasons(reuseDegradeReasons),
+                    freshStage.mlStageMetadata(),
+                    List.copyOf(degradeReasons.stream().distinct().toList()));
+        }
+        return evaluateFresh(request, etaContext, bufferedOrderWindow);
+    }
+
+    private DispatchPairClusterStage evaluateFresh(DispatchV2Request request,
+                                                   EtaContext etaContext,
+                                                   BufferedOrderWindow bufferedOrderWindow) {
         EtaLegCache etaLegCache = etaLegCacheFactory.create(request.traceId(), request.decisionTime(), request.weatherProfile());
         PairSimilarityGraphBuildResult graphBuildResult = pairSimilarityGraphBuilder.build(
                 bufferedOrderWindow,
@@ -43,6 +94,7 @@ public final class DispatchPairClusterService {
                 graph,
                 microClusters,
                 microClusterSummary,
+                HotStartReuseSummary.none(),
                 graphBuildResult.mlStageMetadata(),
                 List.copyOf(degradeReasons));
     }

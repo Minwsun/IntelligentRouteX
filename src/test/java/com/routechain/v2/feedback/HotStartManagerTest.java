@@ -1,7 +1,9 @@
 package com.routechain.v2.feedback;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
+import com.routechain.v2.EtaContext;
 import com.routechain.v2.HotStartState;
+import com.routechain.v2.MlStageMetadata;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -13,38 +15,84 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class HotStartManagerTest {
 
     @Test
-    void matchingSignaturesBecomeReuseEligibleAndDriftDisablesReuse() {
-        HotStartManager hotStartManager = new HotStartManager(RouteChainDispatchV2Properties.defaults());
-        DispatchRuntimeSnapshot firstSnapshot = snapshot("trace-1", List.of("cluster-a"), List.of("bundle-a"), List.of("proposal-a"));
-        DispatchRuntimeSnapshot compatibleSnapshot = snapshot("trace-2", List.of("cluster-a"), List.of("bundle-a"), List.of("proposal-a"));
-        DispatchRuntimeSnapshot driftedSnapshot = snapshot("trace-3", List.of("cluster-b"), List.of("bundle-a"), List.of("proposal-a"));
+    void matchingEtaSignaturePlansReuseAndAppliedReuseIsReported() {
+        RouteChainDispatchV2Properties properties = RouteChainDispatchV2Properties.defaults();
+        InMemoryReuseStateStore reuseStateStore = new InMemoryReuseStateStore();
+        ReuseStateService reuseStateService = new ReuseStateService(properties, new ReuseStateBuilder(), reuseStateStore);
+        reuseStateStore.save(reuseState("trace-1", "eta|1|6.000000|6.000000|0.300000|false|false|baseline-profile-weather"));
 
-        HotStartState firstState = hotStartManager.update(firstSnapshot);
-        HotStartState compatibleState = hotStartManager.update(compatibleSnapshot);
-        HotStartState driftedState = hotStartManager.update(driftedSnapshot);
+        HotStartManager hotStartManager = new HotStartManager(properties, reuseStateService);
+        HotStartReusePlan compatiblePlan = hotStartManager.plan(etaContext("trace-2", 6.0));
+        HotStartState compatibleState = hotStartManager.update(
+                reuseState("trace-2", compatiblePlan.reuseState().etaContextSignature()),
+                compatiblePlan,
+                new HotStartAppliedReuse("hot-start-applied-reuse/v1", true, true, true, 3, 5, List.of()));
 
-        assertFalse(firstState.reuseEligible());
-        assertTrue(compatibleState.reuseEligible());
-        assertFalse(driftedState.reuseEligible());
-        assertTrue(driftedState.degradeReasons().contains("hot-start-signature-drift"));
+        assertTrue(compatiblePlan.reuseEligible());
+        assertTrue(compatibleState.pairClusterReused());
+        assertTrue(compatibleState.bundlePoolReused());
+        assertTrue(compatibleState.routeProposalPoolReused());
+        assertTrue(compatibleState.reusedBundleCount() > 0);
+        assertTrue(compatibleState.reusedRouteProposalCount() > 0);
     }
 
-    private DispatchRuntimeSnapshot snapshot(String traceId,
-                                            List<String> clusterSignatures,
-                                            List<String> bundleSignatures,
-                                            List<String> routeProposalSignatures) {
-        return new DispatchRuntimeSnapshot(
-                "dispatch-runtime-snapshot/v1",
-                traceId + "-snapshot",
+    @Test
+    void etaDriftDisablesReuse() {
+        RouteChainDispatchV2Properties properties = RouteChainDispatchV2Properties.defaults();
+        InMemoryReuseStateStore reuseStateStore = new InMemoryReuseStateStore();
+        ReuseStateService reuseStateService = new ReuseStateService(properties, new ReuseStateBuilder(), reuseStateStore);
+        reuseStateStore.save(reuseState("trace-1", "eta|1|6.000000|6.000000|0.300000|false|false|baseline-profile-weather"));
+
+        HotStartManager hotStartManager = new HotStartManager(properties, reuseStateService);
+        HotStartReusePlan driftedPlan = hotStartManager.plan(etaContext("trace-3", 8.0));
+
+        assertFalse(driftedPlan.reuseEligible());
+        assertTrue(driftedPlan.degradeReasons().contains("hot-start-eta-signature-drift"));
+    }
+
+    private DispatchRuntimeReuseState reuseState(String traceId, String etaSignature) {
+        List<String> emptyStrings = List.of();
+        List<MlStageMetadata> emptyMlMetadata = List.of();
+        return new DispatchRuntimeReuseState(
+                "dispatch-runtime-reuse-state/v1",
+                traceId + "-reuse",
                 traceId,
                 Instant.parse("2026-04-16T12:00:00Z"),
-                List.of("eta/context"),
-                List.of("proposal-1"),
-                List.of("assignment-1"),
-                clusterSignatures,
-                bundleSignatures,
-                routeProposalSignatures,
-                1.0,
-                List.of());
+                etaSignature,
+                "buffer|0|0|",
+                List.of("cluster-a"),
+                List.of("bundle-a"),
+                null,
+                null,
+                List.of(),
+                null,
+                emptyMlMetadata,
+                emptyStrings,
+                List.of(),
+                null,
+                List.of(),
+                null,
+                emptyMlMetadata,
+                emptyStrings,
+                null,
+                null,
+                List.of(),
+                emptyMlMetadata,
+                emptyStrings,
+                emptyStrings);
+    }
+
+    private EtaContext etaContext(String traceId, double averageEtaMinutes) {
+        return new EtaContext(
+                "dispatch-eta-context/v1",
+                traceId,
+                1,
+                averageEtaMinutes,
+                averageEtaMinutes,
+                0.3,
+                false,
+                false,
+                "corridor-a",
+                "baseline-profile-weather");
     }
 }
