@@ -1,4 +1,4 @@
-schemaVersion: model-manifest/v1
+schemaVersion: model-manifest/v2
 workers:
   - worker_name: ml-greedrl-worker
     model_name: greedrl
@@ -41,6 +41,12 @@ workers:
     runtime_image: ghcr.io/minwsun/intelligentroutex/ml-routefinder-worker:bootstrap
     compatibility_contract_version: dispatch-v2-ml/v1
     min_supported_java_contract_version: dispatch-v2-java/v1
+    local_model_root: materialized/routefinder
+    local_artifact_path: materialized/routefinder/model/routefinder-model.json
+    materialization_mode: LOCAL_FILE
+    ready_requires_local_load: true
+    offline_boot_supported: true
+    loaded_model_fingerprint: sha256:8b52802e0e685f7ae36aa62940ca848042ad81341d55dda36190e90a9e7b10fe
     startup_warmup_request:
       endpoint: /route/refine
       payload:

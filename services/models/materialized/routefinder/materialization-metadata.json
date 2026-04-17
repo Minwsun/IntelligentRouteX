@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "routefinder-materialization/v1",
+  "materializationMode": "LOCAL_FILE",
+  "sourceArtifactPath": "services/ml-routefinder-worker/artifacts/routefinder-model.json",
+  "sourceArtifactDigest": "sha256:bb5dba77f63868135f1de84af967a7ca3c2a5c5fc310ea903e688d8b6de2944d",
+  "modelArtifactPath": "services/models/materialized/routefinder/model/routefinder-model.json",
+  "loadedModelFingerprint": "sha256:8b52802e0e685f7ae36aa62940ca848042ad81341d55dda36190e90a9e7b10fe",
+  "fileManifest": [
+    {
+      "path": "routefinder-model.json",
+      "size": 701,
+      "sha256": "bb5dba77f63868135f1de84af967a7ca3c2a5c5fc310ea903e688d8b6de2944d"
+    }
+  ]
+}

@@ -49,6 +49,14 @@ final class HttpRouteFinderTestSupport {
                          String artifactDigest,
                          String compatibilityContractVersion,
                          String javaContractVersion) throws IOException {
+        return manifestV1(tempDir, modelVersion, artifactDigest, compatibilityContractVersion, javaContractVersion);
+    }
+
+    static Path manifestV1(Path tempDir,
+                           String modelVersion,
+                           String artifactDigest,
+                           String compatibilityContractVersion,
+                           String javaContractVersion) throws IOException {
         Path manifestPath = tempDir.resolve("routefinder-model-manifest.yaml");
         Files.writeString(manifestPath, """
                 schemaVersion: model-manifest/v1
@@ -93,7 +101,72 @@ final class HttpRouteFinderTestSupport {
         return manifestPath;
     }
 
+    static Path manifestV2(Path tempDir,
+                           String modelVersion,
+                           String artifactDigest,
+                           String compatibilityContractVersion,
+                           String javaContractVersion,
+                           String loadedModelFingerprint) throws IOException {
+        Path manifestPath = tempDir.resolve("routefinder-model-manifest-v2.yaml");
+        Files.writeString(manifestPath, """
+                schemaVersion: model-manifest/v2
+                workers:
+                  - worker_name: ml-routefinder-worker
+                    model_name: routefinder-local
+                    model_version: %s
+                    artifact_digest: %s
+                    rollback_artifact_digest: sha256:rollback
+                    runtime_image: local/test
+                    compatibility_contract_version: %s
+                    min_supported_java_contract_version: %s
+                    local_model_root: materialized/routefinder
+                    local_artifact_path: materialized/routefinder/model/routefinder-model.json
+                    materialization_mode: LOCAL_FILE
+                    ready_requires_local_load: true
+                    offline_boot_supported: true
+                    loaded_model_fingerprint: %s
+                    startup_warmup_request:
+                      endpoint: /route/refine
+                      payload:
+                        schemaVersion: route-request/v1
+                        traceId: warmup-routefinder
+                        payload:
+                          schemaVersion: routefinder-feature-vector/v1
+                          traceId: warmup-routefinder
+                          bundleId: bundle-1
+                          anchorOrderId: order-1
+                          driverId: driver-1
+                          baselineSource: HEURISTIC_FAST
+                          baselineStopOrder:
+                            - order-1
+                            - order-2
+                            - order-3
+                          bundleOrderIds:
+                            - order-1
+                            - order-2
+                            - order-3
+                          projectedPickupEtaMinutes: 5.0
+                          projectedCompletionEtaMinutes: 18.0
+                          rerankScore: 0.7
+                          bundleScore: 0.8
+                          anchorScore: 0.75
+                          averagePairSupport: 0.65
+                          boundaryCross: false
+                          maxAlternatives: 2
+                """.formatted(modelVersion, artifactDigest, compatibilityContractVersion, javaContractVersion, loadedModelFingerprint), StandardCharsets.UTF_8);
+        return manifestPath;
+    }
+
     static String versionBody(String modelVersion, String artifactDigest) {
+        return versionBody(modelVersion, artifactDigest, false, "", "", "");
+    }
+
+    static String versionBody(String modelVersion,
+                              String artifactDigest,
+                              boolean loadedFromLocal,
+                              String localArtifactPath,
+                              String materializationMode,
+                              String loadedModelFingerprint) {
         return """
                 {
                   "schemaVersion": "worker-version/v1",
@@ -102,9 +175,19 @@ final class HttpRouteFinderTestSupport {
                   "modelVersion": "%s",
                   "artifactDigest": "%s",
                   "compatibilityContractVersion": "dispatch-v2-ml/v1",
-                  "minSupportedJavaContractVersion": "dispatch-v2-java/v1"
+                  "minSupportedJavaContractVersion": "dispatch-v2-java/v1",
+                  "loadedFromLocal": %s,
+                  "localArtifactPath": "%s",
+                  "materializationMode": "%s",
+                  "loadedModelFingerprint": "%s"
                 }
-                """.formatted(modelVersion, artifactDigest);
+                """.formatted(
+                modelVersion,
+                artifactDigest,
+                Boolean.toString(loadedFromLocal),
+                localArtifactPath,
+                materializationMode,
+                loadedModelFingerprint);
     }
 
     static String readyBody(boolean ready, String reason) {

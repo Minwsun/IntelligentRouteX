@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RouteFinderClientNotAppliedContractTest {
+    private static final String LOADED_MODEL_FINGERPRINT = "sha256:8b52802e0e685f7ae36aa62940ca848042ad81341d55dda36190e90a9e7b10fe";
 
     @TempDir
     Path tempDir;
@@ -19,15 +20,15 @@ class RouteFinderClientNotAppliedContractTest {
     @Test
     void timeoutMalformedAndServerErrorReturnTypedNotAppliedResults() throws Exception {
         assertNotApplied(Map.of(
-                "/version", HttpRouteFinderTestSupport.json(HttpRouteFinderTestSupport.versionBody("v1", "sha256:routefinder")),
+                "/version", HttpRouteFinderTestSupport.json(HttpRouteFinderTestSupport.versionBody("v1", "sha256:routefinder", true, "materialized/routefinder/model/routefinder-model.json", "LOCAL_FILE", LOADED_MODEL_FINGERPRINT)),
                 "/ready", HttpRouteFinderTestSupport.json(HttpRouteFinderTestSupport.readyBody(true, "")),
                 "/route/alternatives", HttpRouteFinderTestSupport.delayed(Duration.ofMillis(150), HttpRouteFinderTestSupport.routeBody("routefinder-alternative"))));
         assertNotApplied(Map.of(
-                "/version", HttpRouteFinderTestSupport.json(HttpRouteFinderTestSupport.versionBody("v1", "sha256:routefinder")),
+                "/version", HttpRouteFinderTestSupport.json(HttpRouteFinderTestSupport.versionBody("v1", "sha256:routefinder", true, "materialized/routefinder/model/routefinder-model.json", "LOCAL_FILE", LOADED_MODEL_FINGERPRINT)),
                 "/ready", HttpRouteFinderTestSupport.json(HttpRouteFinderTestSupport.readyBody(true, "")),
                 "/route/alternatives", HttpRouteFinderTestSupport.json("{\"bad\":true}")));
         assertNotApplied(Map.of(
-                "/version", HttpRouteFinderTestSupport.json(HttpRouteFinderTestSupport.versionBody("v1", "sha256:routefinder")),
+                "/version", HttpRouteFinderTestSupport.json(HttpRouteFinderTestSupport.versionBody("v1", "sha256:routefinder", true, "materialized/routefinder/model/routefinder-model.json", "LOCAL_FILE", LOADED_MODEL_FINGERPRINT)),
                 "/ready", HttpRouteFinderTestSupport.json(HttpRouteFinderTestSupport.readyBody(true, "")),
                 "/route/alternatives", HttpRouteFinderTestSupport.status(500, "{\"error\":\"boom\"}")));
     }
@@ -35,7 +36,13 @@ class RouteFinderClientNotAppliedContractTest {
     private void assertNotApplied(Map<String, com.sun.net.httpserver.HttpHandler> handlers) throws Exception {
         HttpServer server = HttpRouteFinderTestSupport.server(handlers);
         try {
-            Path manifestPath = HttpRouteFinderTestSupport.manifest(tempDir, "v1", "sha256:routefinder", "dispatch-v2-ml/v1", "dispatch-v2-java/v1");
+            Path manifestPath = HttpRouteFinderTestSupport.manifestV2(
+                    tempDir,
+                    "v1",
+                    "sha256:routefinder",
+                    "dispatch-v2-ml/v1",
+                    "dispatch-v2-java/v1",
+                    LOADED_MODEL_FINGERPRINT);
             HttpRouteFinderClient client = new HttpRouteFinderClient(
                     "http://127.0.0.1:" + server.getAddress().getPort(),
                     Duration.ofMillis(50),

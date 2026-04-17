@@ -13,5 +13,13 @@ public record WorkerVersionResponse(
         @JsonProperty("compatibilityContractVersion")
         String compatibilityContractVersion,
         @JsonProperty("minSupportedJavaContractVersion")
-        String minSupportedJavaContractVersion) {
+        String minSupportedJavaContractVersion,
+        @JsonProperty("loadedFromLocal")
+        Boolean loadedFromLocal,
+        @JsonProperty("localArtifactPath")
+        String localArtifactPath,
+        @JsonProperty("materializationMode")
+        String materializationMode,
+        @JsonProperty("loadedModelFingerprint")
+        String loadedModelFingerprint) {
 }

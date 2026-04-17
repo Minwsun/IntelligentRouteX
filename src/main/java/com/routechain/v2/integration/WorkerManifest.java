@@ -33,6 +33,18 @@ public record WorkerManifest(
             String compatibilityContractVersion,
             @JsonProperty("min_supported_java_contract_version")
             String minSupportedJavaContractVersion,
+            @JsonProperty("local_model_root")
+            String localModelRoot,
+            @JsonProperty("local_artifact_path")
+            String localArtifactPath,
+            @JsonProperty("materialization_mode")
+            String materializationMode,
+            @JsonProperty("ready_requires_local_load")
+            Boolean readyRequiresLocalLoad,
+            @JsonProperty("offline_boot_supported")
+            Boolean offlineBootSupported,
+            @JsonProperty("loaded_model_fingerprint")
+            String loadedModelFingerprint,
             @JsonProperty("startup_warmup_request")
             StartupWarmupRequest startupWarmupRequest) {
     }

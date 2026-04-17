@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HttpRouteFinderClientTest {
+    private static final String LOADED_MODEL_FINGERPRINT = "sha256:8b52802e0e685f7ae36aa62940ca848042ad81341d55dda36190e90a9e7b10fe";
 
     @TempDir
     Path tempDir;
@@ -20,12 +21,24 @@ class HttpRouteFinderClientTest {
     @Test
     void happyPathSupportsRefineAndAlternatives() throws Exception {
         HttpServer server = HttpRouteFinderTestSupport.server(Map.of(
-                "/version", HttpRouteFinderTestSupport.json(HttpRouteFinderTestSupport.versionBody("v1", "sha256:routefinder")),
+                "/version", HttpRouteFinderTestSupport.json(HttpRouteFinderTestSupport.versionBody(
+                        "v1",
+                        "sha256:routefinder",
+                        true,
+                        "materialized/routefinder/model/routefinder-model.json",
+                        "LOCAL_FILE",
+                        LOADED_MODEL_FINGERPRINT)),
                 "/ready", HttpRouteFinderTestSupport.json(HttpRouteFinderTestSupport.readyBody(true, "")),
                 "/route/refine", HttpRouteFinderTestSupport.json(HttpRouteFinderTestSupport.routeBody("routefinder-refined")),
                 "/route/alternatives", HttpRouteFinderTestSupport.json(HttpRouteFinderTestSupport.routeBody("routefinder-alternative"))));
         try {
-            Path manifestPath = HttpRouteFinderTestSupport.manifest(tempDir, "v1", "sha256:routefinder", "dispatch-v2-ml/v1", "dispatch-v2-java/v1");
+            Path manifestPath = HttpRouteFinderTestSupport.manifestV2(
+                    tempDir,
+                    "v1",
+                    "sha256:routefinder",
+                    "dispatch-v2-ml/v1",
+                    "dispatch-v2-java/v1",
+                    LOADED_MODEL_FINGERPRINT);
             HttpRouteFinderClient client = new HttpRouteFinderClient(
                     "http://127.0.0.1:" + server.getAddress().getPort(),
                     Duration.ofMillis(50),
