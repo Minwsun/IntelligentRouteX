@@ -28,6 +28,7 @@ class EtaServiceLiveSourceIntegrationTest {
         EtaEstimate deterministic = budgetBlockedService.estimate(request());
 
         assertTrue(refined.etaMinutes() > deterministic.etaMinutes());
+        assertTrue("tomtom".equals(refined.refineSource()));
         assertTrue(deterministic.degradeReasons().contains("tomtom-budget-or-policy-skipped"));
     }
 

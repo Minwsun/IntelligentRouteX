@@ -28,6 +28,7 @@ routechain:
     traffic:
       enabled: false
       base-url: http://127.0.0.1:8095
+      api-key: ${TOMTOM_API_KEY:}
       connect-timeout: 75ms
       read-timeout: 180ms
       confidence-threshold: 0.5

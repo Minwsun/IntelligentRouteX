@@ -11,17 +11,30 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TomTomTrafficRefineFallbackContractTest {
 
     @Test
-    void timeoutMalformedServerErrorAndFallbackReturnTypedNotAppliedResult() throws Exception {
-        assertUnavailable(Map.of("/traffic/refine", HttpTomTomTrafficTestSupport.delayed(Duration.ofMillis(150), HttpTomTomTrafficTestSupport.refineBody(false, 1.18, 0L, 0.88, true))));
-        assertUnavailable(Map.of("/traffic/refine", HttpTomTomTrafficTestSupport.json("{\"bad\":true}")));
-        assertUnavailable(Map.of("/traffic/refine", HttpTomTomTrafficTestSupport.status(500, "{\"error\":\"boom\"}")));
-        assertUnavailable(Map.of("/traffic/refine", HttpTomTomTrafficTestSupport.json(HttpTomTomTrafficTestSupport.refineBody(true, 1.18, 0L, 0.88, true))));
+    void timeoutMalformedServerErrorAndProviderFailuresReturnTypedNotAppliedResult() throws Exception {
+        assertUnavailable(Map.of("/traffic/services/4/flowSegmentData/absolute/10/json", HttpTomTomTrafficTestSupport.delayed(Duration.ofMillis(150), HttpTomTomTrafficTestSupport.flowSegmentBody(106.2, 90.0, 0.88, false))));
+        assertUnavailable(Map.of("/traffic/services/4/flowSegmentData/absolute/10/json", HttpTomTomTrafficTestSupport.json("{\"bad\":true}")));
+        assertUnavailable(Map.of("/traffic/services/4/flowSegmentData/absolute/10/json", HttpTomTomTrafficTestSupport.status(500, "{\"error\":\"boom\"}")));
+        assertUnavailable(Map.of("/traffic/services/4/flowSegmentData/absolute/10/json", HttpTomTomTrafficTestSupport.json(HttpTomTomTrafficTestSupport.flowSegmentBody(0.0, 0.0, 0.88, false))));
+        assertUnavailable(Map.of("/traffic/services/4/flowSegmentData/absolute/10/json", HttpTomTomTrafficTestSupport.status(403, "{\"error\":\"forbidden\"}")));
+        assertUnavailable(Map.of("/traffic/services/4/flowSegmentData/absolute/10/json", HttpTomTomTrafficTestSupport.status(429, "{\"error\":\"quota\"}")));
+    }
+
+    @Test
+    void authAndQuotaFailuresMapToExplicitDegradeReason() throws Exception {
+        assertUnavailableWithReason(
+                Map.of("/traffic/services/4/flowSegmentData/absolute/10/json", HttpTomTomTrafficTestSupport.status(403, "{\"error\":\"forbidden\"}")),
+                "tomtom-auth-or-quota-failed");
+        assertUnavailableWithReason(
+                Map.of("/traffic/services/4/flowSegmentData/absolute/10/json", HttpTomTomTrafficTestSupport.status(429, "{\"error\":\"quota\"}")),
+                "tomtom-auth-or-quota-failed");
     }
 
     private void assertUnavailable(Map<String, com.sun.net.httpserver.HttpHandler> handlers) throws Exception {
@@ -29,6 +42,7 @@ class TomTomTrafficRefineFallbackContractTest {
         try {
             HttpTomTomTrafficRefineClient client = new HttpTomTomTrafficRefineClient(
                     "http://127.0.0.1:" + server.getAddress().getPort(),
+                    "test-key",
                     Duration.ofMillis(50),
                     Duration.ofMillis(60),
                     new TrafficRefineMapper());
@@ -37,6 +51,25 @@ class TomTomTrafficRefineFallbackContractTest {
 
             assertFalse(result.applied());
             assertTrue(!result.degradeReason().isBlank());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private void assertUnavailableWithReason(Map<String, com.sun.net.httpserver.HttpHandler> handlers, String degradeReason) throws Exception {
+        HttpServer server = HttpTomTomTrafficTestSupport.server(handlers);
+        try {
+            HttpTomTomTrafficRefineClient client = new HttpTomTomTrafficRefineClient(
+                    "http://127.0.0.1:" + server.getAddress().getPort(),
+                    "test-key",
+                    Duration.ofMillis(50),
+                    Duration.ofMillis(60),
+                    new TrafficRefineMapper());
+
+            TomTomTrafficRefineResult result = client.refine(request(), 8.0, 2.0);
+
+            assertFalse(result.applied());
+            assertEquals(degradeReason, result.degradeReason());
         } finally {
             server.stop(0);
         }

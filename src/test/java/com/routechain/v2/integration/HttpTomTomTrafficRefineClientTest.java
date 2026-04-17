@@ -7,23 +7,33 @@ import com.routechain.domain.WeatherProfile;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HttpTomTomTrafficRefineClientTest {
 
     @Test
-    void happyPathMapsRefineResponse() throws Exception {
+    void happyPathMapsFlowSegmentResponseAndSendsProviderQueryShape() throws Exception {
+        AtomicReference<URI> capturedUri = new AtomicReference<>();
+        AtomicReference<String> capturedTrackingId = new AtomicReference<>();
         HttpServer server = HttpTomTomTrafficTestSupport.server(Map.of(
-                "/traffic/refine", HttpTomTomTrafficTestSupport.json(HttpTomTomTrafficTestSupport.refineBody(false, 1.18, 0L, 0.88, true))));
+                "/traffic/services/4/flowSegmentData/absolute/10/json",
+                HttpTomTomTrafficTestSupport.capturingJson(
+                        HttpTomTomTrafficTestSupport.flowSegmentBody(120.0, 90.0, 0.88, false),
+                        capturedUri,
+                        capturedTrackingId)));
         try {
             HttpTomTomTrafficRefineClient client = new HttpTomTomTrafficRefineClient(
                     "http://127.0.0.1:" + server.getAddress().getPort(),
-                    Duration.ofMillis(50),
+                    "test-key",
                     Duration.ofMillis(100),
+                    Duration.ofMillis(400),
                     new TrafficRefineMapper());
 
             TomTomTrafficRefineResult result = client.refine(request(), 8.0, 2.0);
@@ -31,6 +41,10 @@ class HttpTomTomTrafficRefineClientTest {
             assertTrue(result.applied());
             assertTrue(result.trafficBadSignal());
             assertTrue(result.multiplier() > 1.0);
+            assertTrue(capturedUri.get().getQuery().contains("point="));
+            assertTrue(capturedUri.get().getQuery().contains("key=test-key"));
+            assertTrue(capturedUri.get().getQuery().contains("unit=KMPH"));
+            assertEquals("trace-tomtom", capturedTrackingId.get());
         } finally {
             server.stop(0);
         }

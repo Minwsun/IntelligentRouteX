@@ -945,6 +945,7 @@ public class RouteChainDispatchV2Properties {
     public static final class Traffic {
         private boolean enabled = false;
         private String baseUrl = "http://127.0.0.1:8095";
+        private String apiKey = "";
         private Duration connectTimeout = Duration.ofMillis(75);
         private Duration readTimeout = Duration.ofMillis(180);
         private double confidenceThreshold = 0.5;
@@ -965,6 +966,14 @@ public class RouteChainDispatchV2Properties {
 
         public void setBaseUrl(String baseUrl) {
             this.baseUrl = baseUrl;
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey;
         }
 
         public Duration getConnectTimeout() {

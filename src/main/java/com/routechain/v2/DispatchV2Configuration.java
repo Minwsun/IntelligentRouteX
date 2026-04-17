@@ -142,6 +142,7 @@ public class DispatchV2Configuration {
         }
         return new HttpTomTomTrafficRefineClient(
                 properties.getTraffic().getBaseUrl(),
+                properties.getTraffic().getApiKey(),
                 properties.getTraffic().getConnectTimeout(),
                 properties.getTraffic().getReadTimeout(),
                 new com.routechain.v2.context.TrafficRefineMapper());

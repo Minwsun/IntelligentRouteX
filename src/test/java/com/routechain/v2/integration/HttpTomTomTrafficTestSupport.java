@@ -6,9 +6,11 @@ import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 final class HttpTomTomTrafficTestSupport {
     private HttpTomTomTrafficTestSupport() {
@@ -42,19 +44,29 @@ final class HttpTomTomTrafficTestSupport {
         };
     }
 
-    static String refineBody(boolean fallbackUsed, double multiplier, long sourceAgeMs, double confidence, boolean trafficBadSignal) {
+    static String flowSegmentBody(double currentTravelTime, double freeFlowTravelTime, double confidence, boolean roadClosure) {
         return """
                 {
-                  "schemaVersion": "tomtom-traffic-refine-response/v1",
-                  "traceId": "trace-tomtom",
-                  "fallbackUsed": %s,
-                  "multiplier": %s,
-                  "sourceAgeMs": %d,
-                  "confidence": %s,
-                  "trafficBadSignal": %s,
-                  "latencyMs": 6
+                  "flowSegmentData": {
+                    "currentTravelTime": %s,
+                    "freeFlowTravelTime": %s,
+                    "confidence": %s,
+                    "roadClosure": %s
+                  }
                 }
-                """.formatted(Boolean.toString(fallbackUsed), Double.toString(multiplier), sourceAgeMs, Double.toString(confidence), Boolean.toString(trafficBadSignal));
+                """.formatted(
+                Double.toString(currentTravelTime),
+                Double.toString(freeFlowTravelTime),
+                Double.toString(confidence),
+                Boolean.toString(roadClosure));
+    }
+
+    static HttpHandler capturingJson(String body, AtomicReference<URI> capturedUri, AtomicReference<String> capturedTrackingId) {
+        return exchange -> {
+            capturedUri.set(exchange.getRequestURI());
+            capturedTrackingId.set(exchange.getRequestHeaders().getFirst("Tracking-ID"));
+            write(exchange, 200, body);
+        };
     }
 
     private static void write(HttpExchange exchange, int statusCode, String body) throws IOException {
