@@ -30,6 +30,10 @@ import com.routechain.v2.route.RouteProposalEngine;
 import com.routechain.v2.route.RouteProposalPruner;
 import com.routechain.v2.route.RouteProposalValidator;
 import com.routechain.v2.route.RouteValueScorer;
+import com.routechain.v2.scenario.DispatchScenarioService;
+import com.routechain.v2.scenario.RobustUtilityAggregator;
+import com.routechain.v2.scenario.ScenarioEvaluator;
+import com.routechain.v2.scenario.ScenarioGateEvaluator;
 import com.routechain.v2.cluster.DispatchPairClusterService;
 import com.routechain.v2.cluster.EtaLegCacheFactory;
 import com.routechain.v2.cluster.MicroClusterer;
@@ -126,12 +130,20 @@ final class TestDispatchV2Factory {
                 routeValueScorer,
                 routeProposalPruner,
                 etaLegCacheFactory);
+        ScenarioGateEvaluator scenarioGateEvaluator = configuration.scenarioGateEvaluator(properties);
+        ScenarioEvaluator scenarioEvaluator = configuration.scenarioEvaluator(properties);
+        RobustUtilityAggregator robustUtilityAggregator = configuration.robustUtilityAggregator();
+        DispatchScenarioService dispatchScenarioService = configuration.dispatchScenarioService(
+                scenarioGateEvaluator,
+                scenarioEvaluator,
+                robustUtilityAggregator);
         return configuration.dispatchV2Core(
                 dispatchEtaContextService,
                 dispatchPairClusterService,
                 dispatchBundleStageService,
                 dispatchRouteCandidateService,
-                dispatchRouteProposalService);
+                dispatchRouteProposalService,
+                dispatchScenarioService);
     }
 
     static DispatchV2Request requestWithOrdersAndDriver() {

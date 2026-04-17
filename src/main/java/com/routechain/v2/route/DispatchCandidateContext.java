@@ -13,7 +13,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-final class DispatchCandidateContext {
+public final class DispatchCandidateContext {
     private final Map<String, Order> orderById;
     private final Map<String, Driver> driverById;
     private final Map<String, BundleCandidate> bundleById;
@@ -22,10 +22,10 @@ final class DispatchCandidateContext {
     private final Map<String, Map<String, Double>> pairSupport;
     private final List<Driver> availableDrivers;
 
-    DispatchCandidateContext(List<Order> orders,
-                             List<Driver> availableDrivers,
-                             DispatchPairClusterStage pairClusterStage,
-                             DispatchBundleStage bundleStage) {
+    public DispatchCandidateContext(List<Order> orders,
+                                    List<Driver> availableDrivers,
+                                    DispatchPairClusterStage pairClusterStage,
+                                    DispatchBundleStage bundleStage) {
         this.orderById = orders.stream().collect(java.util.stream.Collectors.toMap(Order::orderId, order -> order));
         this.bundleById = bundleStage.bundleCandidates().stream().collect(java.util.stream.Collectors.toMap(BundleCandidate::bundleId, bundle -> bundle));
         this.clusterById = pairClusterStage.microClusters().stream().collect(java.util.stream.Collectors.toMap(MicroCluster::clusterId, cluster -> cluster));
@@ -43,31 +43,31 @@ final class DispatchCandidateContext {
                 .collect(java.util.stream.Collectors.toMap(Driver::driverId, driver -> driver));
     }
 
-    Order order(String orderId) {
+    public Order order(String orderId) {
         return orderById.get(orderId);
     }
 
-    BundleCandidate bundle(String bundleId) {
+    public BundleCandidate bundle(String bundleId) {
         return bundleById.get(bundleId);
     }
 
-    List<String> bundleIds() {
+    public List<String> bundleIds() {
         return bundleById.keySet().stream().sorted().toList();
     }
 
-    List<Driver> availableDrivers() {
+    public List<Driver> availableDrivers() {
         return availableDrivers;
     }
 
-    Driver driver(String driverId) {
+    public Driver driver(String driverId) {
         return driverById.get(driverId);
     }
 
-    double pairSupport(String leftOrderId, String rightOrderId) {
+    public double pairSupport(String leftOrderId, String rightOrderId) {
         return pairSupport.getOrDefault(leftOrderId, Map.of()).getOrDefault(rightOrderId, 0.0);
     }
 
-    double averagePairSupport(List<String> orderIds) {
+    public double averagePairSupport(List<String> orderIds) {
         if (orderIds.size() <= 1) {
             return 1.0;
         }
@@ -86,37 +86,37 @@ final class DispatchCandidateContext {
         return count == 0 ? 0.0 : total / count;
     }
 
-    String orderSetSignature(String bundleId) {
+    public String orderSetSignature(String bundleId) {
         BundleCandidate bundle = bundle(bundleId);
         return bundle == null ? "" : bundle.orderSetSignature();
     }
 
-    String corridorSignature(String bundleId) {
+    public String corridorSignature(String bundleId) {
         BundleCandidate bundle = bundle(bundleId);
         return bundle == null ? "unknown" : bundle.corridorSignature();
     }
 
-    double bundleScore(String bundleId) {
+    public double bundleScore(String bundleId) {
         BundleCandidate bundle = bundle(bundleId);
         return bundle == null ? 0.0 : bundle.score();
     }
 
-    MicroCluster clusterForBundle(String bundleId) {
+    public MicroCluster clusterForBundle(String bundleId) {
         BundleCandidate bundle = bundle(bundleId);
         return bundle == null ? null : clusterById.get(bundle.clusterId());
     }
 
-    BoundaryExpansion boundaryExpansionForBundle(String bundleId) {
+    public BoundaryExpansion boundaryExpansionForBundle(String bundleId) {
         BundleCandidate bundle = bundle(bundleId);
         return bundle == null ? null : boundaryExpansionByClusterId.get(bundle.clusterId());
     }
 
-    boolean isAcceptedBoundaryOrder(String bundleId, String orderId) {
+    public boolean isAcceptedBoundaryOrder(String bundleId, String orderId) {
         BoundaryExpansion expansion = boundaryExpansionForBundle(bundleId);
         return expansion != null && expansion.acceptedBoundaryOrderIds().contains(orderId);
     }
 
-    double acceptedBoundarySupport(String bundleId) {
+    public double acceptedBoundarySupport(String bundleId) {
         BundleCandidate bundle = bundle(bundleId);
         if (bundle == null || bundle.acceptedBoundaryOrderIds().isEmpty()) {
             return 0.0;
@@ -129,5 +129,50 @@ final class DispatchCandidateContext {
                 .mapToDouble(orderId -> expansion.supportScoreByOrder().getOrDefault(orderId, 0.0))
                 .average()
                 .orElse(0.0);
+    }
+
+    public long readyTimeSpread(String bundleId) {
+        BundleCandidate bundle = bundle(bundleId);
+        if (bundle == null || bundle.orderIds().size() <= 1) {
+            return 0L;
+        }
+        java.time.Instant earliest = bundle.orderIds().stream()
+                .map(this::order)
+                .filter(java.util.Objects::nonNull)
+                .map(Order::readyAt)
+                .min(java.util.Comparator.naturalOrder())
+                .orElse(java.time.Instant.EPOCH);
+        java.time.Instant latest = bundle.orderIds().stream()
+                .map(this::order)
+                .filter(java.util.Objects::nonNull)
+                .map(Order::readyAt)
+                .max(java.util.Comparator.naturalOrder())
+                .orElse(java.time.Instant.EPOCH);
+        return java.time.Duration.between(earliest, latest).toMinutes();
+    }
+
+    public double pickupCompactness(String bundleId) {
+        BundleCandidate bundle = bundle(bundleId);
+        if (bundle == null || bundle.orderIds().size() <= 1) {
+            return 1.0;
+        }
+        List<Order> orders = bundle.orderIds().stream()
+                .map(this::order)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        double minLat = orders.stream().mapToDouble(order -> order.pickupPoint().latitude()).min().orElse(0.0);
+        double maxLat = orders.stream().mapToDouble(order -> order.pickupPoint().latitude()).max().orElse(0.0);
+        double minLon = orders.stream().mapToDouble(order -> order.pickupPoint().longitude()).min().orElse(0.0);
+        double maxLon = orders.stream().mapToDouble(order -> order.pickupPoint().longitude()).max().orElse(0.0);
+        double spread = Math.abs(maxLat - minLat) + Math.abs(maxLon - minLon);
+        return Math.max(0.0, 1.0 - (spread * 10.0));
+    }
+
+    public double acceptedBoundaryParticipation(String bundleId) {
+        BundleCandidate bundle = bundle(bundleId);
+        if (bundle == null || bundle.orderIds().isEmpty()) {
+            return 0.0;
+        }
+        return (double) bundle.acceptedBoundaryOrderIds().size() / bundle.orderIds().size();
     }
 }

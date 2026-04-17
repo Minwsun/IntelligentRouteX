@@ -34,19 +34,23 @@ import com.routechain.v2.context.WeatherContextService;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
+import com.routechain.v2.scenario.DispatchScenarioService;
+import com.routechain.v2.scenario.RobustUtilityAggregator;
+import com.routechain.v2.scenario.ScenarioEvaluator;
+import com.routechain.v2.scenario.ScenarioGateEvaluator;
 
 import java.time.Instant;
 import java.util.List;
 
-final class RouteTestFixtures {
+public final class RouteTestFixtures {
     private RouteTestFixtures() {
     }
 
-    static RouteChainDispatchV2Properties properties() {
+    public static RouteChainDispatchV2Properties properties() {
         return RouteChainDispatchV2Properties.defaults();
     }
 
-    static DispatchV2Request request() {
+    public static DispatchV2Request request() {
         Instant decisionTime = Instant.parse("2026-04-16T12:00:00Z");
         return new DispatchV2Request(
                 "dispatch-v2-request/v1",
@@ -64,7 +68,7 @@ final class RouteTestFixtures {
                 decisionTime);
     }
 
-    static EtaContext etaContext() {
+    public static EtaContext etaContext() {
         return new EtaContext(
                 "dispatch-eta-context/v1",
                 "trace-route",
@@ -78,7 +82,7 @@ final class RouteTestFixtures {
                 "baseline-profile-weather");
     }
 
-    static DispatchPairClusterStage pairClusterStage(RouteChainDispatchV2Properties properties) {
+    public static DispatchPairClusterStage pairClusterStage(RouteChainDispatchV2Properties properties) {
         BaselineTravelTimeEstimator estimator = new BaselineTravelTimeEstimator();
         EtaService etaService = new EtaService(
                 properties,
@@ -101,7 +105,7 @@ final class RouteTestFixtures {
                 .evaluate(request(), etaContext());
     }
 
-    static DispatchBundleStage bundleStage(RouteChainDispatchV2Properties properties, DispatchPairClusterStage pairClusterStage) {
+    public static DispatchBundleStage bundleStage(RouteChainDispatchV2Properties properties, DispatchPairClusterStage pairClusterStage) {
         return new DispatchBundleStageService(
                 properties,
                 new BoundaryCandidateSelector(properties),
@@ -114,7 +118,7 @@ final class RouteTestFixtures {
                 .evaluate(etaContext(), pairClusterStage);
     }
 
-    static DispatchCandidateContext candidateContext(RouteChainDispatchV2Properties properties) {
+    public static DispatchCandidateContext candidateContext(RouteChainDispatchV2Properties properties) {
         DispatchPairClusterStage pairClusterStage = pairClusterStage(properties);
         DispatchBundleStage bundleStage = bundleStage(properties, pairClusterStage);
         return new DispatchCandidateContext(
@@ -124,7 +128,7 @@ final class RouteTestFixtures {
                 bundleStage);
     }
 
-    static DispatchRouteCandidateService routeService(RouteChainDispatchV2Properties properties) {
+    public static DispatchRouteCandidateService routeService(RouteChainDispatchV2Properties properties) {
         EtaService etaService = new EtaService(
                 properties,
                 new BaselineTravelTimeEstimator(),
@@ -142,13 +146,13 @@ final class RouteTestFixtures {
                 etaLegCacheFactory);
     }
 
-    static DispatchRouteCandidateStage routeCandidateStage(RouteChainDispatchV2Properties properties) {
+    public static DispatchRouteCandidateStage routeCandidateStage(RouteChainDispatchV2Properties properties) {
         DispatchPairClusterStage pairClusterStage = pairClusterStage(properties);
         DispatchBundleStage bundleStage = bundleStage(properties, pairClusterStage);
         return routeService(properties).evaluate(request(), etaContext(), pairClusterStage, bundleStage);
     }
 
-    static DispatchRouteProposalService routeProposalService(RouteChainDispatchV2Properties properties) {
+    public static DispatchRouteProposalService routeProposalService(RouteChainDispatchV2Properties properties) {
         EtaService etaService = new EtaService(
                 properties,
                 new BaselineTravelTimeEstimator(),
@@ -165,6 +169,48 @@ final class RouteTestFixtures {
                 new RouteValueScorer(),
                 new RouteProposalPruner(properties),
                 etaLegCacheFactory);
+    }
+
+    public static DispatchRouteProposalStage routeProposalStage(RouteChainDispatchV2Properties properties) {
+        DispatchPairClusterStage pairClusterStage = pairClusterStage(properties);
+        DispatchBundleStage bundleStage = bundleStage(properties, pairClusterStage);
+        DispatchRouteCandidateStage routeCandidateStage = routeCandidateStage(properties);
+        return routeProposalService(properties).evaluate(request(), etaContext(), pairClusterStage, bundleStage, routeCandidateStage);
+    }
+
+    public static EtaContext weatherBadEtaContext() {
+        return new EtaContext(
+                "dispatch-eta-context/v1",
+                "trace-route-weather",
+                1,
+                8.0,
+                8.0,
+                0.45,
+                false,
+                true,
+                "corridor-a",
+                "baseline-profile-weather");
+    }
+
+    public static EtaContext trafficBadEtaContext() {
+        return new EtaContext(
+                "dispatch-eta-context/v1",
+                "trace-route-traffic",
+                1,
+                8.0,
+                8.0,
+                0.45,
+                true,
+                false,
+                "corridor-a",
+                "baseline-profile-weather");
+    }
+
+    public static DispatchScenarioService scenarioService(RouteChainDispatchV2Properties properties) {
+        return new DispatchScenarioService(
+                new ScenarioGateEvaluator(properties),
+                new ScenarioEvaluator(properties),
+                new RobustUtilityAggregator());
     }
 
     private static Order order(String orderId,

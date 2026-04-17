@@ -6,7 +6,7 @@
 
 ## Current Executable Slice
 
-The current runtime result must only report stages that actually ran. For the current route-proposal slice, `DispatchV2Result.decisionStages` must be exactly `["eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool"]` on the enabled path.
+The current runtime result must only report stages that actually ran. For the current scenario slice, `DispatchV2Result.decisionStages` must be exactly `["eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation"]` on the enabled path.
 
 ## Runtime Defaults
 
@@ -19,6 +19,11 @@ The current runtime result must only report stages that actually ran. For the cu
 - `candidate.maxAnchors=3`
 - `candidate.maxDrivers=8`
 - `candidate.maxRouteAlternatives=4`
+- `scenario.weatherBadEtaMultiplier=1.18`
+- `scenario.trafficBadEtaMultiplier=1.22`
+- `scenario.merchantDelayMinutes=6`
+- `scenario.driverDriftPenalty=0.08`
+- `scenario.pickupQueuePenalty=0.06`
 
 ## Feature Flags
 

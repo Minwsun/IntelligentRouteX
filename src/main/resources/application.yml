@@ -60,3 +60,9 @@ routechain:
       min-support-score-threshold: 0.52
       max-boundary-orders-per-cluster: 2
       weather-tightened-support-threshold: 0.62
+    scenario:
+      weather-bad-eta-multiplier: 1.18
+      traffic-bad-eta-multiplier: 1.22
+      merchant-delay-minutes: 6
+      driver-drift-penalty: 0.08
+      pickup-queue-penalty: 0.06

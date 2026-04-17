@@ -34,6 +34,10 @@ import com.routechain.v2.route.RouteProposalEngine;
 import com.routechain.v2.route.RouteProposalPruner;
 import com.routechain.v2.route.RouteProposalValidator;
 import com.routechain.v2.route.RouteValueScorer;
+import com.routechain.v2.scenario.DispatchScenarioService;
+import com.routechain.v2.scenario.RobustUtilityAggregator;
+import com.routechain.v2.scenario.ScenarioEvaluator;
+import com.routechain.v2.scenario.ScenarioGateEvaluator;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
@@ -287,17 +291,44 @@ public class DispatchV2Configuration {
     }
 
     @Bean
+    ScenarioGateEvaluator scenarioGateEvaluator(RouteChainDispatchV2Properties properties) {
+        return new ScenarioGateEvaluator(properties);
+    }
+
+    @Bean
+    ScenarioEvaluator scenarioEvaluator(RouteChainDispatchV2Properties properties) {
+        return new ScenarioEvaluator(properties);
+    }
+
+    @Bean
+    RobustUtilityAggregator robustUtilityAggregator() {
+        return new RobustUtilityAggregator();
+    }
+
+    @Bean
+    DispatchScenarioService dispatchScenarioService(ScenarioGateEvaluator scenarioGateEvaluator,
+                                                    ScenarioEvaluator scenarioEvaluator,
+                                                    RobustUtilityAggregator robustUtilityAggregator) {
+        return new DispatchScenarioService(
+                scenarioGateEvaluator,
+                scenarioEvaluator,
+                robustUtilityAggregator);
+    }
+
+    @Bean
     DispatchV2Core dispatchV2Core(DispatchEtaContextService dispatchEtaContextService,
                                   DispatchPairClusterService dispatchPairClusterService,
                                   DispatchBundleStageService dispatchBundleStageService,
                                   DispatchRouteCandidateService dispatchRouteCandidateService,
-                                  DispatchRouteProposalService dispatchRouteProposalService) {
+                                  DispatchRouteProposalService dispatchRouteProposalService,
+                                  DispatchScenarioService dispatchScenarioService) {
         return new DispatchV2Core(
                 dispatchEtaContextService,
                 dispatchPairClusterService,
                 dispatchBundleStageService,
                 dispatchRouteCandidateService,
-                dispatchRouteProposalService);
+                dispatchRouteProposalService,
+                dispatchScenarioService);
     }
 
     @Bean

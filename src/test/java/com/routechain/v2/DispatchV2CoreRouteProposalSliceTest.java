@@ -19,11 +19,13 @@ class DispatchV2CoreRouteProposalSliceTest {
 
         DispatchV2Result result = core.dispatch(TestDispatchV2Factory.requestWithOrdersAndDriver());
 
-        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool"), result.decisionStages());
+        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation"), result.decisionStages());
         assertFalse(result.fallbackUsed());
         assertNull(result.selectedRouteId());
         assertNotNull(result.routeProposalSummary());
+        assertNotNull(result.scenarioEvaluationSummary());
         assertFalse(result.routeProposals().isEmpty());
+        assertFalse(result.scenarioEvaluations().isEmpty());
         assertTrue(result.routeProposalSummary().retainedProposalCount() > 0);
     }
 }

@@ -17,7 +17,12 @@ public final class RouteProposalValidator {
         if (!proposal.stopOrder().isEmpty() && !proposal.stopOrder().getFirst().equals(proposal.anchorOrderId())) {
             validationReasons.add("route-proposal-anchor-must-lead-stop-order");
         }
-        Set<String> bundleOrderIds = new HashSet<>(context.bundle(proposal.bundleId()).orderIds());
+        if (context.bundle(proposal.bundleId()) == null) {
+            validationReasons.add("route-proposal-missing-bundle-context");
+        }
+        Set<String> bundleOrderIds = context.bundle(proposal.bundleId()) == null
+                ? Set.of()
+                : new HashSet<>(context.bundle(proposal.bundleId()).orderIds());
         Set<String> stopOrderIds = new HashSet<>(proposal.stopOrder());
         if (stopOrderIds.size() != proposal.stopOrder().size()) {
             validationReasons.add("route-proposal-contains-duplicate-orders");

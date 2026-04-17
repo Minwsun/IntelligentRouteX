@@ -32,6 +32,11 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 - `RouteProposal`
 - `RouteProposalSummary`
 - `DispatchRouteProposalStage`
+- `ScenarioType`
+- `ScenarioEvaluation`
+- `RobustUtility`
+- `ScenarioEvaluationSummary`
+- `DispatchScenarioStage`
 - `WarmStartState`
 - `HotStartState`
 - `DecisionLogRecord`

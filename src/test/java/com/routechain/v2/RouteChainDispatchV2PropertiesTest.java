@@ -46,6 +46,11 @@ class RouteChainDispatchV2PropertiesTest {
         assertEquals(0.52, properties.getBoundaryExpansion().getMinSupportScoreThreshold());
         assertEquals(2, properties.getBoundaryExpansion().getMaxBoundaryOrdersPerCluster());
         assertEquals(0.62, properties.getBoundaryExpansion().getWeatherTightenedSupportThreshold());
+        assertEquals(1.18, properties.getScenario().getWeatherBadEtaMultiplier());
+        assertEquals(1.22, properties.getScenario().getTrafficBadEtaMultiplier());
+        assertEquals(6, properties.getScenario().getMerchantDelayMinutes());
+        assertEquals(0.08, properties.getScenario().getDriverDriftPenalty());
+        assertEquals(0.06, properties.getScenario().getPickupQueuePenalty());
         assertFalse(properties.isEnabled());
         assertFalse(properties.isMlEnabled());
         assertFalse(properties.isSidecarRequired());

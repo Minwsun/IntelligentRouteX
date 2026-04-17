@@ -23,6 +23,7 @@ public class RouteChainDispatchV2Properties {
     private final Pair pair = new Pair();
     private final MicroCluster microCluster = new MicroCluster();
     private final BoundaryExpansion boundaryExpansion = new BoundaryExpansion();
+    private final Scenario scenario = new Scenario();
 
     public static RouteChainDispatchV2Properties defaults() {
         return new RouteChainDispatchV2Properties();
@@ -130,6 +131,10 @@ public class RouteChainDispatchV2Properties {
 
     public BoundaryExpansion getBoundaryExpansion() {
         return boundaryExpansion;
+    }
+
+    public Scenario getScenario() {
+        return scenario;
     }
 
     public static final class Buffer {
@@ -456,6 +461,54 @@ public class RouteChainDispatchV2Properties {
 
         public void setWeatherTightenedSupportThreshold(double weatherTightenedSupportThreshold) {
             this.weatherTightenedSupportThreshold = weatherTightenedSupportThreshold;
+        }
+    }
+
+    public static final class Scenario {
+        private double weatherBadEtaMultiplier = 1.18;
+        private double trafficBadEtaMultiplier = 1.22;
+        private int merchantDelayMinutes = 6;
+        private double driverDriftPenalty = 0.08;
+        private double pickupQueuePenalty = 0.06;
+
+        public double getWeatherBadEtaMultiplier() {
+            return weatherBadEtaMultiplier;
+        }
+
+        public void setWeatherBadEtaMultiplier(double weatherBadEtaMultiplier) {
+            this.weatherBadEtaMultiplier = weatherBadEtaMultiplier;
+        }
+
+        public double getTrafficBadEtaMultiplier() {
+            return trafficBadEtaMultiplier;
+        }
+
+        public void setTrafficBadEtaMultiplier(double trafficBadEtaMultiplier) {
+            this.trafficBadEtaMultiplier = trafficBadEtaMultiplier;
+        }
+
+        public int getMerchantDelayMinutes() {
+            return merchantDelayMinutes;
+        }
+
+        public void setMerchantDelayMinutes(int merchantDelayMinutes) {
+            this.merchantDelayMinutes = merchantDelayMinutes;
+        }
+
+        public double getDriverDriftPenalty() {
+            return driverDriftPenalty;
+        }
+
+        public void setDriverDriftPenalty(double driverDriftPenalty) {
+            this.driverDriftPenalty = driverDriftPenalty;
+        }
+
+        public double getPickupQueuePenalty() {
+            return pickupQueuePenalty;
+        }
+
+        public void setPickupQueuePenalty(double pickupQueuePenalty) {
+            this.pickupQueuePenalty = pickupQueuePenalty;
         }
     }
 }
