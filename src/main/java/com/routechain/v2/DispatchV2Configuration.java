@@ -38,6 +38,9 @@ import com.routechain.v2.scenario.DispatchScenarioService;
 import com.routechain.v2.scenario.RobustUtilityAggregator;
 import com.routechain.v2.scenario.ScenarioEvaluator;
 import com.routechain.v2.scenario.ScenarioGateEvaluator;
+import com.routechain.v2.executor.DispatchAssignmentBuilder;
+import com.routechain.v2.executor.DispatchExecutor;
+import com.routechain.v2.executor.DispatchExecutorService;
 import com.routechain.v2.selector.ConflictGraphBuilder;
 import com.routechain.v2.selector.DispatchSelectorService;
 import com.routechain.v2.selector.GlobalSelector;
@@ -357,13 +360,29 @@ public class DispatchV2Configuration {
     }
 
     @Bean
+    DispatchAssignmentBuilder dispatchAssignmentBuilder() {
+        return new DispatchAssignmentBuilder();
+    }
+
+    @Bean
+    DispatchExecutor dispatchExecutor(DispatchAssignmentBuilder dispatchAssignmentBuilder) {
+        return new DispatchExecutor(dispatchAssignmentBuilder);
+    }
+
+    @Bean
+    DispatchExecutorService dispatchExecutorService(DispatchExecutor dispatchExecutor) {
+        return new DispatchExecutorService(dispatchExecutor);
+    }
+
+    @Bean
     DispatchV2Core dispatchV2Core(DispatchEtaContextService dispatchEtaContextService,
                                   DispatchPairClusterService dispatchPairClusterService,
                                   DispatchBundleStageService dispatchBundleStageService,
                                   DispatchRouteCandidateService dispatchRouteCandidateService,
                                   DispatchRouteProposalService dispatchRouteProposalService,
                                   DispatchScenarioService dispatchScenarioService,
-                                  DispatchSelectorService dispatchSelectorService) {
+                                  DispatchSelectorService dispatchSelectorService,
+                                  DispatchExecutorService dispatchExecutorService) {
         return new DispatchV2Core(
                 dispatchEtaContextService,
                 dispatchPairClusterService,
@@ -371,7 +390,8 @@ public class DispatchV2Configuration {
                 dispatchRouteCandidateService,
                 dispatchRouteProposalService,
                 dispatchScenarioService,
-                dispatchSelectorService);
+                dispatchSelectorService,
+                dispatchExecutorService);
     }
 
     @Bean

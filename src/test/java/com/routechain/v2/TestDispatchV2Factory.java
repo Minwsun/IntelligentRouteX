@@ -34,6 +34,9 @@ import com.routechain.v2.scenario.DispatchScenarioService;
 import com.routechain.v2.scenario.RobustUtilityAggregator;
 import com.routechain.v2.scenario.ScenarioEvaluator;
 import com.routechain.v2.scenario.ScenarioGateEvaluator;
+import com.routechain.v2.executor.DispatchAssignmentBuilder;
+import com.routechain.v2.executor.DispatchExecutor;
+import com.routechain.v2.executor.DispatchExecutorService;
 import com.routechain.v2.selector.ConflictGraphBuilder;
 import com.routechain.v2.selector.DispatchSelectorService;
 import com.routechain.v2.selector.GlobalSelector;
@@ -154,6 +157,9 @@ final class TestDispatchV2Factory {
                 selectorCandidateBuilder,
                 conflictGraphBuilder,
                 globalSelector);
+        DispatchAssignmentBuilder dispatchAssignmentBuilder = configuration.dispatchAssignmentBuilder();
+        DispatchExecutor dispatchExecutor = configuration.dispatchExecutor(dispatchAssignmentBuilder);
+        DispatchExecutorService dispatchExecutorService = configuration.dispatchExecutorService(dispatchExecutor);
         return configuration.dispatchV2Core(
                 dispatchEtaContextService,
                 dispatchPairClusterService,
@@ -161,7 +167,8 @@ final class TestDispatchV2Factory {
                 dispatchRouteCandidateService,
                 dispatchRouteProposalService,
                 dispatchScenarioService,
-                dispatchSelectorService);
+                dispatchSelectorService,
+                dispatchExecutorService);
     }
 
     static DispatchV2Request requestWithOrdersAndDriver() {

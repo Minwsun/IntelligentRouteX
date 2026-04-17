@@ -39,8 +39,13 @@ import com.routechain.v2.scenario.DispatchScenarioStage;
 import com.routechain.v2.scenario.RobustUtilityAggregator;
 import com.routechain.v2.scenario.ScenarioEvaluator;
 import com.routechain.v2.scenario.ScenarioGateEvaluator;
+import com.routechain.v2.executor.DispatchAssignmentBuilder;
+import com.routechain.v2.executor.DispatchExecutor;
+import com.routechain.v2.executor.DispatchExecutorService;
+import com.routechain.v2.executor.DispatchExecutorStage;
 import com.routechain.v2.selector.ConflictGraphBuilder;
 import com.routechain.v2.selector.DispatchSelectorService;
+import com.routechain.v2.selector.DispatchSelectorStage;
 import com.routechain.v2.selector.GlobalSelector;
 import com.routechain.v2.selector.GreedyRepairSelector;
 import com.routechain.v2.selector.OrToolsSetPackingSolver;
@@ -239,6 +244,39 @@ public final class RouteTestFixtures {
                 new SelectorCandidateBuilder(properties),
                 new ConflictGraphBuilder(),
                 new GlobalSelector(properties, new GreedyRepairSelector(), new OrToolsSetPackingSolver()));
+    }
+
+    public static DispatchSelectorStage selectorStage(RouteChainDispatchV2Properties properties) {
+        DispatchPairClusterStage pairClusterStage = pairClusterStage(properties);
+        DispatchBundleStage bundleStage = bundleStage(properties, pairClusterStage);
+        DispatchRouteCandidateStage routeCandidateStage = routeCandidateStage(properties);
+        DispatchRouteProposalStage routeProposalStage = routeProposalStage(properties);
+        DispatchScenarioStage scenarioStage = scenarioStage(properties);
+        return selectorService(properties).evaluate(
+                request(),
+                etaContext(),
+                pairClusterStage,
+                bundleStage,
+                routeCandidateStage,
+                routeProposalStage,
+                scenarioStage);
+    }
+
+    public static DispatchExecutorService executorService(RouteChainDispatchV2Properties properties) {
+        return new DispatchExecutorService(new DispatchExecutor(new DispatchAssignmentBuilder()));
+    }
+
+    public static DispatchExecutorStage executorStage(RouteChainDispatchV2Properties properties) {
+        DispatchPairClusterStage pairClusterStage = pairClusterStage(properties);
+        DispatchBundleStage bundleStage = bundleStage(properties, pairClusterStage);
+        DispatchRouteProposalStage routeProposalStage = routeProposalStage(properties);
+        DispatchSelectorStage selectorStage = selectorStage(properties);
+        return executorService(properties).evaluate(
+                request(),
+                pairClusterStage,
+                bundleStage,
+                routeProposalStage,
+                selectorStage);
     }
 
     private static Order order(String orderId,

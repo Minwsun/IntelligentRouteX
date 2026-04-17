@@ -9,7 +9,6 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DispatchV2CoreEtaSliceTest {
@@ -18,9 +17,9 @@ class DispatchV2CoreEtaSliceTest {
     void returnsCurrentExecutedStagesForEnabledCore() {
         DispatchV2Core core = TestDispatchV2Factory.core(com.routechain.config.RouteChainDispatchV2Properties.defaults());
         DispatchV2Result result = core.dispatch(TestDispatchV2Factory.requestWithOrdersAndDriver());
-        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector"), result.decisionStages());
+        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector", "dispatch-executor"), result.decisionStages());
         assertFalse(result.fallbackUsed());
-        assertNull(result.selectedRouteId());
+        assertNotNull(result.selectedRouteId());
         assertNotNull(result.etaContext());
         assertNotNull(result.etaStageTrace());
         assertNotNull(result.freshnessMetadata());
@@ -45,6 +44,8 @@ class DispatchV2CoreEtaSliceTest {
         assertNotNull(result.conflictGraph());
         assertNotNull(result.globalSelectionResult());
         assertNotNull(result.globalSelectorSummary());
+        assertNotNull(result.assignments());
+        assertNotNull(result.dispatchExecutionSummary());
     }
 
     @Test
@@ -58,7 +59,7 @@ class DispatchV2CoreEtaSliceTest {
                 List.of(),
                 WeatherProfile.CLEAR,
                 Instant.now()));
-        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector"), result.decisionStages());
+        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector", "dispatch-executor"), result.decisionStages());
         assertEquals(0, result.etaContext().sampledLegCount());
         assertTrue(result.degradeReasons().contains("no-sampleable-eta-leg"));
         assertEquals(0, result.bufferedOrderWindow().orderCount());
@@ -69,5 +70,6 @@ class DispatchV2CoreEtaSliceTest {
         assertTrue(result.scenarioEvaluations().isEmpty());
         assertTrue(result.robustUtilities().isEmpty());
         assertTrue(result.selectorCandidates().isEmpty());
+        assertTrue(result.assignments().isEmpty());
     }
 }

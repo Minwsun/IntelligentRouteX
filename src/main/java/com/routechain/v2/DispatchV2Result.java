@@ -13,6 +13,8 @@ import com.routechain.v2.route.RouteProposalSummary;
 import com.routechain.v2.scenario.RobustUtility;
 import com.routechain.v2.scenario.ScenarioEvaluation;
 import com.routechain.v2.scenario.ScenarioEvaluationSummary;
+import com.routechain.v2.executor.DispatchAssignment;
+import com.routechain.v2.executor.DispatchExecutionSummary;
 import com.routechain.v2.selector.ConflictGraph;
 import com.routechain.v2.selector.GlobalSelectionResult;
 import com.routechain.v2.selector.GlobalSelectorSummary;
@@ -56,6 +58,8 @@ public record DispatchV2Result(
         ConflictGraph conflictGraph,
         GlobalSelectionResult globalSelectionResult,
         GlobalSelectorSummary globalSelectorSummary,
+        List<DispatchAssignment> assignments,
+        DispatchExecutionSummary dispatchExecutionSummary,
         List<String> degradeReasons) implements SchemaVersioned {
 
     public static DispatchV2Result fallback(String traceId) {
@@ -89,6 +93,8 @@ public record DispatchV2Result(
                 ConflictGraph.empty(),
                 GlobalSelectionResult.empty(),
                 GlobalSelectorSummary.empty(),
+                List.of(),
+                DispatchExecutionSummary.empty(),
                 List.of("dispatch-v2-disabled"));
     }
 }

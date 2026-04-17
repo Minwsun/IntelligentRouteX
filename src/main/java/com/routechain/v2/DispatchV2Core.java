@@ -8,6 +8,8 @@ import com.routechain.v2.route.DispatchRouteProposalService;
 import com.routechain.v2.route.DispatchRouteProposalStage;
 import com.routechain.v2.scenario.DispatchScenarioService;
 import com.routechain.v2.scenario.DispatchScenarioStage;
+import com.routechain.v2.executor.DispatchExecutorService;
+import com.routechain.v2.executor.DispatchExecutorStage;
 import com.routechain.v2.selector.DispatchSelectorService;
 import com.routechain.v2.selector.DispatchSelectorStage;
 import com.routechain.v2.cluster.DispatchPairClusterService;
@@ -23,6 +25,7 @@ public final class DispatchV2Core {
     private final DispatchRouteProposalService dispatchRouteProposalService;
     private final DispatchScenarioService dispatchScenarioService;
     private final DispatchSelectorService dispatchSelectorService;
+    private final DispatchExecutorService dispatchExecutorService;
 
     public DispatchV2Core(DispatchEtaContextService dispatchEtaContextService,
                           DispatchPairClusterService dispatchPairClusterService,
@@ -30,7 +33,8 @@ public final class DispatchV2Core {
                           DispatchRouteCandidateService dispatchRouteCandidateService,
                           DispatchRouteProposalService dispatchRouteProposalService,
                           DispatchScenarioService dispatchScenarioService,
-                          DispatchSelectorService dispatchSelectorService) {
+                          DispatchSelectorService dispatchSelectorService,
+                          DispatchExecutorService dispatchExecutorService) {
         this.dispatchEtaContextService = dispatchEtaContextService;
         this.dispatchPairClusterService = dispatchPairClusterService;
         this.dispatchBundleStageService = dispatchBundleStageService;
@@ -38,6 +42,7 @@ public final class DispatchV2Core {
         this.dispatchRouteProposalService = dispatchRouteProposalService;
         this.dispatchScenarioService = dispatchScenarioService;
         this.dispatchSelectorService = dispatchSelectorService;
+        this.dispatchExecutorService = dispatchExecutorService;
     }
 
     public DispatchV2Result dispatch(DispatchV2Request request) {
@@ -66,6 +71,12 @@ public final class DispatchV2Core {
                 routeCandidateStage,
                 routeProposalStage,
                 scenarioStage);
+        DispatchExecutorStage executorStage = dispatchExecutorService.evaluate(
+                request,
+                pairClusterStage,
+                bundleStage,
+                routeProposalStage,
+                selectorStage);
         java.util.List<String> degradeReasons = java.util.stream.Stream.concat(
                         java.util.stream.Stream.concat(
                                 java.util.stream.Stream.concat(
@@ -78,15 +89,17 @@ public final class DispatchV2Core {
                                                 routeCandidateStage.degradeReasons().stream()),
                                         routeProposalStage.degradeReasons().stream()),
                                 scenarioStage.degradeReasons().stream()),
-                        selectorStage.degradeReasons().stream())
+                        java.util.stream.Stream.concat(
+                                selectorStage.degradeReasons().stream(),
+                                executorStage.degradeReasons().stream()))
                 .distinct()
                 .toList();
         return new DispatchV2Result(
                 "dispatch-v2-result/v1",
                 request.traceId(),
                 false,
-                null,
-                java.util.List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector"),
+                executorStage.selectedRouteId(),
+                java.util.List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector", "dispatch-executor"),
                 etaStage.etaContext(),
                 etaStage.etaStageTrace(),
                 etaStage.freshnessMetadata(),
@@ -111,6 +124,8 @@ public final class DispatchV2Core {
                 selectorStage.conflictGraph(),
                 selectorStage.globalSelectionResult(),
                 selectorStage.globalSelectorSummary(),
+                executorStage.assignments(),
+                executorStage.dispatchExecutionSummary(),
                 degradeReasons);
     }
 }

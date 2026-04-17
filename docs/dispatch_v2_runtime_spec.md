@@ -6,7 +6,7 @@
 
 ## Current Executable Slice
 
-The current runtime result must only report stages that actually ran. For the current global-selector slice, `DispatchV2Result.decisionStages` must be exactly `["eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector"]` on the enabled path.
+The current runtime result must only report stages that actually ran. For the current executor slice, `DispatchV2Result.decisionStages` must be exactly `["eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector", "dispatch-executor"]` on the enabled path.
 
 ## Runtime Defaults
 

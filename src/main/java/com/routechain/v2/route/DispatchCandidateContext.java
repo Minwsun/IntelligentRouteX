@@ -175,4 +175,30 @@ public final class DispatchCandidateContext {
         }
         return (double) bundle.acceptedBoundaryOrderIds().size() / bundle.orderIds().size();
     }
+
+    public java.time.Instant readyWindowStart(String bundleId) {
+        BundleCandidate bundle = bundle(bundleId);
+        if (bundle == null || bundle.orderIds().isEmpty()) {
+            return null;
+        }
+        return bundle.orderIds().stream()
+                .map(this::order)
+                .filter(java.util.Objects::nonNull)
+                .map(Order::readyAt)
+                .min(java.util.Comparator.naturalOrder())
+                .orElse(null);
+    }
+
+    public java.time.Instant readyWindowEnd(String bundleId) {
+        BundleCandidate bundle = bundle(bundleId);
+        if (bundle == null || bundle.orderIds().isEmpty()) {
+            return null;
+        }
+        return bundle.orderIds().stream()
+                .map(this::order)
+                .filter(java.util.Objects::nonNull)
+                .map(Order::readyAt)
+                .max(java.util.Comparator.naturalOrder())
+                .orElse(null);
+    }
 }

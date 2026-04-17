@@ -46,6 +46,10 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 - `GlobalSelectionResult`
 - `GlobalSelectorSummary`
 - `DispatchSelectorStage`
+- `ExecutionActionType`
+- `DispatchAssignment`
+- `DispatchExecutionSummary`
+- `DispatchExecutorStage`
 - `WarmStartState`
 - `HotStartState`
 - `DecisionLogRecord`
@@ -56,6 +60,7 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 - `PairEdge`
 - `SelectorCandidateIdentityKey`
 - `SelectorDecisionTrace`
+- `DispatchExecutionTrace`
 
 ## Rule
 

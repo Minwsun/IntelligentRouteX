@@ -8,7 +8,6 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DispatchV2CoreRouteCandidateSliceTest {
@@ -19,18 +18,20 @@ class DispatchV2CoreRouteCandidateSliceTest {
 
         DispatchV2Result result = core.dispatch(TestDispatchV2Factory.requestWithOrdersAndDriver());
 
-        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector"), result.decisionStages());
+        assertEquals(List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector", "dispatch-executor"), result.decisionStages());
         assertFalse(result.fallbackUsed());
-        assertNull(result.selectedRouteId());
+        assertNotNull(result.selectedRouteId());
         assertNotNull(result.pickupAnchorSummary());
         assertNotNull(result.driverShortlistSummary());
         assertNotNull(result.routeProposalSummary());
         assertNotNull(result.scenarioEvaluationSummary());
         assertNotNull(result.globalSelectorSummary());
+        assertNotNull(result.dispatchExecutionSummary());
         assertFalse(result.pickupAnchors().isEmpty());
         assertFalse(result.driverCandidates().isEmpty());
         assertFalse(result.routeProposals().isEmpty());
         assertFalse(result.robustUtilities().isEmpty());
+        assertFalse(result.assignments().isEmpty());
         assertTrue(result.driverShortlistSummary().rerankedDriverCount() > 0);
     }
 }
