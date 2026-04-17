@@ -72,6 +72,13 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 - `DispatchExecutionTrace`
 - `SnapshotStore`
 - `DecisionLogWriter`
+- `ReplayStore`
+
+## Hardening Runtime Notes
+
+- production dispatch writes replay/log/snapshot state through `PostDispatchHardeningService`
+- replay uses a replay-safe dispatch path and must not mutate hardening stores
+- durable feedback storage may be `IN_MEMORY` or `FILE` without changing decision-stage contracts
 
 ## Rule
 

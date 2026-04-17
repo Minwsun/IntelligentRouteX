@@ -36,9 +36,9 @@ public final class DispatchReplayRunner {
                     List.of("replay-request-missing"));
         }
 
-        DecisionLogRecord decisionLogRecord = dispatchReplayLoader.loadLatestDecisionLog();
-        SnapshotLoadResult snapshotLoadResult = dispatchReplayLoader.loadLatestSnapshot();
-        DispatchV2Result replayResult = dispatchV2Core.dispatch(requestRecord.request());
+        DecisionLogRecord decisionLogRecord = dispatchReplayLoader.loadDecisionLog(requestRecord.traceId());
+        SnapshotLoadResult snapshotLoadResult = dispatchReplayLoader.loadSnapshot(requestRecord.traceId());
+        DispatchV2Result replayResult = dispatchV2Core.dispatchForReplay(requestRecord.request());
         ReplayComparisonResult comparisonResult = dispatchReplayComparator.compare(
                 decisionLogRecord,
                 snapshotLoadResult.snapshot(),

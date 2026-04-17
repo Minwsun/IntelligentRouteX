@@ -20,6 +20,8 @@ import com.routechain.v2.feedback.DispatchReplayLoader;
 import com.routechain.v2.feedback.DispatchReplayRecorder;
 import com.routechain.v2.feedback.DispatchReplayRunner;
 import com.routechain.v2.feedback.HotStartManager;
+import com.routechain.v2.feedback.PostDispatchHardeningService;
+import com.routechain.v2.feedback.ReplayStore;
 import com.routechain.v2.feedback.SnapshotBuilder;
 import com.routechain.v2.feedback.SnapshotService;
 import com.routechain.v2.feedback.SnapshotStore;
@@ -184,14 +186,20 @@ public final class TestDispatchV2Factory {
                 dispatchAssignmentBuilder);
         DispatchExecutorService dispatchExecutorService = configuration.dispatchExecutorService(dispatchExecutor);
         DecisionLogAssembler decisionLogAssembler = configuration.decisionLogAssembler();
-        DecisionLogWriter decisionLogWriter = configuration.decisionLogWriter();
+        DecisionLogWriter decisionLogWriter = configuration.decisionLogWriter(properties);
         DecisionLogService decisionLogService = configuration.decisionLogService(properties, decisionLogAssembler, decisionLogWriter);
         SnapshotBuilder snapshotBuilder = configuration.snapshotBuilder();
-        SnapshotStore snapshotStore = configuration.snapshotStore();
+        SnapshotStore snapshotStore = configuration.snapshotStore(properties);
         SnapshotService snapshotService = configuration.snapshotService(properties, snapshotBuilder, snapshotStore);
-        DispatchReplayRecorder dispatchReplayRecorder = configuration.dispatchReplayRecorder(properties);
+        ReplayStore replayStore = configuration.replayStore(properties);
+        DispatchReplayRecorder dispatchReplayRecorder = configuration.dispatchReplayRecorder(properties, replayStore);
         WarmStartManager warmStartManager = configuration.warmStartManager(properties, snapshotService);
         HotStartManager hotStartManager = configuration.hotStartManager(properties);
+        PostDispatchHardeningService postDispatchHardeningService = configuration.postDispatchHardeningService(
+                dispatchReplayRecorder,
+                decisionLogService,
+                snapshotService,
+                hotStartManager);
         DispatchV2Core core = configuration.dispatchV2Core(
                 dispatchEtaContextService,
                 dispatchPairClusterService,
@@ -201,11 +209,8 @@ public final class TestDispatchV2Factory {
                 dispatchScenarioService,
                 dispatchSelectorService,
                 dispatchExecutorService,
-                dispatchReplayRecorder,
-                decisionLogService,
-                snapshotService,
                 warmStartManager,
-                hotStartManager);
+                postDispatchHardeningService);
         DispatchReplayLoader dispatchReplayLoader = configuration.dispatchReplayLoader(
                 dispatchReplayRecorder,
                 decisionLogService,
@@ -218,8 +223,11 @@ public final class TestDispatchV2Factory {
         return new TestDispatchRuntimeHarness(
                 core,
                 decisionLogService,
+                decisionLogWriter,
                 snapshotService,
+                snapshotStore,
                 dispatchReplayRecorder,
+                replayStore,
                 dispatchReplayLoader,
                 dispatchReplayRunner,
                 warmStartManager,
@@ -264,8 +272,11 @@ public final class TestDispatchV2Factory {
     public record TestDispatchRuntimeHarness(
             DispatchV2Core core,
             DecisionLogService decisionLogService,
+            DecisionLogWriter decisionLogWriter,
             SnapshotService snapshotService,
+            SnapshotStore snapshotStore,
             DispatchReplayRecorder dispatchReplayRecorder,
+            ReplayStore replayStore,
             DispatchReplayLoader dispatchReplayLoader,
             DispatchReplayRunner dispatchReplayRunner,
             WarmStartManager warmStartManager,

@@ -17,11 +17,23 @@ public final class DispatchReplayLoader {
         return dispatchReplayRecorder.latest();
     }
 
+    public ReplayRequestRecord loadRequestRecord(String traceId) {
+        return dispatchReplayRecorder.findByTraceId(traceId);
+    }
+
     public DecisionLogRecord loadLatestDecisionLog() {
         return decisionLogService.latest();
     }
 
+    public DecisionLogRecord loadDecisionLog(String traceId) {
+        return decisionLogService.findByTraceId(traceId);
+    }
+
     public SnapshotLoadResult loadLatestSnapshot() {
         return snapshotService.loadLatest();
+    }
+
+    public SnapshotLoadResult loadSnapshot(String traceId) {
+        return snapshotService.loadByTraceId(traceId);
     }
 }

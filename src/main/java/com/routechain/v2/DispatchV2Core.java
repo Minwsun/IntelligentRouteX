@@ -16,11 +16,7 @@ import com.routechain.v2.cluster.DispatchPairClusterService;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.context.DispatchEtaContextService;
 import com.routechain.v2.context.DispatchEtaContextStage;
-import com.routechain.v2.feedback.DecisionLogService;
-import com.routechain.v2.feedback.DispatchReplayRecorder;
-import com.routechain.v2.feedback.HotStartManager;
-import com.routechain.v2.feedback.SnapshotService;
-import com.routechain.v2.feedback.SnapshotWriteResult;
+import com.routechain.v2.feedback.PostDispatchHardeningService;
 import com.routechain.v2.feedback.WarmStartManager;
 
 public final class DispatchV2Core {
@@ -32,11 +28,8 @@ public final class DispatchV2Core {
     private final DispatchScenarioService dispatchScenarioService;
     private final DispatchSelectorService dispatchSelectorService;
     private final DispatchExecutorService dispatchExecutorService;
-    private final DispatchReplayRecorder dispatchReplayRecorder;
-    private final DecisionLogService decisionLogService;
-    private final SnapshotService snapshotService;
     private final WarmStartManager warmStartManager;
-    private final HotStartManager hotStartManager;
+    private final PostDispatchHardeningService postDispatchHardeningService;
 
     public DispatchV2Core(DispatchEtaContextService dispatchEtaContextService,
                           DispatchPairClusterService dispatchPairClusterService,
@@ -46,11 +39,8 @@ public final class DispatchV2Core {
                           DispatchScenarioService dispatchScenarioService,
                           DispatchSelectorService dispatchSelectorService,
                           DispatchExecutorService dispatchExecutorService,
-                          DispatchReplayRecorder dispatchReplayRecorder,
-                          DecisionLogService decisionLogService,
-                          SnapshotService snapshotService,
                           WarmStartManager warmStartManager,
-                          HotStartManager hotStartManager) {
+                          PostDispatchHardeningService postDispatchHardeningService) {
         this.dispatchEtaContextService = dispatchEtaContextService;
         this.dispatchPairClusterService = dispatchPairClusterService;
         this.dispatchBundleStageService = dispatchBundleStageService;
@@ -59,14 +49,20 @@ public final class DispatchV2Core {
         this.dispatchScenarioService = dispatchScenarioService;
         this.dispatchSelectorService = dispatchSelectorService;
         this.dispatchExecutorService = dispatchExecutorService;
-        this.dispatchReplayRecorder = dispatchReplayRecorder;
-        this.decisionLogService = decisionLogService;
-        this.snapshotService = snapshotService;
         this.warmStartManager = warmStartManager;
-        this.hotStartManager = hotStartManager;
+        this.postDispatchHardeningService = postDispatchHardeningService;
     }
 
     public DispatchV2Result dispatch(DispatchV2Request request) {
+        DispatchV2Result pipelineResult = executePipeline(request);
+        return postDispatchHardeningService.apply(request, pipelineResult);
+    }
+
+    public DispatchV2Result dispatchForReplay(DispatchV2Request request) {
+        return executePipeline(request);
+    }
+
+    private DispatchV2Result executePipeline(DispatchV2Request request) {
         DispatchEtaContextStage etaStage = dispatchEtaContextService.evaluate(request);
         DispatchPairClusterStage pairClusterStage = dispatchPairClusterService.evaluate(request, etaStage.etaContext());
         DispatchBundleStage bundleStage = dispatchBundleStageService.evaluate(etaStage.etaContext(), pairClusterStage);
@@ -116,7 +112,7 @@ public final class DispatchV2Core {
                                 executorStage.degradeReasons().stream()))
                 .distinct()
                 .toList();
-        DispatchV2Result pipelineResult = new DispatchV2Result(
+        return new DispatchV2Result(
                 "dispatch-v2-result/v1",
                 request.traceId(),
                 false,
@@ -151,44 +147,5 @@ public final class DispatchV2Core {
                 warmStartManager.currentState(),
                 HotStartState.empty(),
                 degradeReasons);
-        dispatchReplayRecorder.record(request);
-        decisionLogService.write(request, pipelineResult);
-        SnapshotWriteResult snapshotWriteResult = snapshotService.save(request, pipelineResult);
-        HotStartState hotStartState = hotStartManager.update(snapshotWriteResult.snapshot());
-        return new DispatchV2Result(
-                pipelineResult.schemaVersion(),
-                pipelineResult.traceId(),
-                pipelineResult.fallbackUsed(),
-                pipelineResult.selectedRouteId(),
-                pipelineResult.decisionStages(),
-                pipelineResult.etaContext(),
-                pipelineResult.etaStageTrace(),
-                pipelineResult.freshnessMetadata(),
-                pipelineResult.bufferedOrderWindow(),
-                pipelineResult.pairGraphSummary(),
-                pipelineResult.microClusters(),
-                pipelineResult.microClusterSummary(),
-                pipelineResult.boundaryExpansions(),
-                pipelineResult.boundaryExpansionSummary(),
-                pipelineResult.bundleCandidates(),
-                pipelineResult.bundlePoolSummary(),
-                pipelineResult.pickupAnchors(),
-                pipelineResult.pickupAnchorSummary(),
-                pipelineResult.driverCandidates(),
-                pipelineResult.driverShortlistSummary(),
-                pipelineResult.routeProposals(),
-                pipelineResult.routeProposalSummary(),
-                pipelineResult.scenarioEvaluations(),
-                pipelineResult.robustUtilities(),
-                pipelineResult.scenarioEvaluationSummary(),
-                pipelineResult.selectorCandidates(),
-                pipelineResult.conflictGraph(),
-                pipelineResult.globalSelectionResult(),
-                pipelineResult.globalSelectorSummary(),
-                pipelineResult.assignments(),
-                pipelineResult.dispatchExecutionSummary(),
-                pipelineResult.warmStartState(),
-                hotStartState,
-                pipelineResult.degradeReasons());
     }
 }

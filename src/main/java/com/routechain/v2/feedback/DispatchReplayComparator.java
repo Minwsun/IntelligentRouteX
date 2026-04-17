@@ -22,11 +22,11 @@ public final class DispatchReplayComparator {
                 ? referenceDecisionLog.executedAssignmentIds()
                 : referenceSnapshot != null ? referenceSnapshot.executedAssignmentIds() : null;
         Integer expectedSelectedCount = referenceDecisionLog != null
-                ? referenceDecisionLog.globalSelectorSummary().selectedCount()
-                : expectedSelectedProposalIds != null ? expectedSelectedProposalIds.size() : null;
+                ? Integer.valueOf(referenceDecisionLog.globalSelectorSummary().selectedCount())
+                : expectedSelectedProposalIds != null ? Integer.valueOf(expectedSelectedProposalIds.size()) : null;
         Integer expectedExecutedAssignmentCount = referenceDecisionLog != null
-                ? referenceDecisionLog.dispatchExecutionSummary().executedAssignmentCount()
-                : expectedExecutedAssignmentIds != null ? expectedExecutedAssignmentIds.size() : null;
+                ? Integer.valueOf(referenceDecisionLog.dispatchExecutionSummary().executedAssignmentCount())
+                : expectedExecutedAssignmentIds != null ? Integer.valueOf(expectedExecutedAssignmentIds.size()) : null;
 
         if (expectedDecisionStages == null && expectedSelectedProposalIds == null && expectedExecutedAssignmentIds == null) {
             mismatchReasons.add("replay-reference-missing");

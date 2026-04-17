@@ -1,6 +1,7 @@
 package com.routechain.v2;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
+import com.routechain.v2.feedback.FeedbackStorageMode;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -62,6 +63,9 @@ class RouteChainDispatchV2PropertiesTest {
         assertTrue(properties.getFeedback().isDecisionLogEnabled());
         assertTrue(properties.getFeedback().isSnapshotEnabled());
         assertTrue(properties.getFeedback().isReplayEnabled());
+        assertEquals(FeedbackStorageMode.IN_MEMORY, properties.getFeedback().getStorageMode());
+        assertEquals("build/dispatch-v2-feedback", properties.getFeedback().getBaseDir());
+        assertEquals(20, properties.getFeedback().getRetention().getMaxFiles());
         assertTrue(properties.getWarmHotStart().isLoadLatestSnapshotOnBoot());
     }
 }

@@ -14,11 +14,14 @@ Decision log, snapshot, replay recording, and warm/hot start hardening run after
 
 For the current hardening slice:
 
-- every enabled dispatch writes an in-memory decision log record
-- every enabled dispatch writes an in-memory runtime snapshot
+- every enabled dispatch writes a decision log record through the configured feedback store
+- every enabled dispatch writes a runtime snapshot through the configured feedback store
 - `DispatchV2Result.warmStartState` reports the boot-time warm/cold decision
 - `DispatchV2Result.hotStartState` reports current reuse eligibility against the previous snapshot
 - replay compares exact stage/id/count equality for identical input
+- replay runs through a replay-safe dispatch path and does not mutate replay/log/snapshot/hot-start stores
+- feedback storage supports `IN_MEMORY` and `FILE` modes
+- warm boot can load the latest snapshot from file-backed storage across process restart
 
 For executor summary semantics in the current slice:
 
@@ -48,6 +51,9 @@ For executor summary semantics in the current slice:
 - `feedback.decisionLogEnabled=true`
 - `feedback.snapshotEnabled=true`
 - `feedback.replayEnabled=true`
+- `feedback.storageMode=IN_MEMORY`
+- `feedback.baseDir=build/dispatch-v2-feedback`
+- `feedback.retention.maxFiles=20`
 - `warmHotStart.loadLatestSnapshotOnBoot=true`
 
 ## Feature Flags
@@ -66,4 +72,7 @@ For executor summary semantics in the current slice:
 - `routechain.dispatch-v2.feedback.decision-log-enabled`
 - `routechain.dispatch-v2.feedback.snapshot-enabled`
 - `routechain.dispatch-v2.feedback.replay-enabled`
+- `routechain.dispatch-v2.feedback.storage-mode`
+- `routechain.dispatch-v2.feedback.base-dir`
+- `routechain.dispatch-v2.feedback.retention.max-files`
 - `routechain.dispatch-v2.warm-hot-start.load-latest-snapshot-on-boot`

@@ -3,16 +3,13 @@ package com.routechain.v2.feedback;
 import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.v2.DispatchV2Request;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
 public final class DispatchReplayRecorder {
     private final RouteChainDispatchV2Properties properties;
-    private final Map<String, ReplayRequestRecord> recordsByTraceId = new ConcurrentHashMap<>();
-    private volatile ReplayRequestRecord latest;
+    private final ReplayStore replayStore;
 
-    public DispatchReplayRecorder(RouteChainDispatchV2Properties properties) {
+    public DispatchReplayRecorder(RouteChainDispatchV2Properties properties, ReplayStore replayStore) {
         this.properties = properties;
+        this.replayStore = replayStore;
     }
 
     public ReplayRequestRecord record(DispatchV2Request request) {
@@ -23,12 +20,14 @@ public final class DispatchReplayRecorder {
                 "replay-request-record/v1",
                 request.traceId(),
                 request);
-        latest = record;
-        recordsByTraceId.put(record.traceId(), record);
-        return record;
+        return replayStore.save(record);
     }
 
     public ReplayRequestRecord latest() {
-        return latest;
+        return replayStore.latest();
+    }
+
+    public ReplayRequestRecord findByTraceId(String traceId) {
+        return replayStore.findByTraceId(traceId);
     }
 }

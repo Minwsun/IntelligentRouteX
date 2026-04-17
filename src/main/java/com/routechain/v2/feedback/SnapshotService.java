@@ -55,4 +55,28 @@ public final class SnapshotService {
         }
         return loadResult;
     }
+
+    public SnapshotLoadResult loadByTraceId(String traceId) {
+        if (!properties.getFeedback().isSnapshotEnabled()) {
+            return new SnapshotLoadResult(
+                    "snapshot-load-result/v1",
+                    false,
+                    null,
+                    null,
+                    List.of("snapshot-disabled"));
+        }
+        SnapshotLoadResult loadResult = snapshotStore.loadByTraceId(traceId);
+        if (!loadResult.loaded() || loadResult.snapshot() == null) {
+            return loadResult;
+        }
+        if (!"dispatch-runtime-snapshot/v1".equals(loadResult.snapshot().schemaVersion())) {
+            return new SnapshotLoadResult(
+                    "snapshot-load-result/v1",
+                    false,
+                    loadResult.manifest(),
+                    null,
+                    List.of("snapshot-schema-version-mismatch"));
+        }
+        return loadResult;
+    }
 }

@@ -27,4 +27,8 @@ public final class DecisionLogService {
     public DecisionLogRecord latest() {
         return decisionLogWriter.latest();
     }
+
+    public DecisionLogRecord findByTraceId(String traceId) {
+        return decisionLogWriter.findByTraceId(traceId);
+    }
 }

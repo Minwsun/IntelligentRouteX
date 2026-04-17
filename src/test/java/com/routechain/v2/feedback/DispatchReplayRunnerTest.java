@@ -5,6 +5,7 @@ import com.routechain.v2.TestDispatchV2Factory;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DispatchReplayRunnerTest {
@@ -20,5 +21,7 @@ class DispatchReplayRunnerTest {
         assertEquals(12, replayRunResult.replayDecisionStages().size());
         assertEquals(replayRunResult.replaySelectedProposalIds().size(), replayRunResult.replaySelectedCount());
         assertEquals(replayRunResult.replayExecutedAssignmentIds().size(), replayRunResult.replayExecutedAssignmentCount());
+        assertNotNull(replayRunResult.referenceDecisionLog());
+        assertNotNull(replayRunResult.referenceSnapshotManifest());
     }
 }

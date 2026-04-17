@@ -18,4 +18,9 @@ public final class InMemoryDecisionLogWriter implements DecisionLogWriter {
     public DecisionLogRecord latest() {
         return latest;
     }
+
+    @Override
+    public DecisionLogRecord findByTraceId(String traceId) {
+        return recordsByTraceId.get(traceId);
+    }
 }

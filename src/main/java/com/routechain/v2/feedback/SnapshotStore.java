@@ -4,4 +4,6 @@ public interface SnapshotStore {
     SnapshotWriteResult save(DispatchRuntimeSnapshot snapshot);
 
     SnapshotLoadResult loadLatest();
+
+    SnapshotLoadResult loadByTraceId(String traceId);
 }

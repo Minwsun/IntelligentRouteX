@@ -1,5 +1,6 @@
 package com.routechain.config;
 
+import com.routechain.v2.feedback.FeedbackStorageMode;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
@@ -561,6 +562,9 @@ public class RouteChainDispatchV2Properties {
         private boolean decisionLogEnabled = true;
         private boolean snapshotEnabled = true;
         private boolean replayEnabled = true;
+        private FeedbackStorageMode storageMode = FeedbackStorageMode.IN_MEMORY;
+        private String baseDir = "build/dispatch-v2-feedback";
+        private final Retention retention = new Retention();
 
         public boolean isDecisionLogEnabled() {
             return decisionLogEnabled;
@@ -584,6 +588,38 @@ public class RouteChainDispatchV2Properties {
 
         public void setReplayEnabled(boolean replayEnabled) {
             this.replayEnabled = replayEnabled;
+        }
+
+        public FeedbackStorageMode getStorageMode() {
+            return storageMode;
+        }
+
+        public void setStorageMode(FeedbackStorageMode storageMode) {
+            this.storageMode = storageMode;
+        }
+
+        public String getBaseDir() {
+            return baseDir;
+        }
+
+        public void setBaseDir(String baseDir) {
+            this.baseDir = baseDir;
+        }
+
+        public Retention getRetention() {
+            return retention;
+        }
+    }
+
+    public static final class Retention {
+        private int maxFiles = 20;
+
+        public int getMaxFiles() {
+            return maxFiles;
+        }
+
+        public void setMaxFiles(int maxFiles) {
+            this.maxFiles = maxFiles;
         }
     }
 

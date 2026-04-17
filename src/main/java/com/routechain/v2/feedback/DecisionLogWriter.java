@@ -4,4 +4,6 @@ public interface DecisionLogWriter {
     DecisionLogRecord write(DecisionLogRecord record);
 
     DecisionLogRecord latest();
+
+    DecisionLogRecord findByTraceId(String traceId);
 }

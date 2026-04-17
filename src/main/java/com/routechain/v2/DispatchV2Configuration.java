@@ -15,9 +15,16 @@ import com.routechain.v2.feedback.DispatchReplayComparator;
 import com.routechain.v2.feedback.DispatchReplayLoader;
 import com.routechain.v2.feedback.DispatchReplayRecorder;
 import com.routechain.v2.feedback.DispatchReplayRunner;
+import com.routechain.v2.feedback.FeedbackStorageMode;
+import com.routechain.v2.feedback.FileDecisionLogWriter;
+import com.routechain.v2.feedback.FileReplayStore;
+import com.routechain.v2.feedback.FileSnapshotStore;
 import com.routechain.v2.feedback.HotStartManager;
 import com.routechain.v2.feedback.InMemoryDecisionLogWriter;
+import com.routechain.v2.feedback.InMemoryReplayStore;
 import com.routechain.v2.feedback.InMemorySnapshotStore;
+import com.routechain.v2.feedback.PostDispatchHardeningService;
+import com.routechain.v2.feedback.ReplayStore;
 import com.routechain.v2.feedback.SnapshotBuilder;
 import com.routechain.v2.feedback.SnapshotService;
 import com.routechain.v2.feedback.SnapshotStore;
@@ -408,7 +415,12 @@ public class DispatchV2Configuration {
     }
 
     @Bean
-    DecisionLogWriter decisionLogWriter() {
+    DecisionLogWriter decisionLogWriter(RouteChainDispatchV2Properties properties) {
+        if (properties.getFeedback().getStorageMode() == FeedbackStorageMode.FILE) {
+            return new FileDecisionLogWriter(
+                    java.nio.file.Path.of(properties.getFeedback().getBaseDir()),
+                    properties.getFeedback().getRetention().getMaxFiles());
+        }
         return new InMemoryDecisionLogWriter();
     }
 
@@ -425,7 +437,12 @@ public class DispatchV2Configuration {
     }
 
     @Bean
-    SnapshotStore snapshotStore() {
+    SnapshotStore snapshotStore(RouteChainDispatchV2Properties properties) {
+        if (properties.getFeedback().getStorageMode() == FeedbackStorageMode.FILE) {
+            return new FileSnapshotStore(
+                    java.nio.file.Path.of(properties.getFeedback().getBaseDir()),
+                    properties.getFeedback().getRetention().getMaxFiles());
+        }
         return new InMemorySnapshotStore();
     }
 
@@ -437,8 +454,18 @@ public class DispatchV2Configuration {
     }
 
     @Bean
-    DispatchReplayRecorder dispatchReplayRecorder(RouteChainDispatchV2Properties properties) {
-        return new DispatchReplayRecorder(properties);
+    ReplayStore replayStore(RouteChainDispatchV2Properties properties) {
+        if (properties.getFeedback().getStorageMode() == FeedbackStorageMode.FILE) {
+            return new FileReplayStore(
+                    java.nio.file.Path.of(properties.getFeedback().getBaseDir()),
+                    properties.getFeedback().getRetention().getMaxFiles());
+        }
+        return new InMemoryReplayStore();
+    }
+
+    @Bean
+    DispatchReplayRecorder dispatchReplayRecorder(RouteChainDispatchV2Properties properties, ReplayStore replayStore) {
+        return new DispatchReplayRecorder(properties, replayStore);
     }
 
     @Bean
@@ -452,6 +479,18 @@ public class DispatchV2Configuration {
     }
 
     @Bean
+    PostDispatchHardeningService postDispatchHardeningService(DispatchReplayRecorder dispatchReplayRecorder,
+                                                              DecisionLogService decisionLogService,
+                                                              SnapshotService snapshotService,
+                                                              HotStartManager hotStartManager) {
+        return new PostDispatchHardeningService(
+                dispatchReplayRecorder,
+                decisionLogService,
+                snapshotService,
+                hotStartManager);
+    }
+
+    @Bean
     DispatchV2Core dispatchV2Core(DispatchEtaContextService dispatchEtaContextService,
                                   DispatchPairClusterService dispatchPairClusterService,
                                   DispatchBundleStageService dispatchBundleStageService,
@@ -460,11 +499,8 @@ public class DispatchV2Configuration {
                                   DispatchScenarioService dispatchScenarioService,
                                   DispatchSelectorService dispatchSelectorService,
                                   DispatchExecutorService dispatchExecutorService,
-                                  DispatchReplayRecorder dispatchReplayRecorder,
-                                  DecisionLogService decisionLogService,
-                                  SnapshotService snapshotService,
                                   WarmStartManager warmStartManager,
-                                  HotStartManager hotStartManager) {
+                                  PostDispatchHardeningService postDispatchHardeningService) {
         return new DispatchV2Core(
                 dispatchEtaContextService,
                 dispatchPairClusterService,
@@ -474,11 +510,8 @@ public class DispatchV2Configuration {
                 dispatchScenarioService,
                 dispatchSelectorService,
                 dispatchExecutorService,
-                dispatchReplayRecorder,
-                decisionLogService,
-                snapshotService,
                 warmStartManager,
-                hotStartManager);
+                postDispatchHardeningService);
     }
 
     @Bean

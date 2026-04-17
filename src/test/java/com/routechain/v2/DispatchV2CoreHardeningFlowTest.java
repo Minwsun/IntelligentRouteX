@@ -18,6 +18,7 @@ class DispatchV2CoreHardeningFlowTest {
         assertEquals(12, result.decisionStages().size());
         assertNotNull(result.warmStartState());
         assertNotNull(result.hotStartState());
+        assertNotNull(harness.dispatchReplayRecorder().latest());
         assertNotNull(harness.decisionLogService().latest());
         assertNotNull(harness.snapshotService().loadLatest().snapshot());
         assertFalse(result.fallbackUsed());

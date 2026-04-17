@@ -64,6 +64,44 @@ public record DispatchV2Result(
         HotStartState hotStartState,
         List<String> degradeReasons) implements SchemaVersioned {
 
+    public DispatchV2Result withHotStartState(HotStartState newHotStartState) {
+        return new DispatchV2Result(
+                schemaVersion,
+                traceId,
+                fallbackUsed,
+                selectedRouteId,
+                decisionStages,
+                etaContext,
+                etaStageTrace,
+                freshnessMetadata,
+                bufferedOrderWindow,
+                pairGraphSummary,
+                microClusters,
+                microClusterSummary,
+                boundaryExpansions,
+                boundaryExpansionSummary,
+                bundleCandidates,
+                bundlePoolSummary,
+                pickupAnchors,
+                pickupAnchorSummary,
+                driverCandidates,
+                driverShortlistSummary,
+                routeProposals,
+                routeProposalSummary,
+                scenarioEvaluations,
+                robustUtilities,
+                scenarioEvaluationSummary,
+                selectorCandidates,
+                conflictGraph,
+                globalSelectionResult,
+                globalSelectorSummary,
+                assignments,
+                dispatchExecutionSummary,
+                warmStartState,
+                newHotStartState,
+                degradeReasons);
+    }
+
     public static DispatchV2Result fallback(String traceId) {
         return new DispatchV2Result(
                 "dispatch-v2-result/v1",
