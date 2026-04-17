@@ -34,6 +34,12 @@ import com.routechain.v2.scenario.DispatchScenarioService;
 import com.routechain.v2.scenario.RobustUtilityAggregator;
 import com.routechain.v2.scenario.ScenarioEvaluator;
 import com.routechain.v2.scenario.ScenarioGateEvaluator;
+import com.routechain.v2.selector.ConflictGraphBuilder;
+import com.routechain.v2.selector.DispatchSelectorService;
+import com.routechain.v2.selector.GlobalSelector;
+import com.routechain.v2.selector.GreedyRepairSelector;
+import com.routechain.v2.selector.OrToolsSetPackingSolver;
+import com.routechain.v2.selector.SelectorCandidateBuilder;
 import com.routechain.v2.cluster.DispatchPairClusterService;
 import com.routechain.v2.cluster.EtaLegCacheFactory;
 import com.routechain.v2.cluster.MicroClusterer;
@@ -137,13 +143,25 @@ final class TestDispatchV2Factory {
                 scenarioGateEvaluator,
                 scenarioEvaluator,
                 robustUtilityAggregator);
+        SelectorCandidateBuilder selectorCandidateBuilder = configuration.selectorCandidateBuilder(properties);
+        ConflictGraphBuilder conflictGraphBuilder = configuration.conflictGraphBuilder();
+        GreedyRepairSelector greedyRepairSelector = configuration.greedyRepairSelector();
+        GlobalSelector globalSelector = configuration.globalSelector(
+                properties,
+                greedyRepairSelector,
+                new OrToolsSetPackingSolver());
+        DispatchSelectorService dispatchSelectorService = configuration.dispatchSelectorService(
+                selectorCandidateBuilder,
+                conflictGraphBuilder,
+                globalSelector);
         return configuration.dispatchV2Core(
                 dispatchEtaContextService,
                 dispatchPairClusterService,
                 dispatchBundleStageService,
                 dispatchRouteCandidateService,
                 dispatchRouteProposalService,
-                dispatchScenarioService);
+                dispatchScenarioService,
+                dispatchSelectorService);
     }
 
     static DispatchV2Request requestWithOrdersAndDriver() {

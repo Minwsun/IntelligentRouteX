@@ -8,6 +8,8 @@ import com.routechain.v2.route.DispatchRouteProposalService;
 import com.routechain.v2.route.DispatchRouteProposalStage;
 import com.routechain.v2.scenario.DispatchScenarioService;
 import com.routechain.v2.scenario.DispatchScenarioStage;
+import com.routechain.v2.selector.DispatchSelectorService;
+import com.routechain.v2.selector.DispatchSelectorStage;
 import com.routechain.v2.cluster.DispatchPairClusterService;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.context.DispatchEtaContextService;
@@ -20,19 +22,22 @@ public final class DispatchV2Core {
     private final DispatchRouteCandidateService dispatchRouteCandidateService;
     private final DispatchRouteProposalService dispatchRouteProposalService;
     private final DispatchScenarioService dispatchScenarioService;
+    private final DispatchSelectorService dispatchSelectorService;
 
     public DispatchV2Core(DispatchEtaContextService dispatchEtaContextService,
                           DispatchPairClusterService dispatchPairClusterService,
                           DispatchBundleStageService dispatchBundleStageService,
                           DispatchRouteCandidateService dispatchRouteCandidateService,
                           DispatchRouteProposalService dispatchRouteProposalService,
-                          DispatchScenarioService dispatchScenarioService) {
+                          DispatchScenarioService dispatchScenarioService,
+                          DispatchSelectorService dispatchSelectorService) {
         this.dispatchEtaContextService = dispatchEtaContextService;
         this.dispatchPairClusterService = dispatchPairClusterService;
         this.dispatchBundleStageService = dispatchBundleStageService;
         this.dispatchRouteCandidateService = dispatchRouteCandidateService;
         this.dispatchRouteProposalService = dispatchRouteProposalService;
         this.dispatchScenarioService = dispatchScenarioService;
+        this.dispatchSelectorService = dispatchSelectorService;
     }
 
     public DispatchV2Result dispatch(DispatchV2Request request) {
@@ -53,17 +58,27 @@ public final class DispatchV2Core {
                 routeCandidateStage,
                 bundleStage,
                 pairClusterStage);
+        DispatchSelectorStage selectorStage = dispatchSelectorService.evaluate(
+                request,
+                etaStage.etaContext(),
+                pairClusterStage,
+                bundleStage,
+                routeCandidateStage,
+                routeProposalStage,
+                scenarioStage);
         java.util.List<String> degradeReasons = java.util.stream.Stream.concat(
                         java.util.stream.Stream.concat(
                                 java.util.stream.Stream.concat(
                                         java.util.stream.Stream.concat(
                                                 java.util.stream.Stream.concat(
-                                                        etaStage.degradeReasons().stream(),
-                                                        pairClusterStage.degradeReasons().stream()),
-                                                bundleStage.degradeReasons().stream()),
-                                        routeCandidateStage.degradeReasons().stream()),
-                                routeProposalStage.degradeReasons().stream()),
-                        scenarioStage.degradeReasons().stream())
+                                                        java.util.stream.Stream.concat(
+                                                                etaStage.degradeReasons().stream(),
+                                                                pairClusterStage.degradeReasons().stream()),
+                                                        bundleStage.degradeReasons().stream()),
+                                                routeCandidateStage.degradeReasons().stream()),
+                                        routeProposalStage.degradeReasons().stream()),
+                                scenarioStage.degradeReasons().stream()),
+                        selectorStage.degradeReasons().stream())
                 .distinct()
                 .toList();
         return new DispatchV2Result(
@@ -71,7 +86,7 @@ public final class DispatchV2Core {
                 request.traceId(),
                 false,
                 null,
-                java.util.List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation"),
+                java.util.List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector"),
                 etaStage.etaContext(),
                 etaStage.etaStageTrace(),
                 etaStage.freshnessMetadata(),
@@ -92,6 +107,10 @@ public final class DispatchV2Core {
                 scenarioStage.scenarioEvaluations(),
                 scenarioStage.robustUtilities(),
                 scenarioStage.scenarioEvaluationSummary(),
+                selectorStage.selectorCandidates(),
+                selectorStage.conflictGraph(),
+                selectorStage.globalSelectionResult(),
+                selectorStage.globalSelectorSummary(),
                 degradeReasons);
     }
 }

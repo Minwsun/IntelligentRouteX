@@ -37,6 +37,15 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 - `RobustUtility`
 - `ScenarioEvaluationSummary`
 - `DispatchScenarioStage`
+- `SelectionSolverMode`
+- `ConflictReason`
+- `SelectorCandidate`
+- `ConflictEdge`
+- `ConflictGraph`
+- `SelectedProposal`
+- `GlobalSelectionResult`
+- `GlobalSelectorSummary`
+- `DispatchSelectorStage`
 - `WarmStartState`
 - `HotStartState`
 - `DecisionLogRecord`
@@ -45,6 +54,8 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 
 - `PairSimilarityGraph`
 - `PairEdge`
+- `SelectorCandidateIdentityKey`
+- `SelectorDecisionTrace`
 
 ## Rule
 

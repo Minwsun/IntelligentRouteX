@@ -6,7 +6,7 @@
 
 ## Current Executable Slice
 
-The current runtime result must only report stages that actually ran. For the current scenario slice, `DispatchV2Result.decisionStages` must be exactly `["eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation"]` on the enabled path.
+The current runtime result must only report stages that actually ran. For the current global-selector slice, `DispatchV2Result.decisionStages` must be exactly `["eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector"]` on the enabled path.
 
 ## Runtime Defaults
 
@@ -24,14 +24,20 @@ The current runtime result must only report stages that actually ran. For the cu
 - `scenario.merchantDelayMinutes=6`
 - `scenario.driverDriftPenalty=0.08`
 - `scenario.pickupQueuePenalty=0.06`
+- `selector.greedyRepairEnabled=true`
+- `selector.repairPassLimit=1`
+- `selector.fallbackPenalty=0.03`
 
 ## Feature Flags
 
 - `routechain.dispatch-v2.enabled`
-- `routechain.dispatch-v2.ml.enabled`
-- `routechain.dispatch-v2.sidecar.required`
-- `routechain.dispatch-v2.selector.ortools.enabled`
-- `routechain.dispatch-v2.warm-start.enabled`
-- `routechain.dispatch-v2.hot-start.enabled`
-- `routechain.dispatch-v2.tomtom.enabled`
-- `routechain.dispatch-v2.open-meteo.enabled`
+- `routechain.dispatch-v2.ml-enabled`
+- `routechain.dispatch-v2.sidecar-required`
+- `routechain.dispatch-v2.selector-ortools-enabled`
+- `routechain.dispatch-v2.warm-start-enabled`
+- `routechain.dispatch-v2.hot-start-enabled`
+- `routechain.dispatch-v2.tomtom-enabled`
+- `routechain.dispatch-v2.open-meteo-enabled`
+- `routechain.dispatch-v2.selector.greedy-repair-enabled`
+- `routechain.dispatch-v2.selector.repair-pass-limit`
+- `routechain.dispatch-v2.selector.fallback-penalty`

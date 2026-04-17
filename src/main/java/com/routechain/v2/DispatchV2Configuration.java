@@ -38,6 +38,13 @@ import com.routechain.v2.scenario.DispatchScenarioService;
 import com.routechain.v2.scenario.RobustUtilityAggregator;
 import com.routechain.v2.scenario.ScenarioEvaluator;
 import com.routechain.v2.scenario.ScenarioGateEvaluator;
+import com.routechain.v2.selector.ConflictGraphBuilder;
+import com.routechain.v2.selector.DispatchSelectorService;
+import com.routechain.v2.selector.GlobalSelector;
+import com.routechain.v2.selector.GreedyRepairSelector;
+import com.routechain.v2.selector.OrToolsSetPackingSolver;
+import com.routechain.v2.selector.SelectorCandidateBuilder;
+import com.routechain.v2.selector.SelectorSolver;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
@@ -316,19 +323,55 @@ public class DispatchV2Configuration {
     }
 
     @Bean
+    SelectorCandidateBuilder selectorCandidateBuilder(RouteChainDispatchV2Properties properties) {
+        return new SelectorCandidateBuilder(properties);
+    }
+
+    @Bean
+    ConflictGraphBuilder conflictGraphBuilder() {
+        return new ConflictGraphBuilder();
+    }
+
+    @Bean
+    GreedyRepairSelector greedyRepairSelector() {
+        return new GreedyRepairSelector();
+    }
+
+    @Bean
+    SelectorSolver selectorSolver() {
+        return new OrToolsSetPackingSolver();
+    }
+
+    @Bean
+    GlobalSelector globalSelector(RouteChainDispatchV2Properties properties,
+                                  GreedyRepairSelector greedyRepairSelector,
+                                  SelectorSolver selectorSolver) {
+        return new GlobalSelector(properties, greedyRepairSelector, selectorSolver);
+    }
+
+    @Bean
+    DispatchSelectorService dispatchSelectorService(SelectorCandidateBuilder selectorCandidateBuilder,
+                                                    ConflictGraphBuilder conflictGraphBuilder,
+                                                    GlobalSelector globalSelector) {
+        return new DispatchSelectorService(selectorCandidateBuilder, conflictGraphBuilder, globalSelector);
+    }
+
+    @Bean
     DispatchV2Core dispatchV2Core(DispatchEtaContextService dispatchEtaContextService,
                                   DispatchPairClusterService dispatchPairClusterService,
                                   DispatchBundleStageService dispatchBundleStageService,
                                   DispatchRouteCandidateService dispatchRouteCandidateService,
                                   DispatchRouteProposalService dispatchRouteProposalService,
-                                  DispatchScenarioService dispatchScenarioService) {
+                                  DispatchScenarioService dispatchScenarioService,
+                                  DispatchSelectorService dispatchSelectorService) {
         return new DispatchV2Core(
                 dispatchEtaContextService,
                 dispatchPairClusterService,
                 dispatchBundleStageService,
                 dispatchRouteCandidateService,
                 dispatchRouteProposalService,
-                dispatchScenarioService);
+                dispatchScenarioService,
+                dispatchSelectorService);
     }
 
     @Bean

@@ -35,9 +35,16 @@ import com.routechain.v2.integration.NoOpOpenMeteoClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
 import com.routechain.v2.scenario.DispatchScenarioService;
+import com.routechain.v2.scenario.DispatchScenarioStage;
 import com.routechain.v2.scenario.RobustUtilityAggregator;
 import com.routechain.v2.scenario.ScenarioEvaluator;
 import com.routechain.v2.scenario.ScenarioGateEvaluator;
+import com.routechain.v2.selector.ConflictGraphBuilder;
+import com.routechain.v2.selector.DispatchSelectorService;
+import com.routechain.v2.selector.GlobalSelector;
+import com.routechain.v2.selector.GreedyRepairSelector;
+import com.routechain.v2.selector.OrToolsSetPackingSolver;
+import com.routechain.v2.selector.SelectorCandidateBuilder;
 
 import java.time.Instant;
 import java.util.List;
@@ -211,6 +218,27 @@ public final class RouteTestFixtures {
                 new ScenarioGateEvaluator(properties),
                 new ScenarioEvaluator(properties),
                 new RobustUtilityAggregator());
+    }
+
+    public static DispatchScenarioStage scenarioStage(RouteChainDispatchV2Properties properties) {
+        DispatchPairClusterStage pairClusterStage = pairClusterStage(properties);
+        DispatchBundleStage bundleStage = bundleStage(properties, pairClusterStage);
+        DispatchRouteCandidateStage routeCandidateStage = routeCandidateStage(properties);
+        DispatchRouteProposalStage routeProposalStage = routeProposalStage(properties);
+        return scenarioService(properties).evaluate(
+                request(),
+                etaContext(),
+                routeProposalStage,
+                routeCandidateStage,
+                bundleStage,
+                pairClusterStage);
+    }
+
+    public static DispatchSelectorService selectorService(RouteChainDispatchV2Properties properties) {
+        return new DispatchSelectorService(
+                new SelectorCandidateBuilder(properties),
+                new ConflictGraphBuilder(),
+                new GlobalSelector(properties, new GreedyRepairSelector(), new OrToolsSetPackingSolver()));
     }
 
     private static Order order(String orderId,

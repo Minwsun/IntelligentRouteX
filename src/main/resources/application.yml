@@ -66,3 +66,7 @@ routechain:
       merchant-delay-minutes: 6
       driver-drift-penalty: 0.08
       pickup-queue-penalty: 0.06
+    selector:
+      greedy-repair-enabled: true
+      repair-pass-limit: 1
+      fallback-penalty: 0.03

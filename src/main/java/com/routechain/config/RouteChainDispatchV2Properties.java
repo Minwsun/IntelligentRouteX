@@ -24,6 +24,7 @@ public class RouteChainDispatchV2Properties {
     private final MicroCluster microCluster = new MicroCluster();
     private final BoundaryExpansion boundaryExpansion = new BoundaryExpansion();
     private final Scenario scenario = new Scenario();
+    private final Selector selector = new Selector();
 
     public static RouteChainDispatchV2Properties defaults() {
         return new RouteChainDispatchV2Properties();
@@ -135,6 +136,10 @@ public class RouteChainDispatchV2Properties {
 
     public Scenario getScenario() {
         return scenario;
+    }
+
+    public Selector getSelector() {
+        return selector;
     }
 
     public static final class Buffer {
@@ -509,6 +514,36 @@ public class RouteChainDispatchV2Properties {
 
         public void setPickupQueuePenalty(double pickupQueuePenalty) {
             this.pickupQueuePenalty = pickupQueuePenalty;
+        }
+    }
+
+    public static final class Selector {
+        private boolean greedyRepairEnabled = true;
+        private int repairPassLimit = 1;
+        private double fallbackPenalty = 0.03;
+
+        public boolean isGreedyRepairEnabled() {
+            return greedyRepairEnabled;
+        }
+
+        public void setGreedyRepairEnabled(boolean greedyRepairEnabled) {
+            this.greedyRepairEnabled = greedyRepairEnabled;
+        }
+
+        public int getRepairPassLimit() {
+            return repairPassLimit;
+        }
+
+        public void setRepairPassLimit(int repairPassLimit) {
+            this.repairPassLimit = repairPassLimit;
+        }
+
+        public double getFallbackPenalty() {
+            return fallbackPenalty;
+        }
+
+        public void setFallbackPenalty(double fallbackPenalty) {
+            this.fallbackPenalty = fallbackPenalty;
         }
     }
 }
