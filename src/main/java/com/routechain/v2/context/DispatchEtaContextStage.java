@@ -1,6 +1,7 @@
 package com.routechain.v2.context;
 
 import com.routechain.v2.EtaContext;
+import com.routechain.v2.LiveStageMetadata;
 import com.routechain.v2.MlStageMetadata;
 import com.routechain.v2.SchemaVersioned;
 
@@ -12,5 +13,6 @@ public record DispatchEtaContextStage(
         EtaStageTrace etaStageTrace,
         FreshnessMetadata freshnessMetadata,
         List<MlStageMetadata> mlStageMetadata,
+        List<LiveStageMetadata> liveStageMetadata,
         List<String> degradeReasons) implements SchemaVersioned {
 }

@@ -24,6 +24,7 @@ public final class DecisionLogAssembler {
                 result.globalSelectorSummary(),
                 result.dispatchExecutionSummary(),
                 result.mlStageMetadata(),
+                result.liveStageMetadata(),
                 result.globalSelectionResult().selectedProposals().stream()
                         .map(selectedProposal -> selectedProposal.proposalId())
                         .toList(),

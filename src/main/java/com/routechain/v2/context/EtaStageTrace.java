@@ -9,8 +9,13 @@ public record EtaStageTrace(
         double baselineMinutes,
         double trafficMultiplier,
         double weatherMultiplier,
+        boolean liveWeatherApplied,
         boolean liveRefineApplied,
         boolean mlResidualApplied,
+        double weatherConfidence,
+        double trafficConfidence,
+        long weatherSourceAgeMs,
+        long trafficSourceAgeMs,
         double uncertainty,
         List<String> degradeReasons) implements SchemaVersioned {
 
@@ -22,8 +27,12 @@ public record EtaStageTrace(
                 1.0,
                 false,
                 false,
+                false,
+                0.0,
+                0.0,
+                0L,
+                0L,
                 0.0,
                 List.of());
     }
 }
-

@@ -2,6 +2,7 @@ package com.routechain.v2.context;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.v2.DispatchV2Request;
+import com.routechain.v2.LiveStageMetadata;
 import com.routechain.v2.integration.MlStageMetadataAccumulator;
 import com.routechain.v2.integration.TabularScoreResult;
 import com.routechain.v2.integration.TabularScoringClient;
@@ -20,6 +21,8 @@ public final class EtaService {
     private final TabularScoringClient tabularScoringClient;
     private final EtaFeatureBuilder etaFeatureBuilder;
     private final EtaUncertaintyEstimator etaUncertaintyEstimator;
+    private final LiveTrafficSelectionPolicy liveTrafficSelectionPolicy;
+    private final TrafficConfidenceEvaluator trafficConfidenceEvaluator;
 
     public EtaService(RouteChainDispatchV2Properties properties,
                       BaselineTravelTimeEstimator baselineTravelTimeEstimator,
@@ -37,6 +40,8 @@ public final class EtaService {
         this.tabularScoringClient = tabularScoringClient;
         this.etaFeatureBuilder = etaFeatureBuilder;
         this.etaUncertaintyEstimator = etaUncertaintyEstimator;
+        this.liveTrafficSelectionPolicy = new LiveTrafficSelectionPolicy(properties);
+        this.trafficConfidenceEvaluator = new TrafficConfidenceEvaluator(properties);
     }
 
     public EtaEstimate estimate(EtaEstimateRequest request) {
@@ -58,31 +63,85 @@ public final class EtaService {
 
         TrafficProfileSnapshot traffic = trafficProfileService.resolveTraffic(bridgeRequest, request.from(), request.to());
         WeatherContextSnapshot weather = weatherContextService.resolveWeather(bridgeRequest, request.to());
-        FreshnessMetadata freshnessMetadata = new FreshnessMetadata(
-                "freshness-metadata/v1",
-                weather.sourceAgeMs(),
-                traffic.sourceAgeMs(),
-                properties.getContext().getFreshness().getForecastMaxAge().toMillis() + 1,
-                weather.sourceAgeMs() <= properties.getContext().getFreshness().getWeatherMaxAge().toMillis(),
-                traffic.sourceAgeMs() <= properties.getContext().getFreshness().getTrafficMaxAge().toMillis(),
-                false);
+        boolean weatherFresh = weather.sourceAgeMs() <= properties.getContext().getFreshness().getWeatherMaxAge().toMillis();
+        boolean trafficFresh = traffic.sourceAgeMs() <= properties.getContext().getFreshness().getTrafficMaxAge().toMillis();
 
         double adjustedMinutes = baselineMinutes * traffic.multiplier() * weather.multiplier();
         boolean liveRefineApplied = false;
-        String refineSource = "baseline-profile-weather";
+        String refineSource = weather.source() == WeatherSource.OPEN_METEO ? "baseline-profile-live-weather" : "baseline-profile-weather";
+        double effectiveTrafficConfidence = traffic.confidence();
+        long effectiveTrafficAgeMs = traffic.sourceAgeMs();
+        boolean trafficBadSignal = traffic.trafficBadSignal();
+        List<LiveStageMetadata> liveStageMetadata = new ArrayList<>();
 
-        if (!properties.isTomtomEnabled()) {
+        liveStageMetadata.add(new LiveStageMetadata(
+                "live-stage-metadata/v1",
+                "eta/context",
+                "open-meteo",
+                weather.source() == WeatherSource.OPEN_METEO,
+                weather.source() != WeatherSource.OPEN_METEO,
+                weather.sourceAgeMs(),
+                weather.confidence(),
+                weather.latencyMs(),
+                weather.degradeReason()));
+
+        if (!properties.isTomtomEnabled() || !properties.getTraffic().isEnabled()) {
             degradeReasons.add("tomtom-disabled");
+            liveStageMetadata.add(new LiveStageMetadata(
+                    "live-stage-metadata/v1",
+                    "eta/context",
+                    "tomtom-traffic",
+                    false,
+                    true,
+                    traffic.sourceAgeMs(),
+                    traffic.confidence(),
+                    0L,
+                    "tomtom-disabled"));
+        } else if (!liveTrafficSelectionPolicy.shouldRefine(request, baselineMinutes, distanceKm)) {
+            degradeReasons.add("tomtom-budget-or-policy-skipped");
+            liveStageMetadata.add(new LiveStageMetadata(
+                    "live-stage-metadata/v1",
+                    "eta/context",
+                    "tomtom-traffic",
+                    false,
+                    true,
+                    traffic.sourceAgeMs(),
+                    traffic.confidence(),
+                    0L,
+                    "tomtom-budget-or-policy-skipped"));
         } else {
-            TomTomTrafficRefineResult refineResult = tomTomTrafficRefineClient.refine(request);
-            if (refineResult.applied()) {
+            TomTomTrafficRefineResult refineResult = tomTomTrafficRefineClient.refine(request, baselineMinutes, distanceKm);
+            boolean liveTrafficFresh = refineResult.sourceAgeMs() <= properties.getContext().getFreshness().getTrafficMaxAge().toMillis();
+            double liveTrafficConfidence = trafficConfidenceEvaluator.effectiveConfidence(refineResult.confidence(), liveTrafficFresh);
+            if (refineResult.applied() && trafficConfidenceEvaluator.passesThreshold(liveTrafficConfidence) && liveTrafficFresh) {
                 adjustedMinutes *= refineResult.multiplier();
                 liveRefineApplied = true;
                 refineSource = "tomtom";
+                effectiveTrafficConfidence = liveTrafficConfidence;
+                effectiveTrafficAgeMs = refineResult.sourceAgeMs();
+                trafficBadSignal = refineResult.trafficBadSignal();
             } else {
-                degradeReasons.add("tomtom-unavailable-or-no-data");
+                degradeReasons.add(refineResult.degradeReason().isBlank() ? "tomtom-unavailable-or-no-data" : refineResult.degradeReason());
             }
+            liveStageMetadata.add(new LiveStageMetadata(
+                    "live-stage-metadata/v1",
+                    "eta/context",
+                    "tomtom-traffic",
+                    liveRefineApplied,
+                    !liveRefineApplied,
+                    refineResult.sourceAgeMs(),
+                    liveTrafficConfidence,
+                    refineResult.latencyMs(),
+                    refineResult.degradeReason()));
         }
+        FreshnessMetadata freshnessMetadata = new FreshnessMetadata(
+                "freshness-metadata/v1",
+                weather.sourceAgeMs(),
+                effectiveTrafficAgeMs,
+                properties.getContext().getFreshness().getForecastMaxAge().toMillis() + 1,
+                weatherFresh,
+                effectiveTrafficAgeMs <= properties.getContext().getFreshness().getTrafficMaxAge().toMillis(),
+                false);
 
         EtaFeatureVector featureVector = etaFeatureBuilder.build(
                 bridgeRequest,
@@ -122,15 +181,16 @@ public final class EtaService {
                 request.traceId(),
                 adjustedMinutes,
                 uncertainty,
-                traffic.multiplier(),
+                liveRefineApplied ? traffic.multiplier() * adjustedMinutes / Math.max(0.0001, baselineMinutes * weather.multiplier()) : traffic.multiplier(),
                 weather.multiplier(),
-                traffic.trafficBadSignal(),
+                trafficBadSignal,
                 weather.weatherBadSignal(),
                 corridorId(request),
                 refineSource,
-                traffic.sourceAgeMs(),
+                effectiveTrafficAgeMs,
                 weather.sourceAgeMs(),
                 mlStageMetadataAccumulator.build().map(List::of).orElse(List.of()),
+                List.copyOf(liveStageMetadata),
                 List.copyOf(degradeReasons));
     }
 

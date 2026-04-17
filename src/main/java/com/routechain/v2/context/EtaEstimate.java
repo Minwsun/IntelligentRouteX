@@ -1,6 +1,7 @@
 package com.routechain.v2.context;
 
 import com.routechain.v2.MlStageMetadata;
+import com.routechain.v2.LiveStageMetadata;
 import com.routechain.v2.SchemaVersioned;
 
 import java.util.List;
@@ -19,5 +20,6 @@ public record EtaEstimate(
         long trafficSourceAgeMs,
         long weatherSourceAgeMs,
         List<MlStageMetadata> mlStageMetadata,
+        List<LiveStageMetadata> liveStageMetadata,
         List<String> degradeReasons) implements SchemaVersioned {
 }

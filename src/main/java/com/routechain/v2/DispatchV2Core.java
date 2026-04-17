@@ -76,6 +76,8 @@ public final class DispatchV2Core {
         DispatchScenarioStage scenarioStage = dispatchScenarioService.evaluate(
                 request,
                 etaStage.etaContext(),
+                etaStage.freshnessMetadata(),
+                etaStage.liveStageMetadata(),
                 routeProposalStage,
                 routeCandidateStage,
                 bundleStage,
@@ -114,10 +116,18 @@ public final class DispatchV2Core {
                 .toList();
         java.util.List<MlStageMetadata> mlStageMetadata = java.util.stream.Stream.of(
                         etaStage.mlStageMetadata().stream(),
+                        etaStage.liveStageMetadata().stream(),
                         pairClusterStage.mlStageMetadata().stream(),
                         bundleStage.mlStageMetadata().stream(),
                         routeCandidateStage.mlStageMetadata().stream(),
                         routeProposalStage.mlStageMetadata().stream())
+                .flatMap(stream -> stream)
+                .filter(MlStageMetadata.class::isInstance)
+                .map(MlStageMetadata.class::cast)
+                .distinct()
+                .toList();
+        java.util.List<LiveStageMetadata> liveStageMetadata = java.util.stream.Stream.of(
+                        etaStage.liveStageMetadata().stream())
                 .flatMap(stream -> stream)
                 .distinct()
                 .toList();
@@ -148,6 +158,7 @@ public final class DispatchV2Core {
                 scenarioStage.robustUtilities(),
                 scenarioStage.scenarioEvaluationSummary(),
                 mlStageMetadata,
+                liveStageMetadata,
                 selectorStage.selectorCandidates(),
                 selectorStage.conflictGraph(),
                 selectorStage.globalSelectionResult(),

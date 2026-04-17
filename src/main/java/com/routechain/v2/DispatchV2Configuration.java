@@ -76,6 +76,8 @@ import com.routechain.v2.integration.NoOpGreedRlClient;
 import com.routechain.v2.integration.NoOpRouteFinderClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
+import com.routechain.v2.integration.HttpOpenMeteoClient;
+import com.routechain.v2.integration.HttpTomTomTrafficRefineClient;
 import com.routechain.v2.integration.GreedRlClient;
 import com.routechain.v2.integration.HttpGreedRlClient;
 import com.routechain.v2.integration.HttpRouteFinderClient;
@@ -111,8 +113,27 @@ public class DispatchV2Configuration {
     }
 
     @Bean
-    TomTomTrafficRefineClient tomTomTrafficRefineClient() {
-        return new NoOpTomTomTrafficRefineClient();
+    OpenMeteoClient openMeteoClient(RouteChainDispatchV2Properties properties) {
+        if (!properties.isOpenMeteoEnabled() || !properties.getWeather().isEnabled()) {
+            return new NoOpOpenMeteoClient();
+        }
+        return new HttpOpenMeteoClient(
+                properties.getWeather().getBaseUrl(),
+                properties.getWeather().getConnectTimeout(),
+                properties.getWeather().getReadTimeout(),
+                properties);
+    }
+
+    @Bean
+    TomTomTrafficRefineClient tomTomTrafficRefineClient(RouteChainDispatchV2Properties properties) {
+        if (!properties.isTomtomEnabled() || !properties.getTraffic().isEnabled()) {
+            return new NoOpTomTomTrafficRefineClient();
+        }
+        return new HttpTomTomTrafficRefineClient(
+                properties.getTraffic().getBaseUrl(),
+                properties.getTraffic().getConnectTimeout(),
+                properties.getTraffic().getReadTimeout(),
+                new com.routechain.v2.context.TrafficRefineMapper());
     }
 
     @Bean

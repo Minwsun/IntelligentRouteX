@@ -27,6 +27,8 @@ public class RouteChainDispatchV2Properties {
     private final Scenario scenario = new Scenario();
     private final Selector selector = new Selector();
     private final Ml ml = new Ml();
+    private final Weather weather = new Weather();
+    private final Traffic traffic = new Traffic();
     private final Feedback feedback = new Feedback();
     private final WarmHotStart warmHotStart = new WarmHotStart();
 
@@ -148,6 +150,14 @@ public class RouteChainDispatchV2Properties {
 
     public Ml getMl() {
         return ml;
+    }
+
+    public Weather getWeather() {
+        return weather;
+    }
+
+    public Traffic getTraffic() {
+        return traffic;
     }
 
     public Feedback getFeedback() {
@@ -784,6 +794,129 @@ public class RouteChainDispatchV2Properties {
 
         public void setObjectiveScaleFactor(int objectiveScaleFactor) {
             this.objectiveScaleFactor = objectiveScaleFactor;
+        }
+    }
+
+    public static final class Weather {
+        private boolean enabled = false;
+        private String baseUrl = "http://127.0.0.1:8094";
+        private Duration connectTimeout = Duration.ofMillis(75);
+        private Duration readTimeout = Duration.ofMillis(180);
+        private double confidenceThreshold = 0.45;
+        private boolean staleSignalSuppressionEnabled = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public Duration getConnectTimeout() {
+            return connectTimeout;
+        }
+
+        public void setConnectTimeout(Duration connectTimeout) {
+            this.connectTimeout = connectTimeout;
+        }
+
+        public Duration getReadTimeout() {
+            return readTimeout;
+        }
+
+        public void setReadTimeout(Duration readTimeout) {
+            this.readTimeout = readTimeout;
+        }
+
+        public double getConfidenceThreshold() {
+            return confidenceThreshold;
+        }
+
+        public void setConfidenceThreshold(double confidenceThreshold) {
+            this.confidenceThreshold = confidenceThreshold;
+        }
+
+        public boolean isStaleSignalSuppressionEnabled() {
+            return staleSignalSuppressionEnabled;
+        }
+
+        public void setStaleSignalSuppressionEnabled(boolean staleSignalSuppressionEnabled) {
+            this.staleSignalSuppressionEnabled = staleSignalSuppressionEnabled;
+        }
+    }
+
+    public static final class Traffic {
+        private boolean enabled = false;
+        private String baseUrl = "http://127.0.0.1:8095";
+        private Duration connectTimeout = Duration.ofMillis(75);
+        private Duration readTimeout = Duration.ofMillis(180);
+        private double confidenceThreshold = 0.5;
+        private int refineBudgetPerTick = 8;
+        private int maxRefinedLegsPerRequest = 1;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public Duration getConnectTimeout() {
+            return connectTimeout;
+        }
+
+        public void setConnectTimeout(Duration connectTimeout) {
+            this.connectTimeout = connectTimeout;
+        }
+
+        public Duration getReadTimeout() {
+            return readTimeout;
+        }
+
+        public void setReadTimeout(Duration readTimeout) {
+            this.readTimeout = readTimeout;
+        }
+
+        public double getConfidenceThreshold() {
+            return confidenceThreshold;
+        }
+
+        public void setConfidenceThreshold(double confidenceThreshold) {
+            this.confidenceThreshold = confidenceThreshold;
+        }
+
+        public int getRefineBudgetPerTick() {
+            return refineBudgetPerTick;
+        }
+
+        public void setRefineBudgetPerTick(int refineBudgetPerTick) {
+            this.refineBudgetPerTick = refineBudgetPerTick;
+        }
+
+        public int getMaxRefinedLegsPerRequest() {
+            return maxRefinedLegsPerRequest;
+        }
+
+        public void setMaxRefinedLegsPerRequest(int maxRefinedLegsPerRequest) {
+            this.maxRefinedLegsPerRequest = maxRefinedLegsPerRequest;
         }
     }
 

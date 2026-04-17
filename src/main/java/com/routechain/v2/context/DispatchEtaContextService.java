@@ -5,6 +5,7 @@ import com.routechain.domain.Driver;
 import com.routechain.domain.Order;
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
+import com.routechain.v2.LiveStageMetadata;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -40,10 +41,16 @@ public final class DispatchEtaContextService {
                             1.0,
                             false,
                             false,
+                            false,
+                            0.0,
+                            0.0,
+                            freshnessMetadata.weatherAgeMs(),
+                            freshnessMetadata.trafficAgeMs(),
                             0.0,
                             List.copyOf(degradeReasons)),
                     freshnessMetadata,
                     List.of(),
+                    LiveStageMetadata.emptyList(),
                     List.copyOf(degradeReasons));
         }
 
@@ -66,14 +73,33 @@ public final class DispatchEtaContextService {
                 estimate.weatherBadSignal(),
                 estimate.corridorId(),
                 estimate.refineSource());
+        boolean liveWeatherApplied = estimate.liveStageMetadata().stream()
+                .anyMatch(metadata -> metadata.stageName().equals("eta/context")
+                        && metadata.sourceName().equals("open-meteo")
+                        && metadata.applied());
+        double weatherConfidence = estimate.liveStageMetadata().stream()
+                .filter(metadata -> metadata.sourceName().equals("open-meteo"))
+                .mapToDouble(LiveStageMetadata::confidence)
+                .findFirst()
+                .orElse(0.0);
+        double trafficConfidence = estimate.liveStageMetadata().stream()
+                .filter(metadata -> metadata.sourceName().equals("tomtom-traffic"))
+                .mapToDouble(LiveStageMetadata::confidence)
+                .findFirst()
+                .orElse(estimate.trafficSourceAgeMs() <= properties.getContext().getFreshness().getTrafficMaxAge().toMillis() ? 0.95 : 0.4);
         EtaStageTrace etaStageTrace = new EtaStageTrace(
                 "eta-stage-trace/v1",
                 estimate.etaMinutes() / Math.max(estimate.trafficMultiplier() * estimate.weatherMultiplier(), 0.0001),
                 estimate.trafficMultiplier(),
                 estimate.weatherMultiplier(),
+                liveWeatherApplied,
                 "tomtom".equals(estimate.refineSource()),
                 !estimate.degradeReasons().contains("eta-ml-disabled")
                         && !estimate.degradeReasons().contains("eta-ml-unavailable"),
+                weatherConfidence,
+                trafficConfidence,
+                estimate.weatherSourceAgeMs(),
+                estimate.trafficSourceAgeMs(),
                 estimate.etaUncertainty(),
                 estimate.degradeReasons());
         return new DispatchEtaContextStage(
@@ -82,6 +108,7 @@ public final class DispatchEtaContextService {
                 etaStageTrace,
                 freshnessMetadata,
                 estimate.mlStageMetadata(),
+                estimate.liveStageMetadata(),
                 estimate.degradeReasons());
     }
 

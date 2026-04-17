@@ -15,4 +15,3 @@ public final class NoOpOpenMeteoClient implements OpenMeteoClient {
         return OpenMeteoSnapshot.unavailable();
     }
 }
-

@@ -10,10 +10,12 @@ import com.routechain.v2.integration.OpenMeteoSnapshot;
 public final class WeatherContextService {
     private final RouteChainDispatchV2Properties properties;
     private final OpenMeteoClient openMeteoClient;
+    private final WeatherConfidenceEvaluator weatherConfidenceEvaluator;
 
     public WeatherContextService(RouteChainDispatchV2Properties properties, OpenMeteoClient openMeteoClient) {
         this.properties = properties;
         this.openMeteoClient = openMeteoClient;
+        this.weatherConfidenceEvaluator = new WeatherConfidenceEvaluator(properties);
     }
 
     public WeatherContextSnapshot resolveWeather(DispatchV2Request request, GeoPoint point) {
@@ -27,31 +29,29 @@ public final class WeatherContextService {
                     false,
                     WeatherSource.DEGRADED_PROFILE,
                     properties.getContext().getFreshness().getWeatherMaxAge().toMillis() + 1,
-                    0.2);
+                    0.2,
+                    0L,
+                    "weather-point-missing");
         }
 
-        if (properties.isOpenMeteoEnabled()) {
+        if (properties.isOpenMeteoEnabled() && properties.getWeather().isEnabled()) {
             OpenMeteoSnapshot snapshot = openMeteoClient.fetchForecast(point, request == null ? null : request.decisionTime());
             if (snapshot.available()) {
                 boolean stale = snapshot.sourceAgeMs() > properties.getContext().getFreshness().getWeatherMaxAge().toMillis();
-                double confidence = stale ? Math.min(snapshot.confidence(), 0.35) : snapshot.confidence();
+                double confidence = weatherConfidenceEvaluator.effectiveConfidence(snapshot.confidence(), !stale);
                 return new WeatherContextSnapshot(
                         "weather-context-snapshot/v1",
-                        profileMultiplier(profile),
-                        profile == WeatherProfile.HEAVY_RAIN && confidence >= 0.25,
+                        stale ? profileMultiplier(profile) : snapshot.multiplier(),
+                        !stale && weatherConfidenceEvaluator.passesThreshold(confidence) && snapshot.weatherBadSignal(),
                         stale ? WeatherSource.DEGRADED_PROFILE : WeatherSource.OPEN_METEO,
                         snapshot.sourceAgeMs(),
-                        confidence);
+                        confidence,
+                        snapshot.latencyMs(),
+                        stale ? "open-meteo-stale" : snapshot.degradeReason());
             }
+            return fallbackFromProfile(profile, snapshot.degradeReason(), snapshot.latencyMs());
         }
-
-        return new WeatherContextSnapshot(
-                "weather-context-snapshot/v1",
-                profileMultiplier(profile),
-                profile == WeatherProfile.HEAVY_RAIN,
-                WeatherSource.REQUEST_PROFILE,
-                0L,
-                1.0);
+        return fallbackFromProfile(profile, properties.isOpenMeteoEnabled() ? "open-meteo-disabled" : "open-meteo-top-level-disabled", 0L);
     }
 
     private double profileMultiplier(WeatherProfile profile) {
@@ -61,5 +61,16 @@ public final class WeatherContextService {
             case CLEAR -> 1.0;
         };
     }
-}
 
+    private WeatherContextSnapshot fallbackFromProfile(WeatherProfile profile, String degradeReason, long latencyMs) {
+        return new WeatherContextSnapshot(
+                "weather-context-snapshot/v1",
+                profileMultiplier(profile),
+                profile == WeatherProfile.HEAVY_RAIN,
+                WeatherSource.REQUEST_PROFILE,
+                0L,
+                1.0,
+                latencyMs,
+                degradeReason == null ? "" : degradeReason);
+    }
+}

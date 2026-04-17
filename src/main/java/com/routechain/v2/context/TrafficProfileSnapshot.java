@@ -8,6 +8,6 @@ public record TrafficProfileSnapshot(
         TrafficProfileSource source,
         long sourceAgeMs,
         double confidence,
-        boolean trafficBadSignal) implements SchemaVersioned {
+        boolean trafficBadSignal,
+        String degradeReason) implements SchemaVersioned {
 }
-

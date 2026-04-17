@@ -1,6 +1,8 @@
 package com.routechain.v2.scenario;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
+import com.routechain.v2.LiveStageMetadata;
+import com.routechain.v2.context.FreshnessMetadata;
 import com.routechain.v2.route.RouteTestFixtures;
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +23,8 @@ class ScenarioEvaluationSummaryCountsTest {
         DispatchScenarioStage stage = service.evaluate(
                 RouteTestFixtures.request(),
                 RouteTestFixtures.etaContext(),
+                new FreshnessMetadata("freshness-metadata/v1", 0L, 0L, 0L, true, true, false),
+                LiveStageMetadata.emptyList(),
                 routeProposalStage,
                 routeCandidateStage,
                 bundleStage,

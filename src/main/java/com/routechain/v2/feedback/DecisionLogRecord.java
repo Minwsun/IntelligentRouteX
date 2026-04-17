@@ -1,6 +1,7 @@
 package com.routechain.v2.feedback;
 
 import com.routechain.v2.EtaContext;
+import com.routechain.v2.LiveStageMetadata;
 import com.routechain.v2.MlStageMetadata;
 import com.routechain.v2.SchemaVersioned;
 import com.routechain.v2.cluster.MicroClusterSummary;
@@ -34,6 +35,7 @@ public record DecisionLogRecord(
         GlobalSelectorSummary globalSelectorSummary,
         DispatchExecutionSummary dispatchExecutionSummary,
         List<MlStageMetadata> mlStageMetadata,
+        List<LiveStageMetadata> liveStageMetadata,
         List<String> selectedProposalIds,
         List<String> executedAssignmentIds) implements SchemaVersioned {
 }

@@ -2,8 +2,10 @@ package com.routechain.v2.scenario;
 
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
+import com.routechain.v2.LiveStageMetadata;
 import com.routechain.v2.bundle.DispatchBundleStage;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
+import com.routechain.v2.context.FreshnessMetadata;
 import com.routechain.v2.route.DispatchCandidateContext;
 import com.routechain.v2.route.DispatchRouteCandidateStage;
 import com.routechain.v2.route.DispatchRouteProposalStage;
@@ -30,6 +32,8 @@ public final class DispatchScenarioService {
 
     public DispatchScenarioStage evaluate(DispatchV2Request request,
                                           EtaContext etaContext,
+                                          FreshnessMetadata freshnessMetadata,
+                                          List<LiveStageMetadata> liveStageMetadata,
                                           DispatchRouteProposalStage routeProposalStage,
                                           DispatchRouteCandidateStage routeCandidateStage,
                                           DispatchBundleStage bundleStage,
@@ -51,7 +55,7 @@ public final class DispatchScenarioService {
             if (driverCandidate == null) {
                 continue;
             }
-            List<ScenarioGateDecision> decisions = scenarioGateEvaluator.gate(proposal, driverCandidate, context, etaContext);
+            List<ScenarioGateDecision> decisions = scenarioGateEvaluator.gate(proposal, driverCandidate, context, etaContext, freshnessMetadata, liveStageMetadata);
             for (ScenarioGateDecision decision : decisions) {
                 ScenarioEvaluationResult result = scenarioEvaluator.evaluate(proposal, driverCandidate, context, etaContext, decision);
                 evaluations.add(result.evaluation());

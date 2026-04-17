@@ -2,6 +2,8 @@ package com.routechain.v2.scenario;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.v2.EtaContext;
+import com.routechain.v2.LiveStageMetadata;
+import com.routechain.v2.context.FreshnessMetadata;
 import com.routechain.v2.route.DispatchCandidateContext;
 import com.routechain.v2.route.DriverCandidate;
 import com.routechain.v2.route.RouteProposal;
@@ -19,11 +21,13 @@ public final class ScenarioGateEvaluator {
     public List<ScenarioGateDecision> gate(RouteProposal proposal,
                                            DriverCandidate driverCandidate,
                                            DispatchCandidateContext context,
-                                           EtaContext etaContext) {
+                                           EtaContext etaContext,
+                                           FreshnessMetadata freshnessMetadata,
+                                           List<LiveStageMetadata> liveStageMetadata) {
         List<ScenarioGateDecision> decisions = new ArrayList<>();
         decisions.add(new ScenarioGateDecision(ScenarioType.NORMAL, true, List.of("baseline-scenario"), List.of()));
-        decisions.add(signalScenario(ScenarioType.WEATHER_BAD, etaContext.weatherBadSignal(), "weather-bad-signal-not-present"));
-        decisions.add(signalScenario(ScenarioType.TRAFFIC_BAD, etaContext.trafficBadSignal(), "traffic-bad-signal-not-present"));
+        decisions.add(weatherSignalScenario(etaContext, freshnessMetadata, liveStageMetadata));
+        decisions.add(trafficSignalScenario(etaContext, freshnessMetadata, liveStageMetadata));
         decisions.add(skippedForecastScenario(ScenarioType.DEMAND_SHIFT));
         decisions.add(skippedForecastScenario(ScenarioType.ZONE_BURST));
         decisions.add(skippedForecastScenario(ScenarioType.POST_DROP_SHIFT));
@@ -47,6 +51,44 @@ public final class ScenarioGateEvaluator {
         return List.copyOf(decisions);
     }
 
+    private ScenarioGateDecision weatherSignalScenario(EtaContext etaContext,
+                                                       FreshnessMetadata freshnessMetadata,
+                                                       List<LiveStageMetadata> liveStageMetadata) {
+        if (!etaContext.weatherBadSignal()) {
+            return signalScenario(ScenarioType.WEATHER_BAD, false, "weather-bad-signal-not-present");
+        }
+        LiveStageMetadata metadata = liveStageMetadata.stream()
+                .filter(candidate -> candidate.stageName().equals("eta/context") && candidate.sourceName().equals("open-meteo"))
+                .findFirst()
+                .orElse(null);
+        if (fresnessFalseOrMissing(freshnessMetadata == null ? null : freshnessMetadata.weatherFresh())) {
+            return signalScenario(ScenarioType.WEATHER_BAD, false, "weather-signal-stale");
+        }
+        if (metadata != null && metadata.confidence() < properties.getWeather().getConfidenceThreshold()) {
+            return signalScenario(ScenarioType.WEATHER_BAD, false, "weather-signal-low-confidence");
+        }
+        return signalScenario(ScenarioType.WEATHER_BAD, true, "weather-bad-signal-not-present");
+    }
+
+    private ScenarioGateDecision trafficSignalScenario(EtaContext etaContext,
+                                                       FreshnessMetadata freshnessMetadata,
+                                                       List<LiveStageMetadata> liveStageMetadata) {
+        if (!etaContext.trafficBadSignal()) {
+            return signalScenario(ScenarioType.TRAFFIC_BAD, false, "traffic-bad-signal-not-present");
+        }
+        LiveStageMetadata metadata = liveStageMetadata.stream()
+                .filter(candidate -> candidate.stageName().equals("eta/context") && candidate.sourceName().equals("tomtom-traffic"))
+                .findFirst()
+                .orElse(null);
+        if (fresnessFalseOrMissing(freshnessMetadata == null ? null : freshnessMetadata.trafficFresh())) {
+            return signalScenario(ScenarioType.TRAFFIC_BAD, false, "traffic-signal-stale");
+        }
+        if (metadata != null && metadata.confidence() < properties.getTraffic().getConfidenceThreshold()) {
+            return signalScenario(ScenarioType.TRAFFIC_BAD, false, "traffic-signal-low-confidence");
+        }
+        return signalScenario(ScenarioType.TRAFFIC_BAD, true, "traffic-bad-signal-not-present");
+    }
+
     private ScenarioGateDecision signalScenario(ScenarioType scenario, boolean applied, String missingSignalReason) {
         return new ScenarioGateDecision(
                 scenario,
@@ -61,5 +103,9 @@ public final class ScenarioGateEvaluator {
                 false,
                 List.of("forecast-not-integrated-yet"),
                 List.of("forecast-unavailable-scenario-skipped"));
+    }
+
+    private boolean fresnessFalseOrMissing(Boolean fresh) {
+        return fresh == null || !fresh;
     }
 }

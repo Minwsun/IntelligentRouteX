@@ -7,6 +7,7 @@ import com.routechain.domain.Order;
 import com.routechain.domain.WeatherProfile;
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
+import com.routechain.v2.LiveStageMetadata;
 import com.routechain.v2.bundle.BoundaryCandidateSelector;
 import com.routechain.v2.bundle.BoundaryExpansionEngine;
 import com.routechain.v2.bundle.BundleDominancePruner;
@@ -29,6 +30,7 @@ import com.routechain.v2.context.BaselineTravelTimeEstimator;
 import com.routechain.v2.context.EtaFeatureBuilder;
 import com.routechain.v2.context.EtaService;
 import com.routechain.v2.context.EtaUncertaintyEstimator;
+import com.routechain.v2.context.FreshnessMetadata;
 import com.routechain.v2.context.TrafficProfileService;
 import com.routechain.v2.context.WeatherContextService;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
@@ -266,6 +268,8 @@ public final class RouteTestFixtures {
         return scenarioService(properties).evaluate(
                 request(),
                 etaContext(),
+                new FreshnessMetadata("freshness-metadata/v1", 0L, 0L, 0L, true, true, false),
+                LiveStageMetadata.emptyList(),
                 routeProposalStage,
                 routeCandidateStage,
                 bundleStage,

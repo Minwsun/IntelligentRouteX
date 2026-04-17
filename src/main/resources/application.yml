@@ -18,6 +18,21 @@ routechain:
     tomtom-enabled: false
     open-meteo-enabled: true
     tick: 30s
+    weather:
+      enabled: false
+      base-url: http://127.0.0.1:8094
+      connect-timeout: 75ms
+      read-timeout: 180ms
+      confidence-threshold: 0.45
+      stale-signal-suppression-enabled: true
+    traffic:
+      enabled: false
+      base-url: http://127.0.0.1:8095
+      connect-timeout: 75ms
+      read-timeout: 180ms
+      confidence-threshold: 0.5
+      refine-budget-per-tick: 8
+      max-refined-legs-per-request: 1
     ml:
       tabular:
         enabled: false

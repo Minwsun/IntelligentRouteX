@@ -22,7 +22,8 @@ public final class TrafficProfileService {
                     TrafficProfileSource.DEGRADED_PROFILE,
                     properties.getContext().getFreshness().getTrafficMaxAge().toMillis() + 1,
                     0.4,
-                    false);
+                    false,
+                    "traffic-profile-degraded");
         }
         int hour = hourOfDay(request.decisionTime());
         if (isPeak(hour)) {
@@ -32,7 +33,8 @@ public final class TrafficProfileService {
                     TrafficProfileSource.PROFILE_PEAK,
                     0L,
                     0.95,
-                    true);
+                    true,
+                    "");
         }
         if (isOffPeak(hour)) {
             return new TrafficProfileSnapshot(
@@ -41,7 +43,8 @@ public final class TrafficProfileService {
                     TrafficProfileSource.PROFILE_OFFPEAK,
                     0L,
                     0.95,
-                    false);
+                    false,
+                    "");
         }
         return new TrafficProfileSnapshot(
                 "traffic-profile-snapshot/v1",
@@ -49,7 +52,8 @@ public final class TrafficProfileService {
                 TrafficProfileSource.PROFILE_DEFAULT,
                 0L,
                 0.95,
-                false);
+                false,
+                "");
     }
 
     private int hourOfDay(Instant instant) {
@@ -65,4 +69,3 @@ public final class TrafficProfileService {
         return hour < 6 || hour >= 22;
     }
 }
-

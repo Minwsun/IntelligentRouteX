@@ -55,6 +55,7 @@ public final class DispatchReplayComparator {
         }
         if (referenceDecisionLog != null) {
             ReplayMlMetadataComparator.compare(referenceDecisionLog.mlStageMetadata(), replayResult.mlStageMetadata(), mismatchReasons);
+            ReplayLiveMetadataComparator.compare(referenceDecisionLog.liveStageMetadata(), replayResult.liveStageMetadata(), mismatchReasons);
         }
 
         return new ReplayComparisonResult(

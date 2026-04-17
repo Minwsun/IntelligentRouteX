@@ -1,6 +1,8 @@
 package com.routechain.v2.scenario;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
+import com.routechain.v2.LiveStageMetadata;
+import com.routechain.v2.context.FreshnessMetadata;
 import com.routechain.v2.route.DispatchCandidateContext;
 import com.routechain.v2.route.DispatchRouteCandidateStage;
 import com.routechain.v2.route.DispatchRouteProposalStage;
@@ -8,6 +10,8 @@ import com.routechain.v2.route.DriverCandidate;
 import com.routechain.v2.route.RouteProposal;
 import com.routechain.v2.route.RouteTestFixtures;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,9 +29,12 @@ class ScenarioGateEvaluatorTest {
         DriverCandidate driverCandidate = matchingDriverCandidate(routeCandidateStage, proposal);
         ScenarioGateEvaluator gateEvaluator = new ScenarioGateEvaluator(properties);
 
-        var clearDecisions = gateEvaluator.gate(proposal, driverCandidate, context, RouteTestFixtures.etaContext());
-        var weatherDecisions = gateEvaluator.gate(proposal, driverCandidate, context, RouteTestFixtures.weatherBadEtaContext());
-        var trafficDecisions = gateEvaluator.gate(proposal, driverCandidate, context, RouteTestFixtures.trafficBadEtaContext());
+        FreshnessMetadata fresh = new FreshnessMetadata("freshness-metadata/v1", 0L, 0L, 0L, true, true, false);
+        var clearDecisions = gateEvaluator.gate(proposal, driverCandidate, context, RouteTestFixtures.etaContext(), fresh, LiveStageMetadata.emptyList());
+        var weatherDecisions = gateEvaluator.gate(proposal, driverCandidate, context, RouteTestFixtures.weatherBadEtaContext(), fresh, List.of(
+                new LiveStageMetadata("live-stage-metadata/v1", "eta/context", "open-meteo", true, false, 0L, 0.9, 5L, "")));
+        var trafficDecisions = gateEvaluator.gate(proposal, driverCandidate, context, RouteTestFixtures.trafficBadEtaContext(), fresh, List.of(
+                new LiveStageMetadata("live-stage-metadata/v1", "eta/context", "tomtom-traffic", true, false, 0L, 0.9, 5L, "")));
 
         assertEquals(ScenarioType.NORMAL, clearDecisions.getFirst().scenario());
         assertTrue(clearDecisions.getFirst().applied());

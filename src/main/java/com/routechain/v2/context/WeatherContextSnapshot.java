@@ -8,6 +8,7 @@ public record WeatherContextSnapshot(
         boolean weatherBadSignal,
         WeatherSource source,
         long sourceAgeMs,
-        double confidence) implements SchemaVersioned {
+        double confidence,
+        long latencyMs,
+        String degradeReason) implements SchemaVersioned {
 }
-

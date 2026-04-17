@@ -45,10 +45,11 @@ class WeatherContextServiceTest {
     @Test
     void staleWeatherLowersConfidence() {
         RouteChainDispatchV2Properties properties = RouteChainDispatchV2Properties.defaults();
+        properties.getWeather().setEnabled(true);
         OpenMeteoClient staleClient = new OpenMeteoClient() {
             @Override
             public OpenMeteoSnapshot fetchForecast(GeoPoint point, Instant decisionTime) {
-                return new OpenMeteoSnapshot(true, properties.getContext().getFreshness().getWeatherMaxAge().toMillis() + 1, 0.9);
+                return new OpenMeteoSnapshot(true, "heavy-rain", 1.28, true, properties.getContext().getFreshness().getWeatherMaxAge().toMillis() + 1, 0.9, 6L, "");
             }
 
             @Override
@@ -78,4 +79,3 @@ class WeatherContextServiceTest {
         return new GeoPoint(10.770, 106.690);
     }
 }
-

@@ -73,8 +73,10 @@ import com.routechain.v2.integration.NoOpRouteFinderClient;
 import com.routechain.v2.integration.NoOpTabularScoringClient;
 import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
 import com.routechain.v2.integration.GreedRlClient;
+import com.routechain.v2.integration.OpenMeteoClient;
 import com.routechain.v2.integration.RouteFinderClient;
 import com.routechain.v2.integration.TabularScoringClient;
+import com.routechain.v2.integration.TomTomTrafficRefineClient;
 
 import java.time.Instant;
 import java.util.List;
@@ -110,6 +112,15 @@ public final class TestDispatchV2Factory {
         return harness(properties, tabularScoringClient, routeFinderClient, greedRlClient).core();
     }
 
+    public static DispatchV2Core core(RouteChainDispatchV2Properties properties,
+                                      TabularScoringClient tabularScoringClient,
+                                      RouteFinderClient routeFinderClient,
+                                      GreedRlClient greedRlClient,
+                                      OpenMeteoClient openMeteoClient,
+                                      TomTomTrafficRefineClient tomTomTrafficRefineClient) {
+        return harness(properties, tabularScoringClient, routeFinderClient, greedRlClient, openMeteoClient, tomTomTrafficRefineClient).core();
+    }
+
     public static TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties) {
         return harness(properties, new NoOpTabularScoringClient());
     }
@@ -128,10 +139,19 @@ public final class TestDispatchV2Factory {
                                                      TabularScoringClient tabularScoringClient,
                                                      RouteFinderClient routeFinderClient,
                                                      GreedRlClient greedRlClient) {
+        return harness(properties, tabularScoringClient, routeFinderClient, greedRlClient, new NoOpOpenMeteoClient(), new NoOpTomTomTrafficRefineClient());
+    }
+
+    public static TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties,
+                                                     TabularScoringClient tabularScoringClient,
+                                                     RouteFinderClient routeFinderClient,
+                                                     GreedRlClient greedRlClient,
+                                                     OpenMeteoClient openMeteoClient,
+                                                     TomTomTrafficRefineClient tomTomTrafficRefineClient) {
         DispatchV2Configuration configuration = new DispatchV2Configuration();
         BaselineTravelTimeEstimator baselineTravelTimeEstimator = configuration.baselineTravelTimeEstimator();
         TrafficProfileService trafficProfileService = configuration.trafficProfileService(properties);
-        WeatherContextService weatherContextService = configuration.weatherContextService(properties, new NoOpOpenMeteoClient());
+        WeatherContextService weatherContextService = configuration.weatherContextService(properties, openMeteoClient);
         EtaFeatureBuilder etaFeatureBuilder = configuration.etaFeatureBuilder();
         EtaUncertaintyEstimator etaUncertaintyEstimator = configuration.etaUncertaintyEstimator();
         EtaService etaService = configuration.etaService(
@@ -139,7 +159,7 @@ public final class TestDispatchV2Factory {
                 baselineTravelTimeEstimator,
                 trafficProfileService,
                 weatherContextService,
-                new NoOpTomTomTrafficRefineClient(),
+                tomTomTrafficRefineClient,
                 tabularScoringClient,
                 etaFeatureBuilder,
                 etaUncertaintyEstimator);
