@@ -8,6 +8,20 @@ import com.routechain.v2.context.EtaService;
 import com.routechain.v2.context.EtaUncertaintyEstimator;
 import com.routechain.v2.context.TrafficProfileService;
 import com.routechain.v2.context.WeatherContextService;
+import com.routechain.v2.feedback.DecisionLogAssembler;
+import com.routechain.v2.feedback.DecisionLogService;
+import com.routechain.v2.feedback.DecisionLogWriter;
+import com.routechain.v2.feedback.DispatchReplayComparator;
+import com.routechain.v2.feedback.DispatchReplayLoader;
+import com.routechain.v2.feedback.DispatchReplayRecorder;
+import com.routechain.v2.feedback.DispatchReplayRunner;
+import com.routechain.v2.feedback.HotStartManager;
+import com.routechain.v2.feedback.InMemoryDecisionLogWriter;
+import com.routechain.v2.feedback.InMemorySnapshotStore;
+import com.routechain.v2.feedback.SnapshotBuilder;
+import com.routechain.v2.feedback.SnapshotService;
+import com.routechain.v2.feedback.SnapshotStore;
+import com.routechain.v2.feedback.WarmStartManager;
 import com.routechain.v2.cluster.DispatchPairClusterService;
 import com.routechain.v2.cluster.EtaLegCacheFactory;
 import com.routechain.v2.cluster.MicroClusterer;
@@ -389,6 +403,55 @@ public class DispatchV2Configuration {
     }
 
     @Bean
+    DecisionLogAssembler decisionLogAssembler() {
+        return new DecisionLogAssembler();
+    }
+
+    @Bean
+    DecisionLogWriter decisionLogWriter() {
+        return new InMemoryDecisionLogWriter();
+    }
+
+    @Bean
+    DecisionLogService decisionLogService(RouteChainDispatchV2Properties properties,
+                                          DecisionLogAssembler decisionLogAssembler,
+                                          DecisionLogWriter decisionLogWriter) {
+        return new DecisionLogService(properties, decisionLogAssembler, decisionLogWriter);
+    }
+
+    @Bean
+    SnapshotBuilder snapshotBuilder() {
+        return new SnapshotBuilder();
+    }
+
+    @Bean
+    SnapshotStore snapshotStore() {
+        return new InMemorySnapshotStore();
+    }
+
+    @Bean
+    SnapshotService snapshotService(RouteChainDispatchV2Properties properties,
+                                    SnapshotBuilder snapshotBuilder,
+                                    SnapshotStore snapshotStore) {
+        return new SnapshotService(properties, snapshotBuilder, snapshotStore);
+    }
+
+    @Bean
+    DispatchReplayRecorder dispatchReplayRecorder(RouteChainDispatchV2Properties properties) {
+        return new DispatchReplayRecorder(properties);
+    }
+
+    @Bean
+    WarmStartManager warmStartManager(RouteChainDispatchV2Properties properties, SnapshotService snapshotService) {
+        return new WarmStartManager(properties, snapshotService);
+    }
+
+    @Bean
+    HotStartManager hotStartManager(RouteChainDispatchV2Properties properties) {
+        return new HotStartManager(properties);
+    }
+
+    @Bean
     DispatchV2Core dispatchV2Core(DispatchEtaContextService dispatchEtaContextService,
                                   DispatchPairClusterService dispatchPairClusterService,
                                   DispatchBundleStageService dispatchBundleStageService,
@@ -396,7 +459,12 @@ public class DispatchV2Configuration {
                                   DispatchRouteProposalService dispatchRouteProposalService,
                                   DispatchScenarioService dispatchScenarioService,
                                   DispatchSelectorService dispatchSelectorService,
-                                  DispatchExecutorService dispatchExecutorService) {
+                                  DispatchExecutorService dispatchExecutorService,
+                                  DispatchReplayRecorder dispatchReplayRecorder,
+                                  DecisionLogService decisionLogService,
+                                  SnapshotService snapshotService,
+                                  WarmStartManager warmStartManager,
+                                  HotStartManager hotStartManager) {
         return new DispatchV2Core(
                 dispatchEtaContextService,
                 dispatchPairClusterService,
@@ -405,7 +473,31 @@ public class DispatchV2Configuration {
                 dispatchRouteProposalService,
                 dispatchScenarioService,
                 dispatchSelectorService,
-                dispatchExecutorService);
+                dispatchExecutorService,
+                dispatchReplayRecorder,
+                decisionLogService,
+                snapshotService,
+                warmStartManager,
+                hotStartManager);
+    }
+
+    @Bean
+    DispatchReplayLoader dispatchReplayLoader(DispatchReplayRecorder dispatchReplayRecorder,
+                                              DecisionLogService decisionLogService,
+                                              SnapshotService snapshotService) {
+        return new DispatchReplayLoader(dispatchReplayRecorder, decisionLogService, snapshotService);
+    }
+
+    @Bean
+    DispatchReplayComparator dispatchReplayComparator() {
+        return new DispatchReplayComparator();
+    }
+
+    @Bean
+    DispatchReplayRunner dispatchReplayRunner(DispatchV2Core dispatchV2Core,
+                                              DispatchReplayLoader dispatchReplayLoader,
+                                              DispatchReplayComparator dispatchReplayComparator) {
+        return new DispatchReplayRunner(dispatchV2Core, dispatchReplayLoader, dispatchReplayComparator);
     }
 
     @Bean

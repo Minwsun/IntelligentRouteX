@@ -47,6 +47,8 @@ class DispatchV2CoreEtaSliceTest {
         assertNotNull(result.globalSelectorSummary());
         assertNotNull(result.assignments());
         assertNotNull(result.dispatchExecutionSummary());
+        assertNotNull(result.warmStartState());
+        assertNotNull(result.hotStartState());
     }
 
     @Test

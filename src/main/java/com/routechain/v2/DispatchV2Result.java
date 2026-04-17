@@ -60,6 +60,8 @@ public record DispatchV2Result(
         GlobalSelectorSummary globalSelectorSummary,
         List<DispatchAssignment> assignments,
         DispatchExecutionSummary dispatchExecutionSummary,
+        WarmStartState warmStartState,
+        HotStartState hotStartState,
         List<String> degradeReasons) implements SchemaVersioned {
 
     public static DispatchV2Result fallback(String traceId) {
@@ -95,6 +97,8 @@ public record DispatchV2Result(
                 GlobalSelectorSummary.empty(),
                 List.of(),
                 DispatchExecutionSummary.empty(),
+                WarmStartState.empty(),
+                HotStartState.empty(),
                 List.of("dispatch-v2-disabled"));
     }
 }

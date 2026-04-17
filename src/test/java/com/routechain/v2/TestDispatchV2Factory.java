@@ -12,6 +12,18 @@ import com.routechain.v2.context.EtaService;
 import com.routechain.v2.context.EtaUncertaintyEstimator;
 import com.routechain.v2.context.TrafficProfileService;
 import com.routechain.v2.context.WeatherContextService;
+import com.routechain.v2.feedback.DecisionLogAssembler;
+import com.routechain.v2.feedback.DecisionLogService;
+import com.routechain.v2.feedback.DecisionLogWriter;
+import com.routechain.v2.feedback.DispatchReplayComparator;
+import com.routechain.v2.feedback.DispatchReplayLoader;
+import com.routechain.v2.feedback.DispatchReplayRecorder;
+import com.routechain.v2.feedback.DispatchReplayRunner;
+import com.routechain.v2.feedback.HotStartManager;
+import com.routechain.v2.feedback.SnapshotBuilder;
+import com.routechain.v2.feedback.SnapshotService;
+import com.routechain.v2.feedback.SnapshotStore;
+import com.routechain.v2.feedback.WarmStartManager;
 import com.routechain.v2.bundle.BoundaryCandidateSelector;
 import com.routechain.v2.bundle.BoundaryExpansionEngine;
 import com.routechain.v2.bundle.BundleDominancePruner;
@@ -60,17 +72,21 @@ import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
 import java.time.Instant;
 import java.util.List;
 
-final class TestDispatchV2Factory {
+public final class TestDispatchV2Factory {
     private TestDispatchV2Factory() {
     }
 
-    static DispatchV2CompatibleCore compatibleCore(RouteChainDispatchV2Properties properties) {
+    public static DispatchV2CompatibleCore compatibleCore(RouteChainDispatchV2Properties properties) {
         DispatchV2Configuration configuration = new DispatchV2Configuration();
-        DispatchV2Core core = core(properties);
+        DispatchV2Core core = harness(properties).core();
         return configuration.dispatchV2CompatibleCore(properties, core);
     }
 
-    static DispatchV2Core core(RouteChainDispatchV2Properties properties) {
+    public static DispatchV2Core core(RouteChainDispatchV2Properties properties) {
+        return harness(properties).core();
+    }
+
+    public static TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties) {
         DispatchV2Configuration configuration = new DispatchV2Configuration();
         BaselineTravelTimeEstimator baselineTravelTimeEstimator = configuration.baselineTravelTimeEstimator();
         TrafficProfileService trafficProfileService = configuration.trafficProfileService(properties);
@@ -167,7 +183,16 @@ final class TestDispatchV2Factory {
                 executionConflictValidator,
                 dispatchAssignmentBuilder);
         DispatchExecutorService dispatchExecutorService = configuration.dispatchExecutorService(dispatchExecutor);
-        return configuration.dispatchV2Core(
+        DecisionLogAssembler decisionLogAssembler = configuration.decisionLogAssembler();
+        DecisionLogWriter decisionLogWriter = configuration.decisionLogWriter();
+        DecisionLogService decisionLogService = configuration.decisionLogService(properties, decisionLogAssembler, decisionLogWriter);
+        SnapshotBuilder snapshotBuilder = configuration.snapshotBuilder();
+        SnapshotStore snapshotStore = configuration.snapshotStore();
+        SnapshotService snapshotService = configuration.snapshotService(properties, snapshotBuilder, snapshotStore);
+        DispatchReplayRecorder dispatchReplayRecorder = configuration.dispatchReplayRecorder(properties);
+        WarmStartManager warmStartManager = configuration.warmStartManager(properties, snapshotService);
+        HotStartManager hotStartManager = configuration.hotStartManager(properties);
+        DispatchV2Core core = configuration.dispatchV2Core(
                 dispatchEtaContextService,
                 dispatchPairClusterService,
                 dispatchBundleStageService,
@@ -175,10 +200,33 @@ final class TestDispatchV2Factory {
                 dispatchRouteProposalService,
                 dispatchScenarioService,
                 dispatchSelectorService,
-                dispatchExecutorService);
+                dispatchExecutorService,
+                dispatchReplayRecorder,
+                decisionLogService,
+                snapshotService,
+                warmStartManager,
+                hotStartManager);
+        DispatchReplayLoader dispatchReplayLoader = configuration.dispatchReplayLoader(
+                dispatchReplayRecorder,
+                decisionLogService,
+                snapshotService);
+        DispatchReplayComparator dispatchReplayComparator = configuration.dispatchReplayComparator();
+        DispatchReplayRunner dispatchReplayRunner = configuration.dispatchReplayRunner(
+                core,
+                dispatchReplayLoader,
+                dispatchReplayComparator);
+        return new TestDispatchRuntimeHarness(
+                core,
+                decisionLogService,
+                snapshotService,
+                dispatchReplayRecorder,
+                dispatchReplayLoader,
+                dispatchReplayRunner,
+                warmStartManager,
+                hotStartManager);
     }
 
-    static DispatchV2Request requestWithOrdersAndDriver() {
+    public static DispatchV2Request requestWithOrdersAndDriver() {
         Instant decisionTime = Instant.parse("2026-04-16T12:00:00Z");
         return new DispatchV2Request(
                 "dispatch-v2-request/v1",
@@ -211,5 +259,16 @@ final class TestDispatchV2Factory {
                 readyAt,
                 20,
                 urgent);
+    }
+
+    public record TestDispatchRuntimeHarness(
+            DispatchV2Core core,
+            DecisionLogService decisionLogService,
+            SnapshotService snapshotService,
+            DispatchReplayRecorder dispatchReplayRecorder,
+            DispatchReplayLoader dispatchReplayLoader,
+            DispatchReplayRunner dispatchReplayRunner,
+            WarmStartManager warmStartManager,
+            HotStartManager hotStartManager) {
     }
 }

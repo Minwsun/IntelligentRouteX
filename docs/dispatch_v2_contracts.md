@@ -52,7 +52,15 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 - `DispatchExecutorStage`
 - `WarmStartState`
 - `HotStartState`
+- `BootMode`
 - `DecisionLogRecord`
+- `DispatchRuntimeSnapshot`
+- `SnapshotManifest`
+- `SnapshotWriteResult`
+- `SnapshotLoadResult`
+- `ReplayRequestRecord`
+- `ReplayComparisonResult`
+- `ReplayRunResult`
 
 ## Internal-Only Contracts
 
@@ -62,6 +70,8 @@ All persisted and exchanged contracts are schema-versioned from day 1.
 - `SelectorDecisionTrace`
 - `ResolvedSelectedProposal`
 - `DispatchExecutionTrace`
+- `SnapshotStore`
+- `DecisionLogWriter`
 
 ## Rule
 

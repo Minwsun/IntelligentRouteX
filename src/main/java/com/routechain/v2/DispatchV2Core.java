@@ -16,6 +16,12 @@ import com.routechain.v2.cluster.DispatchPairClusterService;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.context.DispatchEtaContextService;
 import com.routechain.v2.context.DispatchEtaContextStage;
+import com.routechain.v2.feedback.DecisionLogService;
+import com.routechain.v2.feedback.DispatchReplayRecorder;
+import com.routechain.v2.feedback.HotStartManager;
+import com.routechain.v2.feedback.SnapshotService;
+import com.routechain.v2.feedback.SnapshotWriteResult;
+import com.routechain.v2.feedback.WarmStartManager;
 
 public final class DispatchV2Core {
     private final DispatchEtaContextService dispatchEtaContextService;
@@ -26,6 +32,11 @@ public final class DispatchV2Core {
     private final DispatchScenarioService dispatchScenarioService;
     private final DispatchSelectorService dispatchSelectorService;
     private final DispatchExecutorService dispatchExecutorService;
+    private final DispatchReplayRecorder dispatchReplayRecorder;
+    private final DecisionLogService decisionLogService;
+    private final SnapshotService snapshotService;
+    private final WarmStartManager warmStartManager;
+    private final HotStartManager hotStartManager;
 
     public DispatchV2Core(DispatchEtaContextService dispatchEtaContextService,
                           DispatchPairClusterService dispatchPairClusterService,
@@ -34,7 +45,12 @@ public final class DispatchV2Core {
                           DispatchRouteProposalService dispatchRouteProposalService,
                           DispatchScenarioService dispatchScenarioService,
                           DispatchSelectorService dispatchSelectorService,
-                          DispatchExecutorService dispatchExecutorService) {
+                          DispatchExecutorService dispatchExecutorService,
+                          DispatchReplayRecorder dispatchReplayRecorder,
+                          DecisionLogService decisionLogService,
+                          SnapshotService snapshotService,
+                          WarmStartManager warmStartManager,
+                          HotStartManager hotStartManager) {
         this.dispatchEtaContextService = dispatchEtaContextService;
         this.dispatchPairClusterService = dispatchPairClusterService;
         this.dispatchBundleStageService = dispatchBundleStageService;
@@ -43,6 +59,11 @@ public final class DispatchV2Core {
         this.dispatchScenarioService = dispatchScenarioService;
         this.dispatchSelectorService = dispatchSelectorService;
         this.dispatchExecutorService = dispatchExecutorService;
+        this.dispatchReplayRecorder = dispatchReplayRecorder;
+        this.decisionLogService = decisionLogService;
+        this.snapshotService = snapshotService;
+        this.warmStartManager = warmStartManager;
+        this.hotStartManager = hotStartManager;
     }
 
     public DispatchV2Result dispatch(DispatchV2Request request) {
@@ -95,7 +116,7 @@ public final class DispatchV2Core {
                                 executorStage.degradeReasons().stream()))
                 .distinct()
                 .toList();
-        return new DispatchV2Result(
+        DispatchV2Result pipelineResult = new DispatchV2Result(
                 "dispatch-v2-result/v1",
                 request.traceId(),
                 false,
@@ -127,6 +148,47 @@ public final class DispatchV2Core {
                 selectorStage.globalSelectorSummary(),
                 executorStage.assignments(),
                 executorStage.dispatchExecutionSummary(),
+                warmStartManager.currentState(),
+                HotStartState.empty(),
                 degradeReasons);
+        dispatchReplayRecorder.record(request);
+        decisionLogService.write(request, pipelineResult);
+        SnapshotWriteResult snapshotWriteResult = snapshotService.save(request, pipelineResult);
+        HotStartState hotStartState = hotStartManager.update(snapshotWriteResult.snapshot());
+        return new DispatchV2Result(
+                pipelineResult.schemaVersion(),
+                pipelineResult.traceId(),
+                pipelineResult.fallbackUsed(),
+                pipelineResult.selectedRouteId(),
+                pipelineResult.decisionStages(),
+                pipelineResult.etaContext(),
+                pipelineResult.etaStageTrace(),
+                pipelineResult.freshnessMetadata(),
+                pipelineResult.bufferedOrderWindow(),
+                pipelineResult.pairGraphSummary(),
+                pipelineResult.microClusters(),
+                pipelineResult.microClusterSummary(),
+                pipelineResult.boundaryExpansions(),
+                pipelineResult.boundaryExpansionSummary(),
+                pipelineResult.bundleCandidates(),
+                pipelineResult.bundlePoolSummary(),
+                pipelineResult.pickupAnchors(),
+                pipelineResult.pickupAnchorSummary(),
+                pipelineResult.driverCandidates(),
+                pipelineResult.driverShortlistSummary(),
+                pipelineResult.routeProposals(),
+                pipelineResult.routeProposalSummary(),
+                pipelineResult.scenarioEvaluations(),
+                pipelineResult.robustUtilities(),
+                pipelineResult.scenarioEvaluationSummary(),
+                pipelineResult.selectorCandidates(),
+                pipelineResult.conflictGraph(),
+                pipelineResult.globalSelectionResult(),
+                pipelineResult.globalSelectorSummary(),
+                pipelineResult.assignments(),
+                pipelineResult.dispatchExecutionSummary(),
+                pipelineResult.warmStartState(),
+                hotStartState,
+                pipelineResult.degradeReasons());
     }
 }

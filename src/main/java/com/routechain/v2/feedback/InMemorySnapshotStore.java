@@ -1,0 +1,35 @@
+package com.routechain.v2.feedback;
+
+public final class InMemorySnapshotStore implements SnapshotStore {
+    private volatile DispatchRuntimeSnapshot latestSnapshot;
+
+    @Override
+    public SnapshotWriteResult save(DispatchRuntimeSnapshot snapshot) {
+        latestSnapshot = snapshot;
+        return new SnapshotWriteResult(
+                "snapshot-write-result/v1",
+                snapshot.snapshotId(),
+                true,
+                SnapshotManifest.fromSnapshot(snapshot),
+                snapshot,
+                java.util.List.of());
+    }
+
+    @Override
+    public SnapshotLoadResult loadLatest() {
+        if (latestSnapshot == null) {
+            return new SnapshotLoadResult(
+                    "snapshot-load-result/v1",
+                    false,
+                    null,
+                    null,
+                    java.util.List.of("snapshot-not-found"));
+        }
+        return new SnapshotLoadResult(
+                "snapshot-load-result/v1",
+                true,
+                SnapshotManifest.fromSnapshot(latestSnapshot),
+                latestSnapshot,
+                java.util.List.of());
+    }
+}

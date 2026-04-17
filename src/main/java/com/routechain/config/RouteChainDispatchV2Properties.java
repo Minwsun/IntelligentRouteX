@@ -25,6 +25,8 @@ public class RouteChainDispatchV2Properties {
     private final BoundaryExpansion boundaryExpansion = new BoundaryExpansion();
     private final Scenario scenario = new Scenario();
     private final Selector selector = new Selector();
+    private final Feedback feedback = new Feedback();
+    private final WarmHotStart warmHotStart = new WarmHotStart();
 
     public static RouteChainDispatchV2Properties defaults() {
         return new RouteChainDispatchV2Properties();
@@ -140,6 +142,14 @@ public class RouteChainDispatchV2Properties {
 
     public Selector getSelector() {
         return selector;
+    }
+
+    public Feedback getFeedback() {
+        return feedback;
+    }
+
+    public WarmHotStart getWarmHotStart() {
+        return warmHotStart;
     }
 
     public static final class Buffer {
@@ -544,6 +554,48 @@ public class RouteChainDispatchV2Properties {
 
         public void setFallbackPenalty(double fallbackPenalty) {
             this.fallbackPenalty = fallbackPenalty;
+        }
+    }
+
+    public static final class Feedback {
+        private boolean decisionLogEnabled = true;
+        private boolean snapshotEnabled = true;
+        private boolean replayEnabled = true;
+
+        public boolean isDecisionLogEnabled() {
+            return decisionLogEnabled;
+        }
+
+        public void setDecisionLogEnabled(boolean decisionLogEnabled) {
+            this.decisionLogEnabled = decisionLogEnabled;
+        }
+
+        public boolean isSnapshotEnabled() {
+            return snapshotEnabled;
+        }
+
+        public void setSnapshotEnabled(boolean snapshotEnabled) {
+            this.snapshotEnabled = snapshotEnabled;
+        }
+
+        public boolean isReplayEnabled() {
+            return replayEnabled;
+        }
+
+        public void setReplayEnabled(boolean replayEnabled) {
+            this.replayEnabled = replayEnabled;
+        }
+    }
+
+    public static final class WarmHotStart {
+        private boolean loadLatestSnapshotOnBoot = true;
+
+        public boolean isLoadLatestSnapshotOnBoot() {
+            return loadLatestSnapshotOnBoot;
+        }
+
+        public void setLoadLatestSnapshotOnBoot(boolean loadLatestSnapshotOnBoot) {
+            this.loadLatestSnapshotOnBoot = loadLatestSnapshotOnBoot;
         }
     }
 }

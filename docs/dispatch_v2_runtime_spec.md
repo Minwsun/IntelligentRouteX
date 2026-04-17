@@ -2,13 +2,23 @@
 
 ## Pipeline
 
-`ETA/context -> order buffer -> pair graph -> micro-cluster -> boundary expansion -> bundle pool -> pickup anchor -> driver shortlist/rerank -> route proposal pool -> scenario evaluation -> global selector -> dispatch executor -> decision log/replay`
+`ETA/context -> order buffer -> pair graph -> micro-cluster -> boundary expansion -> bundle pool -> pickup anchor -> driver shortlist/rerank -> route proposal pool -> scenario evaluation -> global selector -> dispatch executor`
 
 ## Current Executable Slice
 
 The current runtime result must only report stages that actually ran. For the current executor slice, `DispatchV2Result.decisionStages` must be exactly `["eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector", "dispatch-executor"]` on the enabled path.
 
 For this hardened executor slice, `DispatchV2Result.selectedRouteId` remains intentionally `null`. The runtime may emit multiple executed assignments, so a single selected route id is not yet considered a safe execution semantic.
+
+Decision log, snapshot, replay recording, and warm/hot start hardening run after the 12-stage decision pipeline. They do not appear in `DispatchV2Result.decisionStages`.
+
+For the current hardening slice:
+
+- every enabled dispatch writes an in-memory decision log record
+- every enabled dispatch writes an in-memory runtime snapshot
+- `DispatchV2Result.warmStartState` reports the boot-time warm/cold decision
+- `DispatchV2Result.hotStartState` reports current reuse eligibility against the previous snapshot
+- replay compares exact stage/id/count equality for identical input
 
 For executor summary semantics in the current slice:
 
@@ -35,6 +45,10 @@ For executor summary semantics in the current slice:
 - `selector.greedyRepairEnabled=true`
 - `selector.repairPassLimit=1`
 - `selector.fallbackPenalty=0.03`
+- `feedback.decisionLogEnabled=true`
+- `feedback.snapshotEnabled=true`
+- `feedback.replayEnabled=true`
+- `warmHotStart.loadLatestSnapshotOnBoot=true`
 
 ## Feature Flags
 
@@ -49,3 +63,7 @@ For executor summary semantics in the current slice:
 - `routechain.dispatch-v2.selector.greedy-repair-enabled`
 - `routechain.dispatch-v2.selector.repair-pass-limit`
 - `routechain.dispatch-v2.selector.fallback-penalty`
+- `routechain.dispatch-v2.feedback.decision-log-enabled`
+- `routechain.dispatch-v2.feedback.snapshot-enabled`
+- `routechain.dispatch-v2.feedback.replay-enabled`
+- `routechain.dispatch-v2.warm-hot-start.load-latest-snapshot-on-boot`

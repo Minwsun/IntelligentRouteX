@@ -59,5 +59,9 @@ class RouteChainDispatchV2PropertiesTest {
         assertTrue(properties.isHotStartEnabled());
         assertFalse(properties.isTomtomEnabled());
         assertTrue(properties.isOpenMeteoEnabled());
+        assertTrue(properties.getFeedback().isDecisionLogEnabled());
+        assertTrue(properties.getFeedback().isSnapshotEnabled());
+        assertTrue(properties.getFeedback().isReplayEnabled());
+        assertTrue(properties.getWarmHotStart().isLoadLatestSnapshotOnBoot());
     }
 }
