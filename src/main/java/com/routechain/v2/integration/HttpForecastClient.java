@@ -136,6 +136,15 @@ public final class HttpForecastClient implements ForecastClient {
             if (!JAVA_CONTRACT_VERSION.equals(versionResponse.minSupportedJavaContractVersion())) {
                 return WorkerReadyState.notReady("java-contract-incompatible", manifestMetadata);
             }
+            if (Boolean.TRUE.equals(worker.readyRequiresLocalLoad()) && !Boolean.TRUE.equals(versionResponse.loadedFromLocal())) {
+                return WorkerReadyState.notReady("local-model-not-loaded", manifestMetadata);
+            }
+            if (Boolean.TRUE.equals(worker.readyRequiresLocalLoad())
+                    && worker.loadedModelFingerprint() != null
+                    && !worker.loadedModelFingerprint().isBlank()
+                    && !worker.loadedModelFingerprint().equals(versionResponse.loadedModelFingerprint())) {
+                return WorkerReadyState.notReady("loaded-model-fingerprint-mismatch", manifestMetadata);
+            }
             WorkerReadyResponse readyResponse = readJson("ready", WorkerReadyResponse.class, bootstrapTimeout);
             if (!readyResponse.ready()) {
                 return WorkerReadyState.notReady(

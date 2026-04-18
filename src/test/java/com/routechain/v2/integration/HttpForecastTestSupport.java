@@ -49,6 +49,14 @@ final class HttpForecastTestSupport {
                          String artifactDigest,
                          String compatibilityContractVersion,
                          String javaContractVersion) throws IOException {
+        return manifestV1(tempDir, modelVersion, artifactDigest, compatibilityContractVersion, javaContractVersion);
+    }
+
+    static Path manifestV1(Path tempDir,
+                         String modelVersion,
+                         String artifactDigest,
+                         String compatibilityContractVersion,
+                         String javaContractVersion) throws IOException {
         Path manifestPath = tempDir.resolve("forecast-model-manifest.yaml");
         Files.writeString(manifestPath, """
                 schemaVersion: model-manifest/v1
@@ -82,7 +90,68 @@ final class HttpForecastTestSupport {
         return manifestPath;
     }
 
+    static Path manifestV2(Path tempDir,
+                           String modelVersion,
+                           String artifactDigest,
+                           String compatibilityContractVersion,
+                           String javaContractVersion,
+                           String loadedModelFingerprint) throws IOException {
+        Path manifestPath = tempDir.resolve("forecast-model-manifest-v2.yaml");
+        Files.writeString(manifestPath, """
+                schemaVersion: model-manifest/v2
+                workers:
+                  - worker_name: ml-forecast-worker
+                    model_name: chronos-2
+                    model_version: %s
+                    artifact_digest: %s
+                    rollback_artifact_digest: sha256:rollback
+                    runtime_image: local/test
+                    compatibility_contract_version: %s
+                    min_supported_java_contract_version: %s
+                    local_model_root: materialized/chronos-2
+                    local_artifact_path: materialized/chronos-2/model/chronos-runtime-manifest.json
+                    materialization_mode: HF_SNAPSHOT_PROMOTION
+                    ready_requires_local_load: true
+                    offline_boot_supported: true
+                    loaded_model_fingerprint: %s
+                    source_repository: https://github.com/amazon-science/chronos-forecasting.git
+                    source_ref: fd533389c300660f9d8e3a00fcb29e4ca1174745
+                    source_model_id: amazon/chronos-2
+                    source_model_revision: 0f8a440441931157957e2be1a9bce66627d99c76
+                    source_package_requirement: chronos-forecasting==2.2.2
+                    source_download_command: python -m huggingface_hub snapshot_download --repo-id amazon/chronos-2 --revision 0f8a440441931157957e2be1a9bce66627d99c76
+                    source_test_command: python -c "from chronos import Chronos2Pipeline; Chronos2Pipeline.from_pretrained('snapshot', device_map='cpu')"
+                    startup_warmup_request:
+                      endpoint: /forecast/zone-burst
+                      payload:
+                        schemaVersion: forecast-request/v1
+                        traceId: warmup-forecast
+                        payload:
+                          schemaVersion: zone-burst-feature-vector/v1
+                          traceId: warmup-forecast
+                          corridorId: corridor-a
+                          orderCount: 3
+                          urgentOrderCount: 1
+                          driverCount: 2
+                          averageCompletionEtaMinutes: 16.0
+                          averageRouteValue: 0.68
+                          averageBundleScore: 0.7
+                          averagePairSupport: 0.64
+                          horizonMinutes: 20
+                """.formatted(modelVersion, artifactDigest, compatibilityContractVersion, javaContractVersion, loadedModelFingerprint), StandardCharsets.UTF_8);
+        return manifestPath;
+    }
+
     static String versionBody(String modelVersion, String artifactDigest) {
+        return versionBody(modelVersion, artifactDigest, false, "", "", "");
+    }
+
+    static String versionBody(String modelVersion,
+                              String artifactDigest,
+                              boolean loadedFromLocal,
+                              String localArtifactPath,
+                              String materializationMode,
+                              String loadedModelFingerprint) {
         return """
                 {
                   "schemaVersion": "worker-version/v1",
@@ -91,9 +160,19 @@ final class HttpForecastTestSupport {
                   "modelVersion": "%s",
                   "artifactDigest": "%s",
                   "compatibilityContractVersion": "dispatch-v2-ml/v1",
-                  "minSupportedJavaContractVersion": "dispatch-v2-java/v1"
+                  "minSupportedJavaContractVersion": "dispatch-v2-java/v1",
+                  "loadedFromLocal": %s,
+                  "localArtifactPath": "%s",
+                  "materializationMode": "%s",
+                  "loadedModelFingerprint": "%s"
                 }
-                """.formatted(modelVersion, artifactDigest);
+                """.formatted(
+                modelVersion,
+                artifactDigest,
+                Boolean.toString(loadedFromLocal),
+                localArtifactPath,
+                materializationMode,
+                loadedModelFingerprint);
     }
 
     static String readyBody(boolean ready, String reason) {

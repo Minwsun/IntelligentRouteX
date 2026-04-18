@@ -82,12 +82,25 @@ workers:
           maxAlternatives: 2
   - worker_name: ml-forecast-worker
     model_name: chronos-2
-    model_version: 2026.04.17-v1
-    artifact_digest: sha256:63eb03737be473b08eeca3ab72939b5906822cb04cd49ae6fab708ef850a8878
+    model_version: 2026.04.18-v2
+    artifact_digest: sha256:f344055c273370535ad2e91169317bef1eef96d7b8216578699d27929bdd3d24
     rollback_artifact_digest: sha256:pending-rollback
     runtime_image: ghcr.io/minwsun/intelligentroutex/ml-forecast-worker:bootstrap
     compatibility_contract_version: dispatch-v2-ml/v1
     min_supported_java_contract_version: dispatch-v2-java/v1
+    local_model_root: materialized/chronos-2
+    local_artifact_path: materialized/chronos-2/model/chronos-runtime-manifest.json
+    materialization_mode: HF_SNAPSHOT_PROMOTION
+    ready_requires_local_load: true
+    offline_boot_supported: true
+    loaded_model_fingerprint: sha256:f5e9d3c877a42ef06ba8da80bcf4c758f0e8be0ae0f99a9b73a03c1ae9501333
+    source_repository: https://github.com/amazon-science/chronos-forecasting.git
+    source_ref: fd533389c300660f9d8e3a00fcb29e4ca1174745
+    source_model_id: amazon/chronos-2
+    source_model_revision: 0f8a440441931157957e2be1a9bce66627d99c76
+    source_package_requirement: chronos-forecasting==2.2.2
+    source_download_command: python -m huggingface_hub snapshot_download --repo-id amazon/chronos-2 --revision 0f8a440441931157957e2be1a9bce66627d99c76
+    source_test_command: python -c "from chronos import Chronos2Pipeline; Chronos2Pipeline.from_pretrained('snapshot', device_map='cpu')"
     startup_warmup_request:
       endpoint: /forecast/zone-burst
       payload:

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ForecastClientNotAppliedContractTest {
+    private static final String LOADED_MODEL_FINGERPRINT = "sha256:chronos-fingerprint";
 
     @TempDir
     Path tempDir;
@@ -27,7 +28,13 @@ class ForecastClientNotAppliedContractTest {
     private void assertUnavailable(Map<String, com.sun.net.httpserver.HttpHandler> handlers) throws Exception {
         HttpServer server = HttpForecastTestSupport.server(mergeHandlers(handlers));
         try {
-            Path manifestPath = HttpForecastTestSupport.manifest(tempDir, "v1", "sha256:chronos", "dispatch-v2-ml/v1", "dispatch-v2-java/v1");
+            Path manifestPath = HttpForecastTestSupport.manifestV2(
+                    tempDir,
+                    "v1",
+                    "sha256:chronos",
+                    "dispatch-v2-ml/v1",
+                    "dispatch-v2-java/v1",
+                    LOADED_MODEL_FINGERPRINT);
             HttpForecastClient client = new HttpForecastClient(
                     "http://127.0.0.1:" + server.getAddress().getPort(),
                     Duration.ofMillis(50),
@@ -47,7 +54,13 @@ class ForecastClientNotAppliedContractTest {
 
     private Map<String, com.sun.net.httpserver.HttpHandler> mergeHandlers(Map<String, com.sun.net.httpserver.HttpHandler> handlers) {
         return new java.util.HashMap<>(Map.of(
-                "/version", HttpForecastTestSupport.json(HttpForecastTestSupport.versionBody("v1", "sha256:chronos")),
+                "/version", HttpForecastTestSupport.json(HttpForecastTestSupport.versionBody(
+                        "v1",
+                        "sha256:chronos",
+                        true,
+                        "materialized/chronos-2/model/chronos-runtime-manifest.json",
+                        "HF_SNAPSHOT_PROMOTION",
+                        LOADED_MODEL_FINGERPRINT)),
                 "/ready", HttpForecastTestSupport.json(HttpForecastTestSupport.readyBody(true, "")))) {{
             putAll(handlers);
         }};

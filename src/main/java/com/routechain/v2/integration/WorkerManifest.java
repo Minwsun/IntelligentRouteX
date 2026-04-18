@@ -49,6 +49,12 @@ public record WorkerManifest(
             String sourceRepository,
             @JsonProperty("source_ref")
             String sourceRef,
+            @JsonProperty("source_model_id")
+            String sourceModelId,
+            @JsonProperty("source_model_revision")
+            String sourceModelRevision,
+            @JsonProperty("source_package_requirement")
+            String sourcePackageRequirement,
             @JsonProperty("source_checkpoint_path")
             String sourceCheckpointPath,
             @JsonProperty("source_download_command")

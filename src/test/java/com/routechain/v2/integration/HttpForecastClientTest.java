@@ -11,6 +11,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HttpForecastClientTest {
+    private static final String LOADED_MODEL_FINGERPRINT = "sha256:chronos-fingerprint";
 
     @TempDir
     Path tempDir;
@@ -18,13 +19,25 @@ class HttpForecastClientTest {
     @Test
     void happyPathSupportsDemandShiftZoneBurstAndPostDropShift() throws Exception {
         HttpServer server = HttpForecastTestSupport.server(Map.of(
-                "/version", HttpForecastTestSupport.json(HttpForecastTestSupport.versionBody("v1", "sha256:chronos")),
+                "/version", HttpForecastTestSupport.json(HttpForecastTestSupport.versionBody(
+                        "v1",
+                        "sha256:chronos",
+                        true,
+                        "materialized/chronos-2/model/chronos-runtime-manifest.json",
+                        "HF_SNAPSHOT_PROMOTION",
+                        LOADED_MODEL_FINGERPRINT)),
                 "/ready", HttpForecastTestSupport.json(HttpForecastTestSupport.readyBody(true, "")),
                 "/forecast/demand-shift", HttpForecastTestSupport.json(HttpForecastTestSupport.forecastBody(false, 0.71, null, 0.83, 90000L)),
                 "/forecast/zone-burst", HttpForecastTestSupport.json(HttpForecastTestSupport.forecastBody(false, null, 0.74, 0.82, 80000L)),
                 "/forecast/post-drop-shift", HttpForecastTestSupport.json(HttpForecastTestSupport.forecastBody(false, 0.69, null, 0.8, 85000L))));
         try {
-            Path manifestPath = HttpForecastTestSupport.manifest(tempDir, "v1", "sha256:chronos", "dispatch-v2-ml/v1", "dispatch-v2-java/v1");
+            Path manifestPath = HttpForecastTestSupport.manifestV2(
+                    tempDir,
+                    "v1",
+                    "sha256:chronos",
+                    "dispatch-v2-ml/v1",
+                    "dispatch-v2-java/v1",
+                    LOADED_MODEL_FINGERPRINT);
             HttpForecastClient client = new HttpForecastClient(
                     "http://127.0.0.1:" + server.getAddress().getPort(),
                     Duration.ofMillis(50),
