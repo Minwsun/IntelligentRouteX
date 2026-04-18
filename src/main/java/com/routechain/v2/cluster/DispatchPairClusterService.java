@@ -2,6 +2,7 @@ package com.routechain.v2.cluster;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.v2.DispatchV2Request;
+import com.routechain.v2.DispatchStageLatency;
 import com.routechain.v2.EtaContext;
 import com.routechain.v2.HotStartReuseSummary;
 import com.routechain.v2.feedback.ReuseStateBuilder;
@@ -33,7 +34,9 @@ public final class DispatchPairClusterService {
     public DispatchPairClusterStage evaluate(DispatchV2Request request,
                                              EtaContext etaContext,
                                              PairClusterReuseInput reuseInput) {
+        long orderBufferStartedAt = System.nanoTime();
         BufferedOrderWindow bufferedOrderWindow = orderBuffer.buffer(request);
+        long orderBufferElapsedMs = elapsedMs(orderBufferStartedAt);
         if (reuseInput != null && reuseInput.reuseState() != null) {
             List<String> reuseDegradeReasons = new ArrayList<>();
             if (!ReuseStateBuilder.etaContextSignature(etaContext).equals(reuseInput.reuseState().etaContextSignature())) {
@@ -46,46 +49,64 @@ public final class DispatchPairClusterService {
             if (reuseDegradeReasons.isEmpty()
                     && reuseInput.reuseState().pairSimilarityGraph() != null
                     && reuseInput.reuseState().pairGraphSummary() != null) {
+                long pairGraphStartedAt = System.nanoTime();
+                PairGraphSummary reusedPairGraphSummary = reuseInput.reuseState().pairGraphSummary();
+                PairSimilarityGraph reusedPairSimilarityGraph = reuseInput.reuseState().pairSimilarityGraph();
+                long pairGraphElapsedMs = elapsedMs(pairGraphStartedAt);
+                long microClusterStartedAt = System.nanoTime();
+                List<MicroCluster> reusedMicroClusters = reuseInput.reuseState().microClusters();
+                MicroClusterSummary reusedMicroClusterSummary = reuseInput.reuseState().microClusterSummary();
+                long microClusterElapsedMs = elapsedMs(microClusterStartedAt);
                 return new DispatchPairClusterStage(
                         "dispatch-pair-cluster-stage/v1",
                         bufferedOrderWindow,
-                        reuseInput.reuseState().pairGraphSummary(),
-                        reuseInput.reuseState().pairSimilarityGraph(),
-                        reuseInput.reuseState().microClusters(),
-                        reuseInput.reuseState().microClusterSummary(),
+                        reusedPairGraphSummary,
+                        reusedPairSimilarityGraph,
+                        reusedMicroClusters,
+                        reusedMicroClusterSummary,
                         HotStartReuseSummary.reused(reuseInput.reuseState().microClusters().size()),
+                        List.of(
+                                DispatchStageLatency.measured("order-buffer", orderBufferElapsedMs, false),
+                                DispatchStageLatency.measured("pair-graph", pairGraphElapsedMs, true),
+                                DispatchStageLatency.measured("micro-cluster", microClusterElapsedMs, true)),
                         reuseInput.reuseState().pairClusterMlStageMetadata(),
                         reuseInput.reuseState().pairClusterDegradeReasons());
             }
-            DispatchPairClusterStage freshStage = evaluateFresh(request, etaContext, bufferedOrderWindow);
+            DispatchPairClusterStage freshStage = evaluateFresh(request, etaContext, bufferedOrderWindow, orderBufferElapsedMs);
             List<String> degradeReasons = new ArrayList<>(freshStage.degradeReasons());
             degradeReasons.addAll(reuseDegradeReasons);
             return new DispatchPairClusterStage(
                     freshStage.schemaVersion(),
                     freshStage.bufferedOrderWindow(),
                     freshStage.pairGraphSummary(),
-                    freshStage.pairSimilarityGraph(),
-                    freshStage.microClusters(),
-                    freshStage.microClusterSummary(),
-                    HotStartReuseSummary.none().withDegradeReasons(reuseDegradeReasons),
-                    freshStage.mlStageMetadata(),
-                    List.copyOf(degradeReasons.stream().distinct().toList()));
+                freshStage.pairSimilarityGraph(),
+                freshStage.microClusters(),
+                freshStage.microClusterSummary(),
+                HotStartReuseSummary.none().withDegradeReasons(reuseDegradeReasons),
+                freshStage.stageLatencies(),
+                freshStage.mlStageMetadata(),
+                List.copyOf(degradeReasons.stream().distinct().toList()));
         }
-        return evaluateFresh(request, etaContext, bufferedOrderWindow);
+        return evaluateFresh(request, etaContext, bufferedOrderWindow, orderBufferElapsedMs);
     }
 
     private DispatchPairClusterStage evaluateFresh(DispatchV2Request request,
                                                    EtaContext etaContext,
-                                                   BufferedOrderWindow bufferedOrderWindow) {
+                                                   BufferedOrderWindow bufferedOrderWindow,
+                                                   long orderBufferElapsedMs) {
         EtaLegCache etaLegCache = etaLegCacheFactory.create(request.traceId(), request.decisionTime(), request.weatherProfile());
+        long pairGraphStartedAt = System.nanoTime();
         PairSimilarityGraphBuildResult graphBuildResult = pairSimilarityGraphBuilder.build(
                 bufferedOrderWindow,
                 etaContext,
                 etaLegCache);
+        long pairGraphElapsedMs = elapsedMs(pairGraphStartedAt);
         PairSimilarityGraph graph = graphBuildResult.graph();
         List<String> degradeReasons = new ArrayList<>(graphBuildResult.degradeReasons());
         PairGraphSummary pairGraphSummary = summarizeGraph(graphBuildResult);
+        long microClusterStartedAt = System.nanoTime();
         List<MicroCluster> microClusters = microClusterer.cluster(bufferedOrderWindow, graph);
+        long microClusterElapsedMs = elapsedMs(microClusterStartedAt);
         MicroClusterSummary microClusterSummary = summarizeClusters(microClusters, degradeReasons);
         return new DispatchPairClusterStage(
                 "dispatch-pair-cluster-stage/v1",
@@ -95,6 +116,10 @@ public final class DispatchPairClusterService {
                 microClusters,
                 microClusterSummary,
                 HotStartReuseSummary.none(),
+                List.of(
+                        DispatchStageLatency.measured("order-buffer", orderBufferElapsedMs, false),
+                        DispatchStageLatency.measured("pair-graph", pairGraphElapsedMs, false),
+                        DispatchStageLatency.measured("micro-cluster", microClusterElapsedMs, false)),
                 graphBuildResult.mlStageMetadata(),
                 List.copyOf(degradeReasons));
     }
@@ -119,5 +144,9 @@ public final class DispatchPairClusterService {
                 largestClusterSize,
                 singletonCount,
                 List.copyOf(degradeReasons));
+    }
+
+    private long elapsedMs(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000L;
     }
 }

@@ -1,6 +1,7 @@
 package com.routechain.v2.route;
 
 import com.routechain.domain.WeatherProfile;
+import com.routechain.v2.DispatchStageLatency;
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
 import com.routechain.v2.MlStageMetadata;
@@ -37,11 +38,14 @@ public final class DispatchRouteCandidateService {
                 request.availableDrivers(),
                 pairClusterStage,
                 bundleStage);
+        long pickupAnchorStartedAt = System.nanoTime();
         List<PickupAnchor> pickupAnchors = pickupAnchorSelector.select(bundleStage.bundleCandidates(), context);
+        long pickupAnchorElapsedMs = elapsedMs(pickupAnchorStartedAt);
         EtaLegCache etaLegCache = etaLegCacheFactory.create(
                 request.traceId(),
                 request.decisionTime(),
                 request.weatherProfile() == null ? WeatherProfile.CLEAR : request.weatherProfile());
+        long shortlistStartedAt = System.nanoTime();
         List<DriverCandidate> driverCandidates = new ArrayList<>();
         List<MlStageMetadata> mlStageMetadata = new ArrayList<>();
         List<String> stageDegradeReasons = new ArrayList<>();
@@ -60,6 +64,7 @@ public final class DispatchRouteCandidateService {
             mlStageMetadata.addAll(shortlistResult.mlStageMetadata());
             driverCandidates.addAll(driverReranker.rerank(pickupAnchor, shortlisted));
         }
+        long shortlistElapsedMs = elapsedMs(shortlistStartedAt);
         List<String> degradeReasons = java.util.stream.Stream.concat(
                         driverCandidates.stream().flatMap(candidate -> candidate.degradeReasons().stream()),
                         stageDegradeReasons.stream())
@@ -71,6 +76,9 @@ public final class DispatchRouteCandidateService {
                 summarizeAnchors(bundleStage.bundleCandidates().size(), pickupAnchors, degradeReasons),
                 List.copyOf(driverCandidates),
                 summarizeDrivers(bundleStage.bundleCandidates().size(), pickupAnchors.size(), rawShortlistedCount, driverCandidates.size(), degradeReasons),
+                List.of(
+                        DispatchStageLatency.measured("pickup-anchor", pickupAnchorElapsedMs, false),
+                        DispatchStageLatency.measured("driver-shortlist/rerank", shortlistElapsedMs, false)),
                 List.copyOf(mlStageMetadata.stream().distinct().toList()),
                 degradeReasons);
     }
@@ -98,5 +106,9 @@ public final class DispatchRouteCandidateService {
                 shortlistedDriverCount,
                 rerankedDriverCount,
                 degradeReasons);
+    }
+
+    private long elapsedMs(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000L;
     }
 }

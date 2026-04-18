@@ -26,7 +26,7 @@ class HotStartManagerTest {
         HotStartState compatibleState = hotStartManager.update(
                 reuseState("trace-2", compatiblePlan.reuseState().etaContextSignature()),
                 compatiblePlan,
-                new HotStartAppliedReuse("hot-start-applied-reuse/v1", true, true, true, 3, 5, List.of()));
+                new HotStartAppliedReuse("hot-start-applied-reuse/v1", true, true, true, 3, 5, 12L, List.of("pair-graph"), List.of()));
 
         assertTrue(compatiblePlan.reuseEligible());
         assertTrue(compatibleState.pairClusterReused());
@@ -79,6 +79,7 @@ class HotStartManagerTest {
                 List.of(),
                 emptyMlMetadata,
                 emptyStrings,
+                List.of(),
                 emptyStrings);
     }
 

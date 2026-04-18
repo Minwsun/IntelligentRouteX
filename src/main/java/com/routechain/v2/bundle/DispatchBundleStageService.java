@@ -1,6 +1,7 @@
 package com.routechain.v2.bundle;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
+import com.routechain.v2.DispatchStageLatency;
 import com.routechain.v2.EtaContext;
 import com.routechain.v2.HotStartReuseSummary;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
@@ -66,13 +67,24 @@ public final class DispatchBundleStageService {
             if (reuseDegradeReasons.isEmpty()
                     && reuseInput.reuseState().bundleCandidates() != null
                     && reuseInput.reuseState().bundlePoolSummary() != null) {
+                long boundaryExpansionStartedAt = System.nanoTime();
+                List<BoundaryExpansion> reusedBoundaryExpansions = reuseInput.reuseState().boundaryExpansions();
+                BoundaryExpansionSummary reusedBoundaryExpansionSummary = reuseInput.reuseState().boundaryExpansionSummary();
+                long boundaryExpansionElapsedMs = elapsedMs(boundaryExpansionStartedAt);
+                long bundlePoolStartedAt = System.nanoTime();
+                List<BundleCandidate> reusedBundleCandidates = reuseInput.reuseState().bundleCandidates();
+                BundlePoolSummary reusedBundlePoolSummary = reuseInput.reuseState().bundlePoolSummary();
+                long bundlePoolElapsedMs = elapsedMs(bundlePoolStartedAt);
                 return new DispatchBundleStage(
                         "dispatch-bundle-stage/v1",
-                        reuseInput.reuseState().boundaryExpansions(),
-                        reuseInput.reuseState().boundaryExpansionSummary(),
-                        reuseInput.reuseState().bundleCandidates(),
-                        reuseInput.reuseState().bundlePoolSummary(),
+                        reusedBoundaryExpansions,
+                        reusedBoundaryExpansionSummary,
+                        reusedBundleCandidates,
+                        reusedBundlePoolSummary,
                         HotStartReuseSummary.reused(reuseInput.reuseState().bundleCandidates().size()),
+                        List.of(
+                                DispatchStageLatency.measured("boundary-expansion", boundaryExpansionElapsedMs, false),
+                                DispatchStageLatency.measured("bundle-pool", bundlePoolElapsedMs, true)),
                         reuseInput.reuseState().bundleMlStageMetadata(),
                         reuseInput.reuseState().bundleDegradeReasons());
             }
@@ -86,6 +98,7 @@ public final class DispatchBundleStageService {
                     freshStage.bundleCandidates(),
                     freshStage.bundlePoolSummary(),
                     HotStartReuseSummary.none().withDegradeReasons(reuseDegradeReasons),
+                    freshStage.stageLatencies(),
                     freshStage.mlStageMetadata(),
                     List.copyOf(degradeReasons.stream().distinct().toList()));
         }
@@ -93,6 +106,7 @@ public final class DispatchBundleStageService {
     }
 
     private DispatchBundleStage evaluateFresh(EtaContext etaContext, DispatchPairClusterStage pairClusterStage) {
+        long boundaryExpansionStartedAt = System.nanoTime();
         Map<String, List<BoundaryCandidate>> boundaryCandidates = boundaryCandidateSelector.select(
                 pairClusterStage.bufferedOrderWindow(),
                 pairClusterStage.microClusters(),
@@ -103,7 +117,9 @@ public final class DispatchBundleStageService {
                         boundaryCandidates.getOrDefault(cluster.clusterId(), List.of()),
                         etaContext))
                 .toList();
+        long boundaryExpansionElapsedMs = elapsedMs(boundaryExpansionStartedAt);
 
+        long bundlePoolStartedAt = System.nanoTime();
         List<String> degradeReasons = new ArrayList<>();
         BoundaryExpansionSummary boundaryExpansionSummary = summarizeBoundaryExpansions(boundaryExpansions, degradeReasons);
         BundleContext context = new BundleContext(
@@ -136,6 +152,7 @@ public final class DispatchBundleStageService {
         feasibleCandidates.forEach(candidate -> familyCounts.merge(candidate.family(), 1, Integer::sum));
         feasibleCandidates.forEach(candidate -> sourceCounts.merge(candidate.proposalSource(), 1, Integer::sum));
         List<BundleCandidate> retained = bundleDominancePruner.prune(feasibleCandidates);
+        long bundlePoolElapsedMs = elapsedMs(bundlePoolStartedAt);
         BundlePoolSummary bundlePoolSummary = new BundlePoolSummary(
                 "bundle-pool-summary/v1",
                 feasibleCandidates.size(),
@@ -151,6 +168,9 @@ public final class DispatchBundleStageService {
                 retained,
                 bundlePoolSummary,
                 HotStartReuseSummary.none(),
+                List.of(
+                        DispatchStageLatency.measured("boundary-expansion", boundaryExpansionElapsedMs, false),
+                        DispatchStageLatency.measured("bundle-pool", bundlePoolElapsedMs, false)),
                 greedRlMetadata.build().stream().toList(),
                 List.copyOf(degradeReasons));
     }
@@ -254,5 +274,9 @@ public final class DispatchBundleStageService {
                 acceptedCount,
                 rejectedCount,
                 List.copyOf(degradeReasons));
+    }
+
+    private long elapsedMs(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000L;
     }
 }

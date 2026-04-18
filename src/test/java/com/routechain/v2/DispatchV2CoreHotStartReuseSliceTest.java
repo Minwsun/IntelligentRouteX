@@ -21,6 +21,7 @@ class DispatchV2CoreHotStartReuseSliceTest {
         DispatchV2Result secondResult = harness.core().dispatch(copyWithTraceId(firstRequest, "trace-hot-start-second"));
 
         assertEquals(12, secondResult.decisionStages().size());
+        assertEquals(0L, firstResult.latencyBudgetSummary().estimatedHotStartSavedMs());
         assertEquals(firstResult.traceId(), secondResult.hotStartState().previousTraceId());
         assertTrue(secondResult.hotStartState().reuseEligible());
         assertTrue(secondResult.hotStartState().pairClusterReused());
@@ -28,6 +29,11 @@ class DispatchV2CoreHotStartReuseSliceTest {
         assertTrue(secondResult.hotStartState().routeProposalPoolReused());
         assertTrue(secondResult.hotStartState().reusedBundleCount() > 0);
         assertTrue(secondResult.hotStartState().reusedRouteProposalCount() > 0);
+        assertTrue(secondResult.hotStartState().estimatedSavedMs() >= 0L);
+        assertTrue(secondResult.hotStartState().reusedStageNames().contains("pair-graph"));
+        assertTrue(secondResult.hotStartState().reusedStageNames().contains("micro-cluster"));
+        assertTrue(secondResult.hotStartState().reusedStageNames().contains("bundle-pool"));
+        assertTrue(secondResult.hotStartState().reusedStageNames().contains("route-proposal-pool"));
     }
 
     @Test
@@ -56,6 +62,7 @@ class DispatchV2CoreHotStartReuseSliceTest {
         assertTrue(secondResult.hotStartState().routeProposalPoolReused());
         assertTrue(secondResult.hotStartState().reusedRouteProposalCount() > 0);
         assertTrue(secondResult.hotStartState().reusedRouteProposalCount() < firstResult.routeProposals().size());
+        assertTrue(secondResult.hotStartState().estimatedSavedMs() >= 0L);
         assertTrue(secondResult.hotStartState().degradeReasons().contains("hot-start-route-tuple-drift"));
     }
 

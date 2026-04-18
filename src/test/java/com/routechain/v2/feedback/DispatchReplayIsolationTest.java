@@ -30,12 +30,13 @@ class DispatchReplayIsolationTest {
         harness.dispatchReplayRecorder().record(replayOnlyRequest);
 
         ReplayRunResult replayRunResult = harness.dispatchReplayRunner().replayLatest();
-        DispatchV2Result secondProductionResult = harness.core().dispatch(originalRequest);
 
         assertEquals(replayOnlyRequest.traceId(), replayRunResult.replayRequestRecord().traceId());
         assertEquals(latestDecisionLogBeforeReplay, harness.decisionLogService().latest());
         assertEquals(latestSnapshotBeforeReplay, harness.snapshotService().loadLatest().snapshot());
         assertEquals(latestReuseStateBeforeReplay, harness.reuseStateService().loadLatest().reuseState());
+
+        DispatchV2Result secondProductionResult = harness.core().dispatch(originalRequest);
         assertEquals(firstProductionResult.traceId(), secondProductionResult.hotStartState().previousTraceId());
     }
 }

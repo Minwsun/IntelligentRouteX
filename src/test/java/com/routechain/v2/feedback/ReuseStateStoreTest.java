@@ -70,6 +70,7 @@ class ReuseStateStoreTest {
                 List.of(),
                 List.<MlStageMetadata>of(),
                 List.of(),
+                List.of(),
                 List.of());
     }
 }

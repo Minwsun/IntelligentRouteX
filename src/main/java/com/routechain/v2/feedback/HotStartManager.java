@@ -83,6 +83,8 @@ public final class HotStartManager {
                 appliedReuse != null && appliedReuse.routeProposalPoolReused(),
                 appliedReuse == null ? 0 : appliedReuse.reusedBundleCount(),
                 appliedReuse == null ? 0 : appliedReuse.reusedRouteProposalCount(),
+                appliedReuse == null ? 0L : appliedReuse.estimatedSavedMs(),
+                appliedReuse == null ? List.of() : appliedReuse.reusedStageNames(),
                 java.util.stream.Stream.of(
                                 reusePlan == null ? java.util.stream.Stream.<String>empty() : reusePlan.degradeReasons().stream(),
                                 appliedReuse == null ? java.util.stream.Stream.<String>empty() : appliedReuse.degradeReasons().stream())

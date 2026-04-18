@@ -11,6 +11,7 @@ import com.routechain.v2.integration.NoOpTomTomTrafficRefineClient;
 import com.routechain.v2.integration.TestForecastClient;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DecisionLogAssemblerForecastMetadataTest {
@@ -35,5 +36,7 @@ class DecisionLogAssemblerForecastMetadataTest {
 
         assertTrue(record.mlStageMetadata().stream().anyMatch(metadata -> metadata.stageName().equals("scenario-evaluation")
                 && metadata.sourceModel().equals("chronos-2")));
+        assertEquals(result.stageLatencies(), record.stageLatencies());
+        assertEquals(result.latencyBudgetSummary(), record.latencyBudgetSummary());
     }
 }

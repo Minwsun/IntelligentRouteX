@@ -2,6 +2,7 @@ package com.routechain.v2.feedback;
 
 import com.routechain.v2.MlStageMetadata;
 import com.routechain.v2.SchemaVersioned;
+import com.routechain.v2.DispatchStageLatency;
 import com.routechain.v2.bundle.BoundaryExpansion;
 import com.routechain.v2.bundle.BoundaryExpansionSummary;
 import com.routechain.v2.bundle.BundleCandidate;
@@ -42,5 +43,6 @@ public record DispatchRuntimeReuseState(
         List<RouteProposalTupleReuseEntry> routeProposalTuples,
         List<MlStageMetadata> routeProposalMlStageMetadata,
         List<String> routeProposalDegradeReasons,
+        List<DispatchStageLatency> stageLatencies,
         List<String> degradeReasons) implements SchemaVersioned {
 }

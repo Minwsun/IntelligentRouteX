@@ -11,5 +11,7 @@ public record HotStartAppliedReuse(
         boolean routeProposalPoolReused,
         int reusedBundleCount,
         int reusedRouteProposalCount,
+        long estimatedSavedMs,
+        List<String> reusedStageNames,
         List<String> degradeReasons) implements SchemaVersioned {
 }

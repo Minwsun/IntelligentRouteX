@@ -15,6 +15,8 @@ public record HotStartState(
         boolean routeProposalPoolReused,
         int reusedBundleCount,
         int reusedRouteProposalCount,
+        long estimatedSavedMs,
+        List<String> reusedStageNames,
         List<String> degradeReasons) implements SchemaVersioned {
 
     public static HotStartState empty() {
@@ -31,6 +33,8 @@ public record HotStartState(
                 false,
                 0,
                 0,
+                0L,
+                List.of(),
                 List.of());
     }
 }

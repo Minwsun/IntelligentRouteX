@@ -4,6 +4,8 @@ import com.routechain.v2.feedback.FeedbackStorageMode;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @ConfigurationProperties(prefix = "routechain.dispatch-v2")
 public class RouteChainDispatchV2Properties {
@@ -31,6 +33,7 @@ public class RouteChainDispatchV2Properties {
     private final Traffic traffic = new Traffic();
     private final Feedback feedback = new Feedback();
     private final WarmHotStart warmHotStart = new WarmHotStart();
+    private final Performance performance = new Performance();
 
     public static RouteChainDispatchV2Properties defaults() {
         return new RouteChainDispatchV2Properties();
@@ -166,6 +169,10 @@ public class RouteChainDispatchV2Properties {
 
     public WarmHotStart getWarmHotStart() {
         return warmHotStart;
+    }
+
+    public Performance getPerformance() {
+        return performance;
     }
 
     public static final class Buffer {
@@ -1091,6 +1098,62 @@ public class RouteChainDispatchV2Properties {
 
         public void setLoadLatestSnapshotOnBoot(boolean loadLatestSnapshotOnBoot) {
             this.loadLatestSnapshotOnBoot = loadLatestSnapshotOnBoot;
+        }
+    }
+
+    public static final class Performance {
+        private boolean telemetryEnabled = true;
+        private boolean budgetEnforcementEnabled = false;
+        private Duration totalDispatchBudget = Duration.ofMillis(1200);
+        private Map<String, Duration> stageBudgets = defaultStageBudgets();
+
+        public boolean isTelemetryEnabled() {
+            return telemetryEnabled;
+        }
+
+        public void setTelemetryEnabled(boolean telemetryEnabled) {
+            this.telemetryEnabled = telemetryEnabled;
+        }
+
+        public boolean isBudgetEnforcementEnabled() {
+            return budgetEnforcementEnabled;
+        }
+
+        public void setBudgetEnforcementEnabled(boolean budgetEnforcementEnabled) {
+            this.budgetEnforcementEnabled = budgetEnforcementEnabled;
+        }
+
+        public Duration getTotalDispatchBudget() {
+            return totalDispatchBudget;
+        }
+
+        public void setTotalDispatchBudget(Duration totalDispatchBudget) {
+            this.totalDispatchBudget = totalDispatchBudget;
+        }
+
+        public Map<String, Duration> getStageBudgets() {
+            return stageBudgets;
+        }
+
+        public void setStageBudgets(Map<String, Duration> stageBudgets) {
+            this.stageBudgets = stageBudgets == null ? defaultStageBudgets() : new LinkedHashMap<>(stageBudgets);
+        }
+
+        private static Map<String, Duration> defaultStageBudgets() {
+            LinkedHashMap<String, Duration> budgets = new LinkedHashMap<>();
+            budgets.put("eta/context", Duration.ofMillis(300));
+            budgets.put("order-buffer", Duration.ofMillis(15));
+            budgets.put("pair-graph", Duration.ofMillis(180));
+            budgets.put("micro-cluster", Duration.ofMillis(25));
+            budgets.put("boundary-expansion", Duration.ofMillis(40));
+            budgets.put("bundle-pool", Duration.ofMillis(240));
+            budgets.put("pickup-anchor", Duration.ofMillis(20));
+            budgets.put("driver-shortlist/rerank", Duration.ofMillis(180));
+            budgets.put("route-proposal-pool", Duration.ofMillis(320));
+            budgets.put("scenario-evaluation", Duration.ofMillis(220));
+            budgets.put("global-selector", Duration.ofMillis(180));
+            budgets.put("dispatch-executor", Duration.ofMillis(40));
+            return budgets;
         }
     }
 }

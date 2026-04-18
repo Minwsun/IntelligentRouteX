@@ -1,6 +1,7 @@
 package com.routechain.v2.selector;
 
 import com.routechain.v2.DispatchV2Request;
+import com.routechain.v2.DispatchStageLatency;
 import com.routechain.v2.EtaContext;
 import com.routechain.v2.bundle.DispatchBundleStage;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
@@ -32,6 +33,7 @@ public final class DispatchSelectorService {
                                          DispatchRouteCandidateStage routeCandidateStage,
                                          DispatchRouteProposalStage routeProposalStage,
                                          DispatchScenarioStage scenarioStage) {
+        long selectorStartedAt = System.nanoTime();
         DispatchCandidateContext context = new DispatchCandidateContext(
                 pairClusterStage.bufferedOrderWindow().orders(),
                 request.availableDrivers(),
@@ -69,6 +71,7 @@ public final class DispatchSelectorService {
                 conflictGraph,
                 selectionResult,
                 summarize(selectorCandidates, conflictGraph, selectionResult, degradeReasons),
+                List.of(DispatchStageLatency.measured("global-selector", elapsedMs(selectorStartedAt), false)),
                 degradeReasons);
     }
 
@@ -85,5 +88,9 @@ public final class DispatchSelectorService {
                 selectionResult.selectedCount(),
                 selectionResult.solverMode(),
                 degradeReasons);
+    }
+
+    private long elapsedMs(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000L;
     }
 }

@@ -105,6 +105,7 @@ final class BundleTestFixtures {
                 new MicroClusterSummary("micro-cluster-summary/v1", 2, 2, 1, List.of()),
                 HotStartReuseSummary.none(),
                 List.of(),
+                List.of(),
                 List.of());
     }
 

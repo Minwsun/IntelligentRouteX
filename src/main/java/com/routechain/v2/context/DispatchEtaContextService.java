@@ -3,6 +3,7 @@ package com.routechain.v2.context;
 import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.domain.Driver;
 import com.routechain.domain.Order;
+import com.routechain.v2.DispatchStageLatency;
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
 import com.routechain.v2.LiveStageMetadata;
@@ -20,6 +21,7 @@ public final class DispatchEtaContextService {
     }
 
     public DispatchEtaContextStage evaluate(DispatchV2Request request) {
+        long etaStartedAt = System.nanoTime();
         List<String> degradeReasons = new ArrayList<>();
         EtaEstimate estimate = sampleAndEstimate(request, degradeReasons);
         if (estimate == null) {
@@ -49,6 +51,7 @@ public final class DispatchEtaContextService {
                             0.0,
                             List.copyOf(degradeReasons)),
                     freshnessMetadata,
+                    List.of(DispatchStageLatency.measured("eta/context", elapsedMs(etaStartedAt), false)),
                     List.of(),
                     LiveStageMetadata.emptyList(),
                     List.copyOf(degradeReasons));
@@ -107,6 +110,7 @@ public final class DispatchEtaContextService {
                 etaContext,
                 etaStageTrace,
                 freshnessMetadata,
+                List.of(DispatchStageLatency.measured("eta/context", elapsedMs(etaStartedAt), false)),
                 estimate.mlStageMetadata(),
                 estimate.liveStageMetadata(),
                 estimate.degradeReasons());
@@ -145,5 +149,9 @@ public final class DispatchEtaContextService {
         }
         degradeReasons.add("no-sampleable-eta-leg");
         return null;
+    }
+
+    private long elapsedMs(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000L;
     }
 }

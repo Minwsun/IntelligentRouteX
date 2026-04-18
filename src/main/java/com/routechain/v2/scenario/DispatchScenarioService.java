@@ -1,6 +1,7 @@
 package com.routechain.v2.scenario;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
+import com.routechain.v2.DispatchStageLatency;
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
 import com.routechain.v2.LiveStageMetadata;
@@ -60,6 +61,7 @@ public final class DispatchScenarioService {
                                           DispatchRouteCandidateStage routeCandidateStage,
                                           DispatchBundleStage bundleStage,
                                           DispatchPairClusterStage pairClusterStage) {
+        long scenarioStartedAt = System.nanoTime();
         DispatchCandidateContext context = new DispatchCandidateContext(
                 pairClusterStage.bufferedOrderWindow().orders(),
                 request.availableDrivers(),
@@ -112,12 +114,14 @@ public final class DispatchScenarioService {
                 .map(proposalId -> robustUtilityAggregator.aggregate(proposalId, evaluations))
                 .toList();
         List<String> distinctDegradeReasons = degradeReasons.stream().distinct().toList();
+        long scenarioElapsedMs = elapsedMs(scenarioStartedAt);
         return new DispatchScenarioStage(
                 "dispatch-scenario-stage/v1",
                 List.copyOf(evaluations),
                 robustUtilities,
                 summarize(evaluations, robustUtilities, distinctDegradeReasons),
                 forecastScenarioContext.freshnessMetadata(),
+                List.of(DispatchStageLatency.measured("scenario-evaluation", scenarioElapsedMs, false)),
                 forecastScenarioContext.mlStageMetadata(),
                 distinctDegradeReasons);
     }
@@ -206,5 +210,9 @@ public final class DispatchScenarioService {
 
     private String key(String bundleId, String anchorOrderId, String driverId) {
         return bundleId + "|" + anchorOrderId + "|" + driverId;
+    }
+
+    private long elapsedMs(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000L;
     }
 }

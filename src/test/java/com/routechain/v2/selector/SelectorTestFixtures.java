@@ -110,6 +110,7 @@ final class SelectorTestFixtures {
                         List.of()),
                 HotStartReuseSummary.none(),
                 List.of(),
+                List.of(),
                 List.of());
     }
 
@@ -120,6 +121,7 @@ final class SelectorTestFixtures {
                 robustUtilities,
                 ScenarioEvaluationSummary.empty(),
                 FreshnessMetadata.empty(),
+                List.of(),
                 List.of(),
                 List.of());
     }

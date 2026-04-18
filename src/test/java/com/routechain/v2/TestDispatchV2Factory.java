@@ -301,6 +301,7 @@ public final class TestDispatchV2Factory {
                 reuseStateService,
                 hotStartManager);
         DispatchV2Core core = configuration.dispatchV2Core(
+                properties,
                 dispatchEtaContextService,
                 dispatchPairClusterService,
                 dispatchBundleStageService,

@@ -23,6 +23,8 @@ public final class DecisionLogAssembler {
                 result.scenarioEvaluationSummary(),
                 result.globalSelectorSummary(),
                 result.dispatchExecutionSummary(),
+                result.stageLatencies(),
+                result.latencyBudgetSummary(),
                 result.mlStageMetadata(),
                 result.liveStageMetadata(),
                 result.globalSelectionResult().selectedProposals().stream()

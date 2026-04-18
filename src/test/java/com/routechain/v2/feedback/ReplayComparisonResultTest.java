@@ -46,6 +46,8 @@ class ReplayComparisonResultTest {
                 result.scenarioEvaluationSummary(),
                 result.globalSelectorSummary(),
                 result.dispatchExecutionSummary(),
+                result.stageLatencies(),
+                result.latencyBudgetSummary(),
                 result.mlStageMetadata(),
                 result.liveStageMetadata(),
                 List.of("other-proposal"),

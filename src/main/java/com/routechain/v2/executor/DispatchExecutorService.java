@@ -1,6 +1,7 @@
 package com.routechain.v2.executor;
 
 import com.routechain.v2.DispatchV2Request;
+import com.routechain.v2.DispatchStageLatency;
 import com.routechain.v2.bundle.DispatchBundleStage;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.route.DispatchCandidateContext;
@@ -23,6 +24,7 @@ public final class DispatchExecutorService {
                                           DispatchRouteCandidateStage routeCandidateStage,
                                           DispatchRouteProposalStage routeProposalStage,
                                           DispatchSelectorStage selectorStage) {
+        long executorStartedAt = System.nanoTime();
         DispatchCandidateContext context = new DispatchCandidateContext(
                 pairClusterStage.bufferedOrderWindow().orders(),
                 request.availableDrivers(),
@@ -39,6 +41,7 @@ public final class DispatchExecutorService {
                 "dispatch-executor-stage/v2",
                 executionResult.assignments(),
                 summarize(executionResult, executionResult.degradeReasons()),
+                List.of(DispatchStageLatency.measured("dispatch-executor", elapsedMs(executorStartedAt), false)),
                 executionResult.degradeReasons());
     }
 
@@ -54,5 +57,9 @@ public final class DispatchExecutorService {
                 skippedProposalCount,
                 executionResult.resolvedButRejectedCount(),
                 degradeReasons);
+    }
+
+    private long elapsedMs(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000L;
     }
 }

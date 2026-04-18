@@ -1,27 +1,50 @@
 package com.routechain.v2;
 
+import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.v2.bundle.DispatchBundleStage;
 import com.routechain.v2.bundle.DispatchBundleStageService;
+import com.routechain.v2.cluster.DispatchPairClusterService;
+import com.routechain.v2.cluster.DispatchPairClusterStage;
+import com.routechain.v2.context.DispatchEtaContextService;
+import com.routechain.v2.context.DispatchEtaContextStage;
+import com.routechain.v2.executor.DispatchExecutorService;
+import com.routechain.v2.executor.DispatchExecutorStage;
+import com.routechain.v2.feedback.DispatchRuntimeReuseState;
+import com.routechain.v2.feedback.HotStartAppliedReuse;
+import com.routechain.v2.feedback.HotStartReusePlan;
+import com.routechain.v2.feedback.PostDispatchHardeningService;
+import com.routechain.v2.feedback.WarmStartManager;
 import com.routechain.v2.route.DispatchRouteCandidateService;
 import com.routechain.v2.route.DispatchRouteCandidateStage;
 import com.routechain.v2.route.DispatchRouteProposalService;
 import com.routechain.v2.route.DispatchRouteProposalStage;
 import com.routechain.v2.scenario.DispatchScenarioService;
 import com.routechain.v2.scenario.DispatchScenarioStage;
-import com.routechain.v2.executor.DispatchExecutorService;
-import com.routechain.v2.executor.DispatchExecutorStage;
 import com.routechain.v2.selector.DispatchSelectorService;
 import com.routechain.v2.selector.DispatchSelectorStage;
-import com.routechain.v2.cluster.DispatchPairClusterService;
-import com.routechain.v2.cluster.DispatchPairClusterStage;
-import com.routechain.v2.context.DispatchEtaContextService;
-import com.routechain.v2.context.DispatchEtaContextStage;
-import com.routechain.v2.feedback.HotStartAppliedReuse;
-import com.routechain.v2.feedback.HotStartReusePlan;
-import com.routechain.v2.feedback.PostDispatchHardeningService;
-import com.routechain.v2.feedback.WarmStartManager;
+
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 public final class DispatchV2Core {
+    private static final List<String> DECISION_STAGES = List.of(
+            "eta/context",
+            "order-buffer",
+            "pair-graph",
+            "micro-cluster",
+            "boundary-expansion",
+            "bundle-pool",
+            "pickup-anchor",
+            "driver-shortlist/rerank",
+            "route-proposal-pool",
+            "scenario-evaluation",
+            "global-selector",
+            "dispatch-executor");
+
+    private final RouteChainDispatchV2Properties properties;
     private final DispatchEtaContextService dispatchEtaContextService;
     private final DispatchPairClusterService dispatchPairClusterService;
     private final DispatchBundleStageService dispatchBundleStageService;
@@ -33,7 +56,8 @@ public final class DispatchV2Core {
     private final WarmStartManager warmStartManager;
     private final PostDispatchHardeningService postDispatchHardeningService;
 
-    public DispatchV2Core(DispatchEtaContextService dispatchEtaContextService,
+    public DispatchV2Core(RouteChainDispatchV2Properties properties,
+                          DispatchEtaContextService dispatchEtaContextService,
                           DispatchPairClusterService dispatchPairClusterService,
                           DispatchBundleStageService dispatchBundleStageService,
                           DispatchRouteCandidateService dispatchRouteCandidateService,
@@ -43,6 +67,7 @@ public final class DispatchV2Core {
                           DispatchExecutorService dispatchExecutorService,
                           WarmStartManager warmStartManager,
                           PostDispatchHardeningService postDispatchHardeningService) {
+        this.properties = properties;
         this.dispatchEtaContextService = dispatchEtaContextService;
         this.dispatchPairClusterService = dispatchPairClusterService;
         this.dispatchBundleStageService = dispatchBundleStageService;
@@ -57,6 +82,11 @@ public final class DispatchV2Core {
 
     public DispatchV2Result dispatch(DispatchV2Request request) {
         DispatchPipelineExecution execution = executePipeline(request, true);
+        DispatchLatencyBudgetSummary latencyBudgetSummary = execution.result().latencyBudgetSummary();
+        List<String> reusedStageNames = execution.result().stageLatencies().stream()
+                .filter(DispatchStageLatency::hotStartReused)
+                .map(DispatchStageLatency::stageName)
+                .toList();
         HotStartAppliedReuse appliedReuse = new HotStartAppliedReuse(
                 "hot-start-applied-reuse/v1",
                 execution.pairClusterStage().hotStartReuseSummary().reused(),
@@ -64,6 +94,8 @@ public final class DispatchV2Core {
                 execution.routeProposalStage().hotStartReuseSummary().reused(),
                 execution.bundleStage().hotStartReuseSummary().reusedCount(),
                 execution.routeProposalStage().hotStartReuseSummary().reusedCount(),
+                latencyBudgetSummary.estimatedHotStartSavedMs(),
+                reusedStageNames,
                 java.util.stream.Stream.of(
                                 execution.pairClusterStage().hotStartReuseSummary().degradeReasons().stream(),
                                 execution.bundleStage().hotStartReuseSummary().degradeReasons().stream(),
@@ -83,6 +115,7 @@ public final class DispatchV2Core {
     }
 
     private DispatchPipelineExecution executePipeline(DispatchV2Request request, boolean allowHotStartReuse) {
+        long dispatchStartedAt = System.nanoTime();
         DispatchEtaContextStage etaStage = dispatchEtaContextService.evaluate(request);
         HotStartReusePlan reusePlan = allowHotStartReuse
                 ? postDispatchHardeningService.planHotStartReuse(etaStage.etaContext())
@@ -95,7 +128,11 @@ public final class DispatchV2Core {
                 etaStage.etaContext(),
                 pairClusterStage,
                 reusePlan.bundleReuseInput());
-        DispatchRouteCandidateStage routeCandidateStage = dispatchRouteCandidateService.evaluate(request, etaStage.etaContext(), pairClusterStage, bundleStage);
+        DispatchRouteCandidateStage routeCandidateStage = dispatchRouteCandidateService.evaluate(
+                request,
+                etaStage.etaContext(),
+                pairClusterStage,
+                bundleStage);
         DispatchRouteProposalStage routeProposalStage = dispatchRouteProposalService.evaluate(
                 request,
                 etaStage.etaContext(),
@@ -127,7 +164,22 @@ public final class DispatchV2Core {
                 routeCandidateStage,
                 routeProposalStage,
                 selectorStage);
-        java.util.List<String> degradeReasons = java.util.stream.Stream.concat(
+        long totalDispatchLatencyMs = elapsedMs(dispatchStartedAt);
+        List<DispatchStageLatency> stageLatencies = finalizeStageLatencies(
+                mergeStageLatencies(
+                        etaStage.stageLatencies(),
+                        pairClusterStage.stageLatencies(),
+                        bundleStage.stageLatencies(),
+                        routeCandidateStage.stageLatencies(),
+                        routeProposalStage.stageLatencies(),
+                        scenarioStage.stageLatencies(),
+                        selectorStage.stageLatencies(),
+                        executorStage.stageLatencies()),
+                reusePlan,
+                totalDispatchLatencyMs);
+        DispatchLatencyBudgetSummary latencyBudgetSummary = latencyBudgetSummary(stageLatencies, totalDispatchLatencyMs);
+        List<String> budgetDegradeReasons = budgetDegradeReasons(stageLatencies, latencyBudgetSummary);
+        List<String> degradeReasons = java.util.stream.Stream.concat(
                         java.util.stream.Stream.concat(
                                 java.util.stream.Stream.concat(
                                         java.util.stream.Stream.concat(
@@ -141,10 +193,12 @@ public final class DispatchV2Core {
                                 scenarioStage.degradeReasons().stream()),
                         java.util.stream.Stream.concat(
                                 selectorStage.degradeReasons().stream(),
-                                executorStage.degradeReasons().stream()))
+                                java.util.stream.Stream.concat(
+                                        executorStage.degradeReasons().stream(),
+                                        budgetDegradeReasons.stream())))
                 .distinct()
                 .toList();
-        java.util.List<MlStageMetadata> mlStageMetadata = java.util.stream.Stream.of(
+        List<MlStageMetadata> mlStageMetadata = java.util.stream.Stream.of(
                         etaStage.mlStageMetadata().stream(),
                         pairClusterStage.mlStageMetadata().stream(),
                         bundleStage.mlStageMetadata().stream(),
@@ -154,7 +208,7 @@ public final class DispatchV2Core {
                 .flatMap(stream -> stream)
                 .distinct()
                 .toList();
-        java.util.List<LiveStageMetadata> liveStageMetadata = java.util.stream.Stream.of(
+        List<LiveStageMetadata> liveStageMetadata = java.util.stream.Stream.of(
                         etaStage.liveStageMetadata().stream())
                 .flatMap(stream -> stream)
                 .distinct()
@@ -164,7 +218,7 @@ public final class DispatchV2Core {
                 request.traceId(),
                 false,
                 null,
-                java.util.List.of("eta/context", "order-buffer", "pair-graph", "micro-cluster", "boundary-expansion", "bundle-pool", "pickup-anchor", "driver-shortlist/rerank", "route-proposal-pool", "scenario-evaluation", "global-selector", "dispatch-executor"),
+                DECISION_STAGES,
                 etaStage.etaContext(),
                 etaStage.etaStageTrace(),
                 scenarioStage.freshnessMetadata(),
@@ -185,6 +239,8 @@ public final class DispatchV2Core {
                 scenarioStage.scenarioEvaluations(),
                 scenarioStage.robustUtilities(),
                 scenarioStage.scenarioEvaluationSummary(),
+                stageLatencies,
+                latencyBudgetSummary,
                 mlStageMetadata,
                 liveStageMetadata,
                 selectorStage.selectorCandidates(),
@@ -197,22 +253,24 @@ public final class DispatchV2Core {
                 new HotStartState(
                         "hot-start-state/v2",
                         reusePlan.previousTraceId(),
-                        reusePlan.reuseState() == null ? java.util.List.of() : reusePlan.reuseState().clusterSignatures(),
-                        reusePlan.reuseState() == null ? java.util.List.of() : reusePlan.reuseState().bundleSignatures(),
-                        reusePlan.reuseState() == null ? java.util.List.of() : reusePlan.reuseState().routeProposals().stream()
+                        reusePlan.reuseState() == null ? List.of() : reusePlan.reuseState().clusterSignatures(),
+                        reusePlan.reuseState() == null ? List.of() : reusePlan.reuseState().bundleSignatures(),
+                        reusePlan.reuseState() == null ? List.of() : reusePlan.reuseState().routeProposals().stream()
                                 .map(proposal -> proposal.proposalId()
                                         + "|" + proposal.bundleId()
                                         + "|" + proposal.driverId()
                                         + "|" + String.join(",", proposal.stopOrder()))
                                 .sorted()
                                 .toList(),
-                        java.util.List.of(),
+                        List.of(),
                         reusePlan.reuseEligible(),
                         false,
                         false,
                         false,
                         0,
                         0,
+                        latencyBudgetSummary.estimatedHotStartSavedMs(),
+                        stageLatencies.stream().filter(DispatchStageLatency::hotStartReused).map(DispatchStageLatency::stageName).toList(),
                         reusePlan.degradeReasons()),
                 degradeReasons);
         return new DispatchPipelineExecution(
@@ -224,5 +282,106 @@ public final class DispatchV2Core {
                 routeCandidateStage,
                 routeProposalStage,
                 scenarioStage);
+    }
+
+    private List<DispatchStageLatency> mergeStageLatencies(List<DispatchStageLatency>... stageLatencyLists) {
+        Map<String, DispatchStageLatency> byStage = new LinkedHashMap<>();
+        for (List<DispatchStageLatency> stageLatencyList : stageLatencyLists) {
+            if (stageLatencyList == null) {
+                continue;
+            }
+            for (DispatchStageLatency stageLatency : stageLatencyList) {
+                byStage.put(stageLatency.stageName(), stageLatency);
+            }
+        }
+        List<DispatchStageLatency> merged = new ArrayList<>();
+        for (String stageName : DECISION_STAGES) {
+            DispatchStageLatency stageLatency = byStage.get(stageName);
+            if (stageLatency != null) {
+                merged.add(stageLatency);
+            }
+        }
+        return List.copyOf(merged);
+    }
+
+    private List<DispatchStageLatency> finalizeStageLatencies(List<DispatchStageLatency> rawStageLatencies,
+                                                              HotStartReusePlan reusePlan,
+                                                              long totalDispatchLatencyMs) {
+        if (!properties.getPerformance().isTelemetryEnabled()) {
+            return List.of();
+        }
+        Map<String, DispatchStageLatency> previousByStage = previousStageLatencies(reusePlan.reuseState());
+        List<DispatchStageLatency> finalized = new ArrayList<>();
+        for (DispatchStageLatency stageLatency : rawStageLatencies) {
+            Duration stageBudget = properties.getPerformance().getStageBudgets().get(stageLatency.stageName());
+            long budgetMs = stageBudget == null ? 0L : Math.max(0L, stageBudget.toMillis());
+            boolean budgetBreached = budgetMs > 0L && stageLatency.elapsedMs() > budgetMs;
+            long estimatedSavedMs = 0L;
+            if (stageLatency.hotStartReused()) {
+                DispatchStageLatency previousStageLatency = previousByStage.get(stageLatency.stageName());
+                if (previousStageLatency != null) {
+                    estimatedSavedMs = Math.max(0L, previousStageLatency.elapsedMs() - stageLatency.elapsedMs());
+                }
+            }
+            finalized.add(stageLatency
+                    .withBudget(budgetMs, budgetBreached)
+                    .withEstimatedSavedMs(estimatedSavedMs));
+        }
+        return List.copyOf(finalized);
+    }
+
+    private Map<String, DispatchStageLatency> previousStageLatencies(DispatchRuntimeReuseState reuseState) {
+        if (reuseState == null || reuseState.stageLatencies() == null) {
+            return Map.of();
+        }
+        Map<String, DispatchStageLatency> byStage = new LinkedHashMap<>();
+        for (DispatchStageLatency stageLatency : reuseState.stageLatencies()) {
+            byStage.put(stageLatency.stageName(), stageLatency);
+        }
+        return byStage;
+    }
+
+    private DispatchLatencyBudgetSummary latencyBudgetSummary(List<DispatchStageLatency> stageLatencies,
+                                                              long totalDispatchLatencyMs) {
+        if (!properties.getPerformance().isTelemetryEnabled()) {
+            return DispatchLatencyBudgetSummary.empty();
+        }
+        long totalBudgetMs = Math.max(0L, properties.getPerformance().getTotalDispatchBudget().toMillis());
+        boolean totalBudgetBreached = totalBudgetMs > 0L && totalDispatchLatencyMs > totalBudgetMs;
+        List<String> breachedStageNames = stageLatencies.stream()
+                .filter(DispatchStageLatency::budgetBreached)
+                .map(DispatchStageLatency::stageName)
+                .toList();
+        long estimatedHotStartSavedMs = stageLatencies.stream()
+                .mapToLong(DispatchStageLatency::estimatedSavedMs)
+                .sum();
+        return new DispatchLatencyBudgetSummary(
+                "dispatch-latency-budget-summary/v1",
+                totalDispatchLatencyMs,
+                totalBudgetMs,
+                totalBudgetBreached,
+                breachedStageNames,
+                estimatedHotStartSavedMs);
+    }
+
+    private List<String> budgetDegradeReasons(List<DispatchStageLatency> stageLatencies,
+                                              DispatchLatencyBudgetSummary latencyBudgetSummary) {
+        if (!properties.getPerformance().isBudgetEnforcementEnabled()) {
+            return List.of();
+        }
+        List<String> reasons = new ArrayList<>();
+        for (DispatchStageLatency stageLatency : stageLatencies) {
+            if (stageLatency.budgetBreached()) {
+                reasons.add("dispatch-stage-budget-breached:" + stageLatency.stageName());
+            }
+        }
+        if (latencyBudgetSummary.totalBudgetBreached()) {
+            reasons.add("dispatch-total-budget-breached");
+        }
+        return List.copyOf(reasons);
+    }
+
+    private long elapsedMs(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000L;
     }
 }

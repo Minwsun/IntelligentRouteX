@@ -2,6 +2,7 @@ package com.routechain.v2.route;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.domain.WeatherProfile;
+import com.routechain.v2.DispatchStageLatency;
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
 import com.routechain.v2.HotStartReuseSummary;
@@ -64,6 +65,7 @@ public final class DispatchRouteProposalService {
                                                DispatchBundleStage bundleStage,
                                                DispatchRouteCandidateStage routeCandidateStage,
                                                RouteProposalReuseInput reuseInput) {
+        long routeProposalStartedAt = System.nanoTime();
         DispatchCandidateContext context = new DispatchCandidateContext(
                 pairClusterStage.bufferedOrderWindow().orders(),
                 request.availableDrivers(),
@@ -111,6 +113,7 @@ public final class DispatchRouteProposalService {
                 .flatMap(stream -> stream)
                 .distinct()
                 .toList();
+        long routeProposalElapsedMs = elapsedMs(routeProposalStartedAt);
         return new DispatchRouteProposalStage(
                 "dispatch-route-proposal-stage/v1",
                 routeProposals,
@@ -120,6 +123,7 @@ public final class DispatchRouteProposalService {
                         !reusePreparation.reusedCandidates().isEmpty(),
                         reusePreparation.reusedCandidates().size(),
                         reusePreparation.degradeReasons()),
+                List.of(DispatchStageLatency.measured("route-proposal-pool", routeProposalElapsedMs, !reusePreparation.reusedCandidates().isEmpty())),
                 mlStageMetadata,
                 degradeReasons);
     }
@@ -352,5 +356,9 @@ public final class DispatchRouteProposalService {
                 retained.size(),
                 sourceCounts,
                 List.copyOf(degradeReasons));
+    }
+
+    private long elapsedMs(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000L;
     }
 }

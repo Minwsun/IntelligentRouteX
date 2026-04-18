@@ -88,5 +88,20 @@ class RouteChainDispatchV2PropertiesTest {
         assertEquals("build/dispatch-v2-feedback", properties.getFeedback().getBaseDir());
         assertEquals(20, properties.getFeedback().getRetention().getMaxFiles());
         assertTrue(properties.getWarmHotStart().isLoadLatestSnapshotOnBoot());
+        assertTrue(properties.getPerformance().isTelemetryEnabled());
+        assertFalse(properties.getPerformance().isBudgetEnforcementEnabled());
+        assertEquals(Duration.ofMillis(1200), properties.getPerformance().getTotalDispatchBudget());
+        assertEquals(Duration.ofMillis(300), properties.getPerformance().getStageBudgets().get("eta/context"));
+        assertEquals(Duration.ofMillis(15), properties.getPerformance().getStageBudgets().get("order-buffer"));
+        assertEquals(Duration.ofMillis(180), properties.getPerformance().getStageBudgets().get("pair-graph"));
+        assertEquals(Duration.ofMillis(25), properties.getPerformance().getStageBudgets().get("micro-cluster"));
+        assertEquals(Duration.ofMillis(40), properties.getPerformance().getStageBudgets().get("boundary-expansion"));
+        assertEquals(Duration.ofMillis(240), properties.getPerformance().getStageBudgets().get("bundle-pool"));
+        assertEquals(Duration.ofMillis(20), properties.getPerformance().getStageBudgets().get("pickup-anchor"));
+        assertEquals(Duration.ofMillis(180), properties.getPerformance().getStageBudgets().get("driver-shortlist/rerank"));
+        assertEquals(Duration.ofMillis(320), properties.getPerformance().getStageBudgets().get("route-proposal-pool"));
+        assertEquals(Duration.ofMillis(220), properties.getPerformance().getStageBudgets().get("scenario-evaluation"));
+        assertEquals(Duration.ofMillis(180), properties.getPerformance().getStageBudgets().get("global-selector"));
+        assertEquals(Duration.ofMillis(40), properties.getPerformance().getStageBudgets().get("dispatch-executor"));
     }
 }

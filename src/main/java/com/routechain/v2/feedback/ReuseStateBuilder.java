@@ -68,6 +68,7 @@ public final class ReuseStateBuilder {
                 routeProposalTuples,
                 execution.routeProposalStage().mlStageMetadata(),
                 execution.routeProposalStage().degradeReasons(),
+                result.stageLatencies(),
                 result.degradeReasons());
     }
 

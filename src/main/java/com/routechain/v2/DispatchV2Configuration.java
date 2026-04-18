@@ -647,7 +647,8 @@ public class DispatchV2Configuration {
     }
 
     @Bean
-    DispatchV2Core dispatchV2Core(DispatchEtaContextService dispatchEtaContextService,
+    DispatchV2Core dispatchV2Core(RouteChainDispatchV2Properties properties,
+                                  DispatchEtaContextService dispatchEtaContextService,
                                   DispatchPairClusterService dispatchPairClusterService,
                                   DispatchBundleStageService dispatchBundleStageService,
                                   DispatchRouteCandidateService dispatchRouteCandidateService,
@@ -658,6 +659,7 @@ public class DispatchV2Configuration {
                                   WarmStartManager warmStartManager,
                                   PostDispatchHardeningService postDispatchHardeningService) {
         return new DispatchV2Core(
+                properties,
                 dispatchEtaContextService,
                 dispatchPairClusterService,
                 dispatchBundleStageService,
