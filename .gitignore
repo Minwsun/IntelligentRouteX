@@ -7,3 +7,4 @@ __pycache__/
 .venv/
 .pytest_cache/
 services/models/materialized/chronos-2/
+services/models/materialized/greedrl/

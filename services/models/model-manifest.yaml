@@ -1,13 +1,25 @@
 schemaVersion: model-manifest/v2
 workers:
   - worker_name: ml-greedrl-worker
-    model_name: greedrl
-    model_version: 2026.04.17-v1
-    artifact_digest: sha256:5711fb82a853ac2771f86ba476dac273f51bb95d7f466ac00f628afb4cd7c236
+    model_name: greedrl-local
+    model_version: 2026.04.18-v2
+    artifact_digest: sha256:940f6540dfd5d32a3ad72de0f76b2c23f8adb9fac576388edda1e1cc7393fc0f
     rollback_artifact_digest: sha256:pending-rollback
     runtime_image: ghcr.io/minwsun/intelligentroutex/ml-greedrl-worker:bootstrap
     compatibility_contract_version: dispatch-v2-ml/v1
     min_supported_java_contract_version: dispatch-v2-java/v1
+    local_model_root: materialized/greedrl
+    local_artifact_path: materialized/greedrl/model/greedrl-runtime-manifest.json
+    materialization_mode: LOCAL_PACKAGE_PROMOTION
+    ready_requires_local_load: true
+    offline_boot_supported: true
+    loaded_model_fingerprint: sha256:3b4a1c0c0fbb9bc84bb5df184bec7b6bd1d43254d16327904fa595e72544a1aa
+    source_repository: https://huggingface.co/Cainiao-AI/GreedRL
+    source_ref: 2d5d3bde195dbb5f602908fe42170ffd3ee25c75
+    source_package_requirement: greedrl-community-edition
+    source_python_requirement: ==3.8.*
+    source_build_command: python setup.py build
+    source_test_command: python -c "import greedrl; import greedrl_c"
     startup_warmup_request:
       endpoint: /bundle/propose
       payload:

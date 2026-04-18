@@ -55,6 +55,10 @@ public record WorkerManifest(
             String sourceModelRevision,
             @JsonProperty("source_package_requirement")
             String sourcePackageRequirement,
+            @JsonProperty("source_python_requirement")
+            String sourcePythonRequirement,
+            @JsonProperty("source_build_command")
+            String sourceBuildCommand,
             @JsonProperty("source_checkpoint_path")
             String sourceCheckpointPath,
             @JsonProperty("source_download_command")
