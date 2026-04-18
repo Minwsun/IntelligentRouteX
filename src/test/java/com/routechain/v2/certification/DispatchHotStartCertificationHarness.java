@@ -38,6 +38,27 @@ public final class DispatchHotStartCertificationHarness {
                                                        RouteChainDispatchV2Properties warmHotProperties,
                                                        CertificationDependencies coldDependencies,
                                                        CertificationDependencies warmHotDependencies) {
+        return certifyDetailed(
+                traceFamilyId,
+                feedbackDirectory,
+                coldRequest,
+                warmRequest,
+                hotRequest,
+                coldProperties,
+                warmHotProperties,
+                coldDependencies,
+                warmHotDependencies).report();
+    }
+
+    public DispatchHotStartCertificationRun certifyDetailed(String traceFamilyId,
+                                                            Path feedbackDirectory,
+                                                            DispatchV2Request coldRequest,
+                                                            DispatchV2Request warmRequest,
+                                                            DispatchV2Request hotRequest,
+                                                            RouteChainDispatchV2Properties coldProperties,
+                                                            RouteChainDispatchV2Properties warmHotProperties,
+                                                            CertificationDependencies coldDependencies,
+                                                            CertificationDependencies warmHotDependencies) {
         TestDispatchV2Factory.TestDispatchRuntimeHarness coldHarness = harness(coldProperties, coldDependencies);
         DispatchV2Result coldResult = coldHarness.core().dispatch(coldRequest);
 
@@ -50,7 +71,7 @@ public final class DispatchHotStartCertificationHarness {
         DispatchV2Result hotResult = warmHotHarness.core().dispatch(hotRequest);
 
         List<String> correctnessMismatchReasons = correctnessMismatchReasons(coldResult, hotResult);
-        return new DispatchHotStartCertificationReport(
+        DispatchHotStartCertificationReport report = new DispatchHotStartCertificationReport(
                 "dispatch-hot-start-certification-report/v1",
                 traceFamilyId,
                 coldResult.traceId(),
@@ -81,6 +102,7 @@ public final class DispatchHotStartCertificationHarness {
                 !correctnessMismatchReasons.contains("executed-assignment-count-mismatch"),
                 !correctnessMismatchReasons.contains("conflict-detected"),
                 hotResult.degradeReasons());
+        return new DispatchHotStartCertificationRun(report, coldResult, warmResult, hotResult);
     }
 
     private TestDispatchV2Factory.TestDispatchRuntimeHarness harness(RouteChainDispatchV2Properties properties,
@@ -251,6 +273,26 @@ public final class DispatchHotStartCertificationHarness {
         }
 
         public CertificationDependencies withForecastClient(ForecastClient forecastClient) {
+            return new CertificationDependencies(
+                    tabularScoringClient,
+                    routeFinderClient,
+                    greedRlClient,
+                    forecastClient,
+                    openMeteoClient,
+                    tomTomTrafficRefineClient);
+        }
+
+        public CertificationDependencies withRouteFinderClient(RouteFinderClient routeFinderClient) {
+            return new CertificationDependencies(
+                    tabularScoringClient,
+                    routeFinderClient,
+                    greedRlClient,
+                    forecastClient,
+                    openMeteoClient,
+                    tomTomTrafficRefineClient);
+        }
+
+        public CertificationDependencies withGreedRlClient(GreedRlClient greedRlClient) {
             return new CertificationDependencies(
                     tabularScoringClient,
                     routeFinderClient,
