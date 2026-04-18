@@ -125,7 +125,7 @@ public final class HttpRouteFinderClient implements RouteFinderClient {
         if (worker.artifactDigest() == null || worker.artifactDigest().isBlank() || worker.artifactDigest().contains("pending")) {
             return WorkerReadyState.notReady("artifact-not-pinned", manifestMetadata);
         }
-        Duration bootstrapTimeout = Duration.ofMillis(Math.max(readTimeout.toMillis(), 500L));
+        Duration bootstrapTimeout = Duration.ofMillis(Math.max(readTimeout.toMillis(), 15_000L));
         try {
             WorkerVersionResponse versionResponse = readJson("version", WorkerVersionResponse.class, bootstrapTimeout);
             if (!worker.modelVersion().equals(versionResponse.modelVersion())) {
