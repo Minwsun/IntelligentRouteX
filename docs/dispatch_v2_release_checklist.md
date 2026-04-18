@@ -11,6 +11,7 @@ Phase 3 validation closure uses:
 - `python scripts/verify_dispatch_v2_phase3.py`
 - `powershell -File scripts/verify_dispatch_v2_phase3.ps1`
 - `bash scripts/verify_dispatch_v2_phase3.sh`
+- [dispatch_v2_16gb_windows_runbook.md](/E:/Code%20_Project/IntelligentRouteX/docs/dispatch_v2_16gb_windows_runbook.md) for constrained-machine sequencing
 
 ## Scripted Gates
 
@@ -61,6 +62,8 @@ Phase 3 validation closure uses:
 ## Phase 3 Validation Closure
 
 Use the dedicated Phase 3 validation script before considering large-scale / soak / chaos work closed on a target machine.
+
+On a constrained Windows machine, follow [dispatch_v2_16gb_windows_runbook.md](/E:/Code%20_Project/IntelligentRouteX/docs/dispatch_v2_16gb_windows_runbook.md) so targeted package runs and real runner smokes happen before any attempt at a full-suite JVM pass.
 
 ### `phase3-java-chaos`
 
