@@ -1,0 +1,4 @@
+$ErrorActionPreference = "Stop"
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+Set-Location $RepoRoot
+python .\scripts\verify_dispatch_v2_release.py @args

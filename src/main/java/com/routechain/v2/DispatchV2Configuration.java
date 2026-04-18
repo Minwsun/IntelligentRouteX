@@ -97,6 +97,12 @@ import com.routechain.v2.integration.OpenMeteoClient;
 import com.routechain.v2.integration.RouteFinderClient;
 import com.routechain.v2.integration.TabularScoringClient;
 import com.routechain.v2.integration.TomTomTrafficRefineClient;
+import com.routechain.v2.ops.DispatchOpsInfoContributor;
+import com.routechain.v2.ops.DispatchOpsReadinessService;
+import com.routechain.v2.ops.DispatchOpsStartupReporter;
+import org.springframework.boot.actuate.info.InfoContributor;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -111,11 +117,6 @@ public class DispatchV2Configuration {
     @Bean
     TrafficProfileService trafficProfileService(RouteChainDispatchV2Properties properties) {
         return new TrafficProfileService(properties);
-    }
-
-    @Bean
-    OpenMeteoClient openMeteoClient() {
-        return new NoOpOpenMeteoClient();
     }
 
     @Bean
@@ -694,5 +695,33 @@ public class DispatchV2Configuration {
     @Bean
     DispatchV2CompatibleCore dispatchV2CompatibleCore(RouteChainDispatchV2Properties properties, DispatchV2Core dispatchV2Core) {
         return new DispatchV2CompatibleCore(properties, dispatchV2Core);
+    }
+
+    @Bean
+    DispatchOpsReadinessService dispatchOpsReadinessService(RouteChainDispatchV2Properties properties,
+                                                            WarmStartManager warmStartManager,
+                                                            TabularScoringClient tabularScoringClient,
+                                                            RouteFinderClient routeFinderClient,
+                                                            GreedRlClient greedRlClient,
+                                                            ForecastClient forecastClient) {
+        return new DispatchOpsReadinessService(
+                properties,
+                warmStartManager,
+                tabularScoringClient,
+                routeFinderClient,
+                greedRlClient,
+                forecastClient,
+                java.nio.file.Path.of("services", "models", "model-manifest.yaml"));
+    }
+
+    @Bean
+    InfoContributor dispatchOpsInfoContributor(DispatchOpsReadinessService dispatchOpsReadinessService) {
+        return new DispatchOpsInfoContributor(dispatchOpsReadinessService);
+    }
+
+    @Bean
+    ApplicationRunner dispatchOpsStartupReporter(DispatchOpsReadinessService dispatchOpsReadinessService,
+                                                 ObjectMapper objectMapper) {
+        return new DispatchOpsStartupReporter(dispatchOpsReadinessService, objectMapper);
     }
 }
