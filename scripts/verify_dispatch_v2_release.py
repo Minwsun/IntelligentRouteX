@@ -1,4 +1,5 @@
 import argparse
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -7,6 +8,10 @@ from typing import Callable, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def gradle_command() -> str:
+    return str(REPO_ROOT / "gradlew.bat") if os.name == "nt" else str(REPO_ROOT / "gradlew")
 
 
 @dataclass(frozen=True)
@@ -20,31 +25,31 @@ CHECKS = [
     ReleaseCheck(
         "runtime-stage-and-budget",
         "12-stage runtime, OR-Tools modes, and latency budget telemetry",
-        ["./gradlew.bat", "--no-daemon", "test", "--tests", "com.routechain.v2.DispatchV2CompatibleCoreTest",
+        [gradle_command(), "--no-daemon", "test", "--tests", "com.routechain.v2.DispatchV2CompatibleCoreTest",
          "--tests", "com.routechain.v2.DispatchV2CoreOrToolsSliceTest",
          "--tests", "com.routechain.v2.DispatchV2CoreLatencyBudgetSliceTest"],
     ),
     ReleaseCheck(
         "replay-and-warm-boot",
         "replay isolation and warm boot across restart",
-        ["./gradlew.bat", "--no-daemon", "test", "--tests", "com.routechain.v2.feedback.DispatchReplayIsolationTest",
+        [gradle_command(), "--no-daemon", "test", "--tests", "com.routechain.v2.feedback.DispatchReplayIsolationTest",
          "--tests", "com.routechain.v2.feedback.DispatchReplayRunnerTest",
          "--tests", "com.routechain.v2.feedback.WarmBootAcrossRestartTest"],
     ),
     ReleaseCheck(
         "hot-start-certification",
         "hot-start certification harness",
-        ["./gradlew.bat", "--no-daemon", "test", "--tests", "com.routechain.v2.certification.DispatchHotStartCertificationHarnessTest"],
+        [gradle_command(), "--no-daemon", "test", "--tests", "com.routechain.v2.certification.DispatchHotStartCertificationHarnessTest"],
     ),
     ReleaseCheck(
         "realistic-certification-suites",
         "realistic certification packs",
-        ["./gradlew.bat", "--no-daemon", "test", "--tests", "com.routechain.v2.certification.DispatchCertificationSuiteRunnerTest"],
+        [gradle_command(), "--no-daemon", "test", "--tests", "com.routechain.v2.certification.DispatchCertificationSuiteRunnerTest"],
     ),
     ReleaseCheck(
         "local-model-offline-workers",
         "all local-model workers boot and infer offline",
-        ["./gradlew.bat", "--no-daemon", "test",
+        [gradle_command(), "--no-daemon", "test",
          "--tests", "com.routechain.v2.DispatchV2CoreTabularOfflineSliceTest",
          "--tests", "com.routechain.v2.DispatchV2CoreRouteFinderOfflineSliceTest",
          "--tests", "com.routechain.v2.DispatchV2CoreGreedRlOfflineSliceTest",
@@ -53,7 +58,7 @@ CHECKS = [
     ReleaseCheck(
         "worker-version-and-compatibility",
         "local worker version payloads and local-load truth checks",
-        ["./gradlew.bat", "--no-daemon", "test",
+        [gradle_command(), "--no-daemon", "test",
          "--tests", "com.routechain.v2.integration.TabularWorkerVersionTest",
          "--tests", "com.routechain.v2.integration.TabularWorkerSchemaCompatibilityTest",
          "--tests", "com.routechain.v2.integration.RouteFinderWorkerVersionTest",
@@ -66,14 +71,14 @@ CHECKS = [
     ReleaseCheck(
         "live-source-degrade-paths",
         "stale weather/traffic and live-source degrade behavior",
-        ["./gradlew.bat", "--no-daemon", "test",
+        [gradle_command(), "--no-daemon", "test",
          "--tests", "com.routechain.v2.DispatchV2CoreLiveSourceSliceTest",
          "--tests", "com.routechain.v2.context.EtaServiceLiveSourceIntegrationTest"],
     ),
     ReleaseCheck(
         "ops-readiness-and-secret-hygiene",
         "startup readiness snapshot and TomTom missing-key warning",
-        ["./gradlew.bat", "--no-daemon", "test",
+        [gradle_command(), "--no-daemon", "test",
          "--tests", "com.routechain.api.DispatchOpsInfoContributorIntegrationTest",
          "--tests", "com.routechain.v2.ops.DispatchOpsStatusMapperTest",
          "--tests", "com.routechain.v2.ops.DispatchOpsReadinessServiceTest",

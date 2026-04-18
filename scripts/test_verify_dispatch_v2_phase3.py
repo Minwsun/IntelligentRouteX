@@ -38,6 +38,11 @@ class VerifyDispatchPhase3Test(unittest.TestCase):
         for check in phase3_verify.CHECKS:
             self.assertIn(check.name, checklist)
 
+    def test_gradle_checks_use_resolved_wrapper_path(self) -> None:
+        gradle_checks = [*phase3_verify.CHECKS[:3], phase3_verify.FULL_SUITE_CHECK]
+        for check in gradle_checks:
+            self.assertEqual(phase3_verify.gradle_command(), check.command[0])
+
 
 if __name__ == "__main__":
     unittest.main()

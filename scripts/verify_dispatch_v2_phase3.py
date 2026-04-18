@@ -1,4 +1,5 @@
 import argparse
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,6 +7,10 @@ from typing import Callable, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def gradle_command() -> str:
+    return str(REPO_ROOT / "gradlew.bat") if os.name == "nt" else str(REPO_ROOT / "gradlew")
 
 
 @dataclass(frozen=True)
@@ -19,17 +24,17 @@ CHECKS = [
     Phase3Check(
         "phase3-java-chaos",
         "compile and run the Phase 3 chaos test-support pack",
-        ["./gradlew.bat", "--no-daemon", "test", "--tests", "com.routechain.v2.chaos.*"],
+        [gradle_command(), "--no-daemon", "test", "--tests", "com.routechain.v2.chaos.*"],
     ),
     Phase3Check(
         "phase3-java-perf-regression",
         "compile and run the existing perf benchmark support pack",
-        ["./gradlew.bat", "--no-daemon", "test", "--tests", "com.routechain.v2.perf.*"],
+        [gradle_command(), "--no-daemon", "test", "--tests", "com.routechain.v2.perf.*"],
     ),
     Phase3Check(
         "phase3-java-quality-regression",
         "compile and run the existing quality benchmark support pack",
-        ["./gradlew.bat", "--no-daemon", "test", "--tests", "com.routechain.v2.benchmark.*"],
+        [gradle_command(), "--no-daemon", "test", "--tests", "com.routechain.v2.benchmark.*"],
     ),
     Phase3Check(
         "phase3-large-scale-smoke",
@@ -67,7 +72,7 @@ CHECKS = [
 FULL_SUITE_CHECK = Phase3Check(
     "phase3-full-gradle-test",
     "optional full gradle test on a machine with enough JVM capacity",
-    ["./gradlew.bat", "--no-daemon", "test"],
+    [gradle_command(), "--no-daemon", "test"],
 )
 
 

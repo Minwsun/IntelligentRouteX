@@ -39,6 +39,10 @@ class VerifyDispatchReleaseTest(unittest.TestCase):
         for check in release_verify.CHECKS:
             self.assertIn(check.name, checklist)
 
+    def test_gradle_checks_use_resolved_wrapper_path(self) -> None:
+        for check in release_verify.CHECKS:
+            self.assertEqual(release_verify.gradle_command(), check.command[0])
+
 
 if __name__ == "__main__":
     unittest.main()
