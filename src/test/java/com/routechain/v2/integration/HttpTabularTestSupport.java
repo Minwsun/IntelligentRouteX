@@ -44,11 +44,11 @@ final class HttpTabularTestSupport {
         };
     }
 
-    static Path manifest(Path tempDir,
-                         String modelVersion,
-                         String artifactDigest,
-                         String compatibilityContractVersion,
-                         String javaContractVersion) throws IOException {
+    static Path manifestV1(Path tempDir,
+                           String modelVersion,
+                           String artifactDigest,
+                           String compatibilityContractVersion,
+                           String javaContractVersion) throws IOException {
         Path manifestPath = tempDir.resolve("model-manifest.yaml");
         Files.writeString(manifestPath, """
                 schemaVersion: model-manifest/v1
@@ -70,7 +70,63 @@ final class HttpTabularTestSupport {
         return manifestPath;
     }
 
+    static Path manifest(Path tempDir,
+                         String modelVersion,
+                         String artifactDigest,
+                         String compatibilityContractVersion,
+                         String javaContractVersion) throws IOException {
+        return manifestV1(tempDir, modelVersion, artifactDigest, compatibilityContractVersion, javaContractVersion);
+    }
+
+    static Path manifestV2(Path tempDir,
+                           String modelVersion,
+                           String artifactDigest,
+                           String compatibilityContractVersion,
+                           String javaContractVersion,
+                           String loadedModelFingerprint) throws IOException {
+        Path manifestPath = tempDir.resolve("model-manifest.yaml");
+        Files.writeString(manifestPath, """
+                schemaVersion: model-manifest/v2
+                workers:
+                  - worker_name: ml-tabular-worker
+                    model_name: tabular-test
+                    model_version: %s
+                    artifact_digest: %s
+                    rollback_artifact_digest: sha256:rollback
+                    runtime_image: local/test
+                    compatibility_contract_version: %s
+                    min_supported_java_contract_version: %s
+                    local_model_root: materialized/tabular
+                    local_artifact_path: materialized/tabular/model/tabular-runtime-manifest.json
+                    materialization_mode: LOCAL_FILE_PROMOTION
+                    ready_requires_local_load: true
+                    offline_boot_supported: true
+                    loaded_model_fingerprint: %s
+                    startup_warmup_request:
+                      endpoint: /score/eta-residual
+                      payload:
+                        schemaVersion: score-request/v1
+                        traceId: warmup-tabular
+                """.formatted(
+                modelVersion,
+                artifactDigest,
+                compatibilityContractVersion,
+                javaContractVersion,
+                loadedModelFingerprint), StandardCharsets.UTF_8);
+        return manifestPath;
+    }
+
     static String versionBody(String modelVersion, String artifactDigest) {
+        return versionBody(modelVersion, artifactDigest, true, "/tmp/materialized/tabular/model/tabular-runtime-manifest.json",
+                "LOCAL_FILE_PROMOTION", "sha256:fingerprint");
+    }
+
+    static String versionBody(String modelVersion,
+                              String artifactDigest,
+                              boolean loadedFromLocal,
+                              String localArtifactPath,
+                              String materializationMode,
+                              String loadedModelFingerprint) {
         return """
                 {
                   "schemaVersion": "worker-version/v1",
@@ -79,9 +135,19 @@ final class HttpTabularTestSupport {
                   "modelVersion": "%s",
                   "artifactDigest": "%s",
                   "compatibilityContractVersion": "dispatch-v2-ml/v1",
-                  "minSupportedJavaContractVersion": "dispatch-v2-java/v1"
+                  "minSupportedJavaContractVersion": "dispatch-v2-java/v1",
+                  "loadedFromLocal": %s,
+                  "localArtifactPath": "%s",
+                  "materializationMode": "%s",
+                  "loadedModelFingerprint": "%s"
                 }
-                """.formatted(modelVersion, artifactDigest);
+                """.formatted(
+                modelVersion,
+                artifactDigest,
+                Boolean.toString(loadedFromLocal),
+                localArtifactPath,
+                materializationMode,
+                loadedModelFingerprint);
     }
 
     static String readyBody(boolean ready, String reason) {
@@ -113,7 +179,6 @@ final class HttpTabularTestSupport {
     }
 
     private static void write(HttpExchange exchange, int statusCode, String body) throws IOException {
-        // Drain request bodies so sequential POSTs do not poison the lightweight test server connection state.
         exchange.getRequestBody().readAllBytes();
         byte[] responseBytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/json");

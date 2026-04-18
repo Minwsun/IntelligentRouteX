@@ -19,10 +19,22 @@ class TabularWorkerVersionTest {
     @Test
     void readyWorkerExposesPinnedVersionMetadata() throws Exception {
         HttpServer server = HttpTabularTestSupport.server(Map.of(
-                "/version", HttpTabularTestSupport.json(HttpTabularTestSupport.versionBody("v1", "sha256:test")),
+                "/version", HttpTabularTestSupport.json(HttpTabularTestSupport.versionBody(
+                        "v1",
+                        "sha256:test",
+                        true,
+                        "/tmp/materialized/tabular/model/tabular-runtime-manifest.json",
+                        "LOCAL_FILE_PROMOTION",
+                        "sha256:fingerprint")),
                 "/ready", HttpTabularTestSupport.json(HttpTabularTestSupport.readyBody(true, ""))));
         try {
-            Path manifestPath = HttpTabularTestSupport.manifest(tempDir, "v1", "sha256:test", "dispatch-v2-ml/v1", "dispatch-v2-java/v1");
+            Path manifestPath = HttpTabularTestSupport.manifestV2(
+                    tempDir,
+                    "v1",
+                    "sha256:test",
+                    "dispatch-v2-ml/v1",
+                    "dispatch-v2-java/v1",
+                    "sha256:fingerprint");
             HttpTabularScoringClient client = new HttpTabularScoringClient(
                     "http://127.0.0.1:" + server.getAddress().getPort(),
                     Duration.ofMillis(50),

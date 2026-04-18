@@ -133,11 +133,17 @@ workers:
   - worker_name: ml-tabular-worker
     model_name: tabular-linear
     model_version: 2026.04.17-v1
-    artifact_digest: sha256:fbd13af3d91b8077f499178632c68b1fd1c0be38a74dfb7ff80faf9a59191ac1
+    artifact_digest: sha256:77cb54517f515a9f751c4282f93c52f2a34bae99610ed56a5074741af413b5e7
     rollback_artifact_digest: sha256:pending-rollback
     runtime_image: ghcr.io/minwsun/intelligentroutex/ml-tabular-worker:bootstrap
     compatibility_contract_version: dispatch-v2-ml/v1
     min_supported_java_contract_version: dispatch-v2-java/v1
+    local_model_root: materialized/tabular
+    local_artifact_path: materialized/tabular/model/tabular-runtime-manifest.json
+    materialization_mode: LOCAL_FILE_PROMOTION
+    ready_requires_local_load: true
+    offline_boot_supported: true
+    loaded_model_fingerprint: sha256:ec0d0209af16146823a1cae51289113680a864fb42a2ea1635f5b9a87a0ce7cc
     startup_warmup_request:
       endpoint: /score/eta-residual
       payload:
