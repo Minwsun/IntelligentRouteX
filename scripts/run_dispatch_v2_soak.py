@@ -21,6 +21,7 @@ class SoakCell:
     size: str
     scenario_pack: str
     execution_mode: str
+    sample_count_override: int
 
 
 def expand_selector(value: str, allowed: Sequence[str]) -> list[str]:
@@ -41,7 +42,7 @@ def planned_cells(args: argparse.Namespace) -> list[SoakCell]:
     scenario_packs = expand_selector(args.scenario_pack, SCENARIO_PACKS)
     execution_modes = expand_selector(args.execution_mode, EXECUTION_MODES)
     return [
-        SoakCell(duration, size, scenario_pack, execution_mode)
+        SoakCell(duration, size, scenario_pack, execution_mode, args.sample_count_override)
         for duration in durations
         for size in sizes
         for scenario_pack in scenario_packs
@@ -64,7 +65,7 @@ def run_cell(cell: SoakCell, output_dir: Path, runner=subprocess.run):
         "DISPATCH_SOAK_SCENARIO_PACK": cell.scenario_pack,
         "DISPATCH_SOAK_EXECUTION_MODE": cell.execution_mode,
         "DISPATCH_SOAK_OUTPUT_DIR": str(output_dir),
-        "DISPATCH_SOAK_SAMPLE_COUNT_OVERRIDE": "3",
+        "DISPATCH_SOAK_SAMPLE_COUNT_OVERRIDE": str(cell.sample_count_override),
     })
     return runner(command, cwd=REPO_ROOT, text=True, check=False, env=env)
 
@@ -103,6 +104,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--scenario-pack", default="all", help="scenario pack or all")
     parser.add_argument("--execution-mode", default="controlled", help="controlled|local-real")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
+    parser.add_argument("--sample-count-override", type=int, default=3, help="Validation-only soak sample count override.")
     parser.add_argument("--dry-run", action="store_true", help="Print the planned matrix only.")
     args = parser.parse_args(argv)
 
@@ -115,7 +117,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_dir = Path(args.output_dir)
     print(f"[MATRIX] {len(cells)} soak cell(s)")
     for cell in cells:
-        print(f"- duration={cell.duration} size={cell.size} scenario-pack={cell.scenario_pack} execution-mode={cell.execution_mode}")
+        print(f"- duration={cell.duration} size={cell.size} scenario-pack={cell.scenario_pack} execution-mode={cell.execution_mode} sample-count-override={cell.sample_count_override}")
     if args.dry_run:
         return 0
 

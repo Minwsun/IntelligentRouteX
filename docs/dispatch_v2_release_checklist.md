@@ -6,6 +6,12 @@ This checklist is the release gate for the current Dispatch V2 platform state. U
 - `powershell -File scripts/verify_dispatch_v2_release.ps1`
 - `bash scripts/verify_dispatch_v2_release.sh`
 
+Phase 3 validation closure uses:
+
+- `python scripts/verify_dispatch_v2_phase3.py`
+- `powershell -File scripts/verify_dispatch_v2_phase3.ps1`
+- `bash scripts/verify_dispatch_v2_phase3.sh`
+
 ## Scripted Gates
 
 ### `runtime-stage-and-budget`
@@ -51,6 +57,47 @@ This checklist is the release gate for the current Dispatch V2 platform state. U
 - `/actuator/info` exposes startup readiness snapshot
 - startup warning appears when `TOMTOM_API_KEY` is missing while TomTom is enabled
 - no raw secret value appears in startup readiness logs
+
+## Phase 3 Validation Closure
+
+Use the dedicated Phase 3 validation script before considering large-scale / soak / chaos work closed on a target machine.
+
+### `phase3-java-chaos`
+
+- compiles and runs `com.routechain.v2.chaos.*`
+- confirms the new Phase 3 Java test-support pack is valid on a machine with enough JVM capacity
+
+### `phase3-java-perf-regression`
+
+- compiles and runs `com.routechain.v2.perf.*`
+- confirms Phase 3 changes did not break the existing perf benchmark support
+
+### `phase3-java-quality-regression`
+
+- compiles and runs `com.routechain.v2.benchmark.*`
+- confirms Phase 3 changes did not break the existing quality benchmark support
+
+### `phase3-large-scale-smoke`
+
+- runs one real large-scale smoke through `scripts/run_dispatch_v2_large_scale.py`
+- requires artifact JSON and Markdown under `artifacts/large-scale/`
+
+### `phase3-soak-smoke`
+
+- runs one short real soak smoke through `scripts/run_dispatch_v2_soak.py`
+- uses a validation-only sample-count override instead of waiting for a literal one-hour run
+- requires artifact JSON and Markdown under `artifacts/soak/`
+
+### `phase3-chaos-smoke`
+
+- runs one real chaos smoke through `scripts/run_dispatch_v2_chaos.py`
+- requires artifact JSON and Markdown under `artifacts/chaos/`
+
+### `phase3-full-gradle-test`
+
+- optional
+- run only on a machine that can sustain a full JVM/Gradle test pass
+- use `--include-full-suite` with `verify_dispatch_v2_phase3.py`
 
 ## Manual Release Checks
 

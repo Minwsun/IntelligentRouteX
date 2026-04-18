@@ -24,6 +24,7 @@ class RunDispatchSoakTest(unittest.TestCase):
         self.assertEqual(0, exit_code)
         self.assertIn("[MATRIX]", output)
         self.assertIn("duration=1h", output)
+        self.assertIn("sample-count-override=3", output)
 
     def test_runner_collects_json_and_writes_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
