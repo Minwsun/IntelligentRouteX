@@ -154,10 +154,10 @@ python scripts/run_dispatch_v2_benchmark.py --baseline all --size S --scenario-p
 ### 3. Ablation smoke
 
 ```powershell
-python scripts/run_dispatch_v2_ablation.py --component tabular --size S --scenario-pack normal-clear --execution-mode controlled --output-dir artifacts/benchmark
-python scripts/run_dispatch_v2_ablation.py --component routefinder --size S --scenario-pack normal-clear --execution-mode controlled --output-dir artifacts/benchmark
-python scripts/run_dispatch_v2_ablation.py --component greedrl --size S --scenario-pack normal-clear --execution-mode controlled --output-dir artifacts/benchmark
-python scripts/run_dispatch_v2_ablation.py --component forecast --size S --scenario-pack normal-clear --execution-mode controlled --output-dir artifacts/benchmark
+python scripts/run_dispatch_v2_ablation.py --component tabular --size S --scenario-pack normal-clear --execution-mode controlled --output-dir artifacts/ablation
+python scripts/run_dispatch_v2_ablation.py --component routefinder --size S --scenario-pack normal-clear --execution-mode controlled --output-dir artifacts/ablation
+python scripts/run_dispatch_v2_ablation.py --component greedrl --size S --scenario-pack normal-clear --execution-mode controlled --output-dir artifacts/ablation
+python scripts/run_dispatch_v2_ablation.py --component forecast --size S --scenario-pack normal-clear --execution-mode controlled --output-dir artifacts/ablation
 ```
 
 ### 4. Phase 3 closure path
@@ -203,6 +203,7 @@ Retain these artifact directories for review:
 
 - `artifacts/perf/`
 - `artifacts/benchmark/`
+- `artifacts/ablation/`
 - `artifacts/large-scale/`
 - `artifacts/soak/`
 - `artifacts/chaos/`

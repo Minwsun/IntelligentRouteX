@@ -1,0 +1,15 @@
+routechain:
+  dispatch-v2:
+    bundle:
+      top-neighbors: 8
+      beam-width: 10
+    candidate:
+      max-drivers: 6
+      max-route-alternatives: 3
+    pair:
+      max-candidate-neighbors-per-order: 8
+    ml:
+      routefinder:
+        max-alternatives-per-driver-candidate: 1
+      greedrl:
+        max-proposals-per-cluster: 2
