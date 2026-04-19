@@ -5,6 +5,7 @@ import com.routechain.v2.perf.DispatchPerfMachineProfile;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 public record DispatchQualityBenchmarkResult(
         String schemaVersion,
@@ -16,6 +17,13 @@ public record DispatchQualityBenchmarkResult(
         boolean authoritative,
         boolean authorityEligible,
         boolean sampleCountOverrideApplied,
+        String resolvedModelManifestPath,
+        boolean manifestExists,
+        Map<String, String> workerBaseUrls,
+        Map<String, Boolean> activeMlFlags,
+        List<DispatchQualityWorkerStatus> workerStatusSnapshot,
+        DispatchQualityMlAttachStatus mlAttachStatus,
+        List<String> mlAttachmentFailureReasons,
         String baselineId,
         String scenarioPack,
         String scenarioName,

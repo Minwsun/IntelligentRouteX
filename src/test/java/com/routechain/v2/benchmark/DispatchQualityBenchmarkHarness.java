@@ -18,6 +18,8 @@ import com.routechain.v2.integration.HttpOpenMeteoClient;
 import com.routechain.v2.integration.HttpRouteFinderClient;
 import com.routechain.v2.integration.HttpTabularScoringClient;
 import com.routechain.v2.integration.HttpTomTomTrafficRefineClient;
+import com.routechain.v2.integration.MlWorkerMetadata;
+import com.routechain.v2.integration.ModelManifestLoader;
 import com.routechain.v2.integration.NoOpForecastClient;
 import com.routechain.v2.integration.NoOpGreedRlClient;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
@@ -34,6 +36,8 @@ import com.routechain.v2.integration.TestRouteFinderClient;
 import com.routechain.v2.integration.TestTabularScoringClient;
 import com.routechain.v2.integration.TestTomTomTrafficRefineClient;
 import com.routechain.v2.integration.TomTomTrafficRefineClient;
+import com.routechain.v2.integration.WorkerManifest;
+import com.routechain.v2.integration.WorkerReadyState;
 import com.routechain.v2.perf.DispatchPerfBenchmarkHarness;
 import com.routechain.v2.perf.DispatchPerfMachineProfile;
 import com.routechain.v2.perf.DispatchPerfWorkloadFactory;
@@ -42,6 +46,7 @@ import com.routechain.v2.route.RouteProposalSource;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -56,7 +61,10 @@ import java.util.Map;
 import java.util.Set;
 
 public final class DispatchQualityBenchmarkHarness {
-    private static final Path MODEL_MANIFEST_PATH = Path.of("services", "models", "model-manifest.yaml");
+    private static final String TABULAR_WORKER = "ml-tabular-worker";
+    private static final String ROUTEFINDER_WORKER = "ml-routefinder-worker";
+    private static final String GREEDRL_WORKER = "ml-greedrl-worker";
+    private static final String FORECAST_WORKER = "ml-forecast-worker";
 
     public DispatchQualityBenchmarkRun benchmark(BenchmarkRequest request) {
         List<DispatchQualityBenchmarkResult> results = request.baselines().stream()
@@ -109,10 +117,14 @@ public final class DispatchQualityBenchmarkHarness {
     }
 
     private DispatchQualityBenchmarkResult runScenario(BenchmarkRequest request, DispatchPerfBenchmarkHarness.BaselineId baselineId) {
-        DispatchV2Result result = executeDispatch(request, baselineId);
+        ScenarioExecution execution = executeDispatch(request, baselineId);
+        DispatchV2Result result = execution.result();
         List<String> notes = new ArrayList<>();
         if (!request.authorityRun() && request.executionMode() == ExecutionMode.LOCAL_REAL) {
             notes.add("non-authoritative-local-real-run");
+        }
+        if (execution.attachDiagnostics().mlAttachStatus() == DispatchQualityMlAttachStatus.ML_ATTACH_FAIL) {
+            notes.add("ML_ATTACH_FAIL");
         }
         String runAuthorityClass = request.authorityRun() ? "AUTHORITY_REAL" : "LOCAL_NON_AUTHORITY";
         boolean authorityEligible = request.authorityRun() && notes.stream().noneMatch("non-authoritative-local-real-run"::equals);
@@ -126,6 +138,13 @@ public final class DispatchQualityBenchmarkHarness {
                 request.authorityRun(),
                 authorityEligible,
                 false,
+                execution.attachDiagnostics().resolvedModelManifestPath(),
+                execution.attachDiagnostics().manifestExists(),
+                execution.attachDiagnostics().workerBaseUrls(),
+                execution.attachDiagnostics().activeMlFlags(),
+                execution.attachDiagnostics().workerStatusSnapshot(),
+                execution.attachDiagnostics().mlAttachStatus(),
+                execution.attachDiagnostics().mlAttachmentFailureReasons(),
                 baselineId.name(),
                 request.scenarioPack().wireName(),
                 request.scenarioPack().wireName(),
@@ -159,6 +178,13 @@ public final class DispatchQualityBenchmarkHarness {
                 request.authorityRun(),
                 false,
                 false,
+                "",
+                false,
+                Map.of(),
+                Map.of(),
+                List.of(),
+                DispatchQualityMlAttachStatus.ML_ATTACH_FAIL,
+                List.of("deferred-on-current-machine"),
                 baselineId.name(),
                 request.scenarioPack().wireName(),
                 request.scenarioPack().wireName(),
@@ -173,13 +199,14 @@ public final class DispatchQualityBenchmarkHarness {
                 List.of(note));
     }
 
-    private DispatchV2Result executeDispatch(BenchmarkRequest request, DispatchPerfBenchmarkHarness.BaselineId baselineId) {
+    private ScenarioExecution executeDispatch(BenchmarkRequest request, DispatchPerfBenchmarkHarness.BaselineId baselineId) {
         ScenarioDefinition scenario = scenarioDefinition(request.scenarioPack());
         RouteChainDispatchV2Properties properties = baseProperties(baselineId, request.executionMode(), feedbackDirectory(request, baselineId));
         scenario.configureProperties(properties, baselineId);
         ScenarioDependencies dependencies = request.executionMode() == ExecutionMode.CONTROLLED
                 ? scenario.controlledDependencies(baselineId)
                 : scenario.localRealDependencies(baselineId, properties);
+        MlAttachDiagnostics attachDiagnostics = collectAttachDiagnostics(properties, dependencies);
         DispatchV2Request dispatchRequest = scenario.request(
                 request.workloadSize(),
                 traceFamilyId(request, baselineId),
@@ -192,7 +219,8 @@ public final class DispatchQualityBenchmarkHarness {
                 dependencies.forecastClient(),
                 dependencies.openMeteoClient(),
                 dependencies.tomTomTrafficRefineClient());
-        return harness.core().dispatch(dispatchRequest);
+        DispatchV2Result result = harness.core().dispatch(dispatchRequest);
+        return new ScenarioExecution(result, finalizeAttachDiagnostics(properties, baselineId, request.authorityRun(), attachDiagnostics, result));
     }
 
     private DispatchV2Result executeAblationRun(AblationRequest request, boolean control) {
@@ -560,6 +588,38 @@ public final class DispatchQualityBenchmarkHarness {
                                                           ExecutionMode executionMode,
                                                           Path feedbackDirectory) {
         RouteChainDispatchV2Properties properties = RouteChainDispatchV2Properties.defaults();
+        properties.getMl().setModelManifestPath(configuredValue(
+                "dispatchV2.ml.modelManifestPath",
+                "IRX_MODEL_MANIFEST_PATH",
+                properties.getMl().getModelManifestPath()));
+        properties.getMl().getTabular().setBaseUrl(configuredValue(
+                "dispatchV2.ml.tabular.baseUrl",
+                "IRX_TABULAR_BASE_URL",
+                properties.getMl().getTabular().getBaseUrl()));
+        properties.getMl().getRoutefinder().setBaseUrl(configuredValue(
+                "dispatchV2.ml.routefinder.baseUrl",
+                "IRX_ROUTEFINDER_BASE_URL",
+                properties.getMl().getRoutefinder().getBaseUrl()));
+        properties.getMl().getGreedrl().setBaseUrl(configuredValue(
+                "dispatchV2.ml.greedrl.baseUrl",
+                "IRX_GREEDRL_BASE_URL",
+                properties.getMl().getGreedrl().getBaseUrl()));
+        properties.getMl().getForecast().setBaseUrl(configuredValue(
+                "dispatchV2.ml.forecast.baseUrl",
+                "IRX_FORECAST_BASE_URL",
+                properties.getMl().getForecast().getBaseUrl()));
+        properties.getWeather().setBaseUrl(configuredValue(
+                "dispatchV2.weather.baseUrl",
+                "IRX_OPEN_METEO_BASE_URL",
+                properties.getWeather().getBaseUrl()));
+        properties.getTraffic().setBaseUrl(configuredValue(
+                "dispatchV2.traffic.baseUrl",
+                "IRX_TOMTOM_BASE_URL",
+                properties.getTraffic().getBaseUrl()));
+        properties.getTraffic().setApiKey(configuredValue(
+                "dispatchV2.traffic.apiKey",
+                "IRX_TOMTOM_API_KEY",
+                properties.getTraffic().getApiKey()));
         properties.setEnabled(true);
         properties.setMlEnabled(false);
         properties.setSelectorOrtoolsEnabled(false);
@@ -797,7 +857,8 @@ public final class DispatchQualityBenchmarkHarness {
     }
 
     private static ScenarioDependencies localRealDependencies(RouteChainDispatchV2Properties properties) {
-        if (!Files.exists(MODEL_MANIFEST_PATH)) {
+        ManifestResolution manifestResolution = resolveManifest(properties);
+        if (!manifestResolution.valid()) {
             return noOps();
         }
         String apiKey = System.getenv("TOMTOM_API_KEY");
@@ -806,22 +867,22 @@ public final class DispatchQualityBenchmarkHarness {
                         properties.getMl().getTabular().getBaseUrl(),
                         properties.getMl().getTabular().getConnectTimeout(),
                         properties.getMl().getTabular().getReadTimeout(),
-                        MODEL_MANIFEST_PATH),
+                        manifestResolution.path()),
                 new HttpRouteFinderClient(
                         properties.getMl().getRoutefinder().getBaseUrl(),
                         properties.getMl().getRoutefinder().getConnectTimeout(),
                         properties.getMl().getRoutefinder().getReadTimeout(),
-                        MODEL_MANIFEST_PATH),
+                        manifestResolution.path()),
                 new HttpGreedRlClient(
                         properties.getMl().getGreedrl().getBaseUrl(),
                         properties.getMl().getGreedrl().getConnectTimeout(),
                         properties.getMl().getGreedrl().getReadTimeout(),
-                        MODEL_MANIFEST_PATH),
+                        manifestResolution.path()),
                 new HttpForecastClient(
                         properties.getMl().getForecast().getBaseUrl(),
                         properties.getMl().getForecast().getConnectTimeout(),
                         properties.getMl().getForecast().getReadTimeout(),
-                        MODEL_MANIFEST_PATH),
+                        manifestResolution.path()),
                 new HttpOpenMeteoClient(
                         properties.getWeather().getBaseUrl(),
                         properties.getWeather().getConnectTimeout(),
@@ -833,6 +894,235 @@ public final class DispatchQualityBenchmarkHarness {
                         properties.getTraffic().getConnectTimeout(),
                         properties.getTraffic().getReadTimeout(),
                         new TrafficRefineMapper()));
+    }
+
+    private MlAttachDiagnostics collectAttachDiagnostics(RouteChainDispatchV2Properties properties,
+                                                         ScenarioDependencies dependencies) {
+        ManifestResolution manifestResolution = resolveManifest(properties);
+        Map<String, WorkerManifest.WorkerManifestEntry> manifestEntries = loadManifestEntries(manifestResolution);
+        List<DispatchQualityWorkerStatus> workers = List.of(
+                workerStatus(TABULAR_WORKER, properties.isMlEnabled() && properties.getMl().getTabular().isEnabled(), properties.getMl().getTabular().getBaseUrl(), dependencies.tabularScoringClient().readyState(), manifestEntries.get(TABULAR_WORKER)),
+                workerStatus(ROUTEFINDER_WORKER, properties.isMlEnabled() && properties.getMl().getRoutefinder().isEnabled(), properties.getMl().getRoutefinder().getBaseUrl(), dependencies.routeFinderClient().readyState(), manifestEntries.get(ROUTEFINDER_WORKER)),
+                workerStatus(GREEDRL_WORKER, properties.isMlEnabled() && properties.getMl().getGreedrl().isEnabled(), properties.getMl().getGreedrl().getBaseUrl(), dependencies.greedRlClient().readyState(), manifestEntries.get(GREEDRL_WORKER)),
+                workerStatus(FORECAST_WORKER, properties.isMlEnabled() && properties.getMl().getForecast().isEnabled(), properties.getMl().getForecast().getBaseUrl(), dependencies.forecastClient().readyState(), manifestEntries.get(FORECAST_WORKER)));
+        List<String> failureReasons = new ArrayList<>();
+        failureReasons.addAll(manifestResolution.failureReasons());
+        workers.stream()
+                .filter(DispatchQualityWorkerStatus::enabled)
+                .filter(worker -> !worker.ready())
+                .map(worker -> worker.workerName() + ":" + blankToEmpty(worker.readyReason()))
+                .forEach(failureReasons::add);
+        return new MlAttachDiagnostics(
+                manifestResolution.displayPath(),
+                manifestResolution.exists(),
+                workerBaseUrls(properties),
+                activeMlFlags(properties),
+                workers,
+                DispatchQualityMlAttachStatus.ATTACHED,
+                List.copyOf(distinctSources(failureReasons)));
+    }
+
+    private MlAttachDiagnostics finalizeAttachDiagnostics(RouteChainDispatchV2Properties properties,
+                                                          DispatchPerfBenchmarkHarness.BaselineId baselineId,
+                                                          boolean authorityRun,
+                                                          MlAttachDiagnostics diagnostics,
+                                                          DispatchV2Result result) {
+        List<String> workerAppliedSources = distinctSources(result.mlStageMetadata().stream()
+                .filter(MlStageMetadata::applied)
+                .map(MlStageMetadata::sourceModel)
+                .toList());
+        List<DispatchQualityWorkerStatus> updatedWorkers = diagnostics.workerStatusSnapshot().stream()
+                .map(worker -> applyRunObservation(worker, workerAppliedSources))
+                .toList();
+        List<String> failureReasons = new ArrayList<>(diagnostics.mlAttachmentFailureReasons());
+        if (properties.isMlEnabled() && authorityRun && baselineId == DispatchPerfBenchmarkHarness.BaselineId.C && workerAppliedSources.isEmpty()) {
+            failureReasons.add("worker-applied-sources-empty");
+        }
+        DispatchQualityMlAttachStatus status = classifyAttachStatus(properties, baselineId, authorityRun, updatedWorkers, workerAppliedSources);
+        return new MlAttachDiagnostics(
+                diagnostics.resolvedModelManifestPath(),
+                diagnostics.manifestExists(),
+                diagnostics.workerBaseUrls(),
+                diagnostics.activeMlFlags(),
+                updatedWorkers,
+                status,
+                List.copyOf(distinctSources(failureReasons)));
+    }
+
+    private static DispatchQualityWorkerStatus applyRunObservation(DispatchQualityWorkerStatus worker, List<String> workerAppliedSources) {
+        boolean applied = !blankToEmpty(worker.sourceModel()).isBlank() && workerAppliedSources.contains(worker.sourceModel());
+        String notAppliedReason = applied ? "" : (worker.ready() ? "worker-not-observed-in-run" : worker.readyReason());
+        return new DispatchQualityWorkerStatus(
+                worker.workerName(),
+                worker.enabled(),
+                worker.baseUrl(),
+                worker.reachable(),
+                worker.ready(),
+                worker.readyReason(),
+                worker.sourceModel(),
+                worker.modelVersion(),
+                worker.artifactDigest(),
+                worker.loadedFromLocal(),
+                worker.expectedFingerprint(),
+                worker.fingerprintMatch(),
+                applied,
+                blankToEmpty(notAppliedReason));
+    }
+
+    private static DispatchQualityMlAttachStatus classifyAttachStatus(RouteChainDispatchV2Properties properties,
+                                                                      DispatchPerfBenchmarkHarness.BaselineId baselineId,
+                                                                      boolean authorityRun,
+                                                                      List<DispatchQualityWorkerStatus> workers,
+                                                                      List<String> workerAppliedSources) {
+        long enabledWorkers = workers.stream().filter(DispatchQualityWorkerStatus::enabled).count();
+        long readyWorkers = workers.stream().filter(DispatchQualityWorkerStatus::enabled).filter(DispatchQualityWorkerStatus::ready).count();
+        long appliedWorkers = workers.stream().filter(DispatchQualityWorkerStatus::enabled).filter(DispatchQualityWorkerStatus::applied).count();
+        if (!properties.isMlEnabled() || enabledWorkers == 0) {
+            return DispatchQualityMlAttachStatus.ATTACHED;
+        }
+        if (authorityRun
+                && baselineId == DispatchPerfBenchmarkHarness.BaselineId.C
+                && workerAppliedSources.isEmpty()) {
+            return readyWorkers > 0 ? DispatchQualityMlAttachStatus.PARTIAL_ATTACH : DispatchQualityMlAttachStatus.ML_ATTACH_FAIL;
+        }
+        if (appliedWorkers == 0 && workerAppliedSources.isEmpty()) {
+            return readyWorkers > 0 ? DispatchQualityMlAttachStatus.PARTIAL_ATTACH : DispatchQualityMlAttachStatus.ML_ATTACH_FAIL;
+        }
+        return appliedWorkers < enabledWorkers ? DispatchQualityMlAttachStatus.PARTIAL_ATTACH : DispatchQualityMlAttachStatus.ATTACHED;
+    }
+
+    private static DispatchQualityWorkerStatus workerStatus(String workerName,
+                                                            boolean enabled,
+                                                            String baseUrl,
+                                                            WorkerReadyState readyState,
+                                                            WorkerManifest.WorkerManifestEntry manifestEntry) {
+        MlWorkerMetadata metadata = readyState == null ? MlWorkerMetadata.empty() : readyState.workerMetadata();
+        boolean ready = enabled && readyState != null && readyState.ready();
+        String readyReason = enabled
+                ? (ready ? "" : readyState == null ? "worker-state-missing" : blankToEmpty(readyState.reason()))
+                : "worker-disabled";
+        return new DispatchQualityWorkerStatus(
+                workerName,
+                enabled,
+                blankToEmpty(baseUrl),
+                enabled && isReachable(readyReason),
+                ready,
+                blankToEmpty(readyReason),
+                firstNonBlank(metadata.sourceModel(), manifestEntry == null ? "" : manifestEntry.modelName()),
+                firstNonBlank(metadata.modelVersion(), manifestEntry == null ? "" : manifestEntry.modelVersion()),
+                firstNonBlank(metadata.artifactDigest(), manifestEntry == null ? "" : manifestEntry.artifactDigest()),
+                loadedFromLocal(manifestEntry, readyState),
+                manifestEntry == null ? "" : blankToEmpty(manifestEntry.loadedModelFingerprint()),
+                fingerprintMatch(manifestEntry, readyState),
+                false,
+                ready ? "" : blankToEmpty(readyReason));
+    }
+
+    private static Map<String, String> workerBaseUrls(RouteChainDispatchV2Properties properties) {
+        return Map.of(
+                TABULAR_WORKER, properties.getMl().getTabular().getBaseUrl(),
+                ROUTEFINDER_WORKER, properties.getMl().getRoutefinder().getBaseUrl(),
+                GREEDRL_WORKER, properties.getMl().getGreedrl().getBaseUrl(),
+                FORECAST_WORKER, properties.getMl().getForecast().getBaseUrl());
+    }
+
+    private static Map<String, Boolean> activeMlFlags(RouteChainDispatchV2Properties properties) {
+        return Map.of(
+                "mlEnabled", properties.isMlEnabled(),
+                "sidecarRequired", properties.isSidecarRequired(),
+                "tabularEnabled", properties.getMl().getTabular().isEnabled(),
+                "routefinderEnabled", properties.getMl().getRoutefinder().isEnabled(),
+                "greedrlEnabled", properties.getMl().getGreedrl().isEnabled(),
+                "forecastEnabled", properties.getMl().getForecast().isEnabled());
+    }
+
+    private static Map<String, WorkerManifest.WorkerManifestEntry> loadManifestEntries(ManifestResolution manifestResolution) {
+        if (!manifestResolution.valid()) {
+            return Map.of();
+        }
+        try {
+            WorkerManifest manifest = new ModelManifestLoader().load(manifestResolution.path());
+            Map<String, WorkerManifest.WorkerManifestEntry> entries = new LinkedHashMap<>();
+            for (WorkerManifest.WorkerManifestEntry entry : manifest.workers()) {
+                entries.put(entry.workerName(), entry);
+            }
+            return Map.copyOf(entries);
+        } catch (RuntimeException exception) {
+            return Map.of();
+        }
+    }
+
+    private static ManifestResolution resolveManifest(RouteChainDispatchV2Properties properties) {
+        String configuredPath = blankToEmpty(properties.getMl().getModelManifestPath());
+        if (configuredPath.isBlank()) {
+            return new ManifestResolution(null, "", false, List.of("model-manifest-path-blank"));
+        }
+        try {
+            Path resolved = Path.of(configuredPath).toAbsolutePath().normalize();
+            if (!Files.exists(resolved)) {
+                return new ManifestResolution(resolved, resolved.toString(), false, List.of("model-manifest-missing"));
+            }
+            return new ManifestResolution(resolved, resolved.toString(), true, List.of());
+        } catch (InvalidPathException exception) {
+            return new ManifestResolution(null, configuredPath, false, List.of("model-manifest-path-invalid"));
+        }
+    }
+
+    private static String configuredValue(String propertyName, String envName, String defaultValue) {
+        String propertyValue = System.getProperty(propertyName);
+        if (propertyValue != null && !propertyValue.isBlank()) {
+            return propertyValue;
+        }
+        String envValue = System.getenv(envName);
+        if (envValue != null && !envValue.isBlank()) {
+            return envValue;
+        }
+        return defaultValue;
+    }
+
+    private static boolean isReachable(String readyReason) {
+        String normalized = blankToEmpty(readyReason).toLowerCase(Locale.ROOT);
+        return !(normalized.contains("client-disabled")
+                || normalized.contains("worker-unreachable")
+                || normalized.contains("manifest-worker-missing")
+                || normalized.contains("model-manifest"));
+    }
+
+    private static Boolean loadedFromLocal(WorkerManifest.WorkerManifestEntry manifestEntry, WorkerReadyState readyState) {
+        if (manifestEntry == null || !Boolean.TRUE.equals(manifestEntry.readyRequiresLocalLoad()) || readyState == null) {
+            return null;
+        }
+        if (readyState.ready()) {
+            return true;
+        }
+        if ("local-model-not-loaded".equals(readyState.reason())) {
+            return false;
+        }
+        if ("loaded-model-fingerprint-mismatch".equals(readyState.reason())) {
+            return true;
+        }
+        return null;
+    }
+
+    private static Boolean fingerprintMatch(WorkerManifest.WorkerManifestEntry manifestEntry, WorkerReadyState readyState) {
+        if (manifestEntry == null || blankToEmpty(manifestEntry.loadedModelFingerprint()).isBlank() || readyState == null) {
+            return null;
+        }
+        if (readyState.ready()) {
+            return true;
+        }
+        if ("loaded-model-fingerprint-mismatch".equals(readyState.reason())) {
+            return false;
+        }
+        return null;
+    }
+
+    private static String firstNonBlank(String first, String second) {
+        return !blankToEmpty(first).isBlank() ? blankToEmpty(first) : blankToEmpty(second);
+    }
+
+    private static String blankToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     private String gitCommit() {
@@ -996,6 +1286,31 @@ public final class DispatchQualityBenchmarkHarness {
 
         ScenarioDependencies withTomTomTrafficRefineClient(TomTomTrafficRefineClient client) {
             return new ScenarioDependencies(tabularScoringClient, routeFinderClient, greedRlClient, forecastClient, openMeteoClient, client);
+        }
+    }
+
+    private record ScenarioExecution(
+            DispatchV2Result result,
+            MlAttachDiagnostics attachDiagnostics) {
+    }
+
+    private record MlAttachDiagnostics(
+            String resolvedModelManifestPath,
+            boolean manifestExists,
+            Map<String, String> workerBaseUrls,
+            Map<String, Boolean> activeMlFlags,
+            List<DispatchQualityWorkerStatus> workerStatusSnapshot,
+            DispatchQualityMlAttachStatus mlAttachStatus,
+            List<String> mlAttachmentFailureReasons) {
+    }
+
+    private record ManifestResolution(
+            Path path,
+            String displayPath,
+            boolean exists,
+            List<String> failureReasons) {
+        boolean valid() {
+            return path != null && exists;
         }
     }
 }

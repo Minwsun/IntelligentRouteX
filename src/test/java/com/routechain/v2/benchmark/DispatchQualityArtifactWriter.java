@@ -91,12 +91,38 @@ public final class DispatchQualityArtifactWriter {
         builder.append("- execution mode: `").append(result.executionMode()).append("`\n");
         builder.append("- authority class: `").append(result.runAuthorityClass()).append("`\n");
         builder.append("- authority eligible: `").append(result.authorityEligible()).append("`\n");
+        builder.append("- model manifest: `").append(result.resolvedModelManifestPath()).append("`\n");
+        builder.append("- manifest exists: `").append(result.manifestExists()).append("`\n");
+        builder.append("- ml attach status: `").append(result.mlAttachStatus()).append("`\n");
         builder.append("- selected proposals: `").append(metrics.selectedProposalCount()).append("`\n");
         builder.append("- executed assignments: `").append(metrics.executedAssignmentCount()).append("`\n");
         builder.append("- conflict free: `").append(metrics.conflictFreeAssignments()).append("`\n");
         builder.append("- bundle rate: `").append(metrics.bundleRate()).append("`\n");
         builder.append("- robust utility avg: `").append(metrics.robustUtilityAverage()).append("`\n");
         builder.append("- selector objective: `").append(metrics.selectorObjectiveValue()).append("`\n");
+        if (!result.workerBaseUrls().isEmpty()) {
+            builder.append("- worker base urls: `").append(result.workerBaseUrls()).append("`\n");
+        }
+        if (!result.activeMlFlags().isEmpty()) {
+            builder.append("- active ml flags: `").append(result.activeMlFlags()).append("`\n");
+        }
+        if (!result.mlAttachmentFailureReasons().isEmpty()) {
+            builder.append("- ml attachment failure reasons: `").append(result.mlAttachmentFailureReasons()).append("`\n");
+        }
+        if (!result.workerStatusSnapshot().isEmpty()) {
+            builder.append("\n## Worker Attachment Snapshot\n\n");
+            for (DispatchQualityWorkerStatus worker : result.workerStatusSnapshot()) {
+                builder.append("- `").append(worker.workerName()).append("` ")
+                        .append("enabled=`").append(worker.enabled()).append("` ")
+                        .append("ready=`").append(worker.ready()).append("` ")
+                        .append("reachable=`").append(worker.reachable()).append("` ")
+                        .append("applied=`").append(worker.applied()).append("` ")
+                        .append("reason=`").append(worker.readyReason()).append("` ")
+                        .append("notAppliedReason=`").append(worker.notAppliedReason()).append("` ")
+                        .append("baseUrl=`").append(worker.baseUrl()).append("`")
+                        .append('\n');
+            }
+        }
         if (!result.notes().isEmpty()) {
             builder.append("- notes: `").append(result.notes()).append("`\n");
         }

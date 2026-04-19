@@ -28,6 +28,8 @@ public final class HttpForecastClient implements ForecastClient {
                               Path manifestPath) {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(connectTimeout)
+                // Bundled uvicorn workers speak plain HTTP/1.1; Java's h2c upgrade attempt can break request framing.
+                .version(HttpClient.Version.HTTP_1_1)
                 .build();
         this.objectMapper = JsonMapper.builder().findAndAddModules().build();
         this.baseUri = URI.create(baseUrl.endsWith("/") ? baseUrl : baseUrl + "/");
