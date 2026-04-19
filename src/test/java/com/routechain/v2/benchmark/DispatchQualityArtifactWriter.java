@@ -89,6 +89,8 @@ public final class DispatchQualityArtifactWriter {
         builder.append("- scenario: `").append(result.scenarioPack()).append(" / ").append(result.scenarioName()).append("`\n");
         builder.append("- workload: `").append(result.workloadSize()).append("`\n");
         builder.append("- execution mode: `").append(result.executionMode()).append("`\n");
+        builder.append("- authority class: `").append(result.runAuthorityClass()).append("`\n");
+        builder.append("- authority eligible: `").append(result.authorityEligible()).append("`\n");
         builder.append("- selected proposals: `").append(metrics.selectedProposalCount()).append("`\n");
         builder.append("- executed assignments: `").append(metrics.executedAssignmentCount()).append("`\n");
         builder.append("- conflict free: `").append(metrics.conflictFreeAssignments()).append("`\n");
@@ -106,6 +108,8 @@ public final class DispatchQualityArtifactWriter {
         builder.append("- scenario: `").append(report.scenarioPack()).append(" / ").append(report.scenarioName()).append("`\n");
         builder.append("- workload: `").append(report.workloadSize()).append("`\n");
         builder.append("- execution mode: `").append(report.executionMode()).append("`\n");
+        builder.append("- authority class: `").append(report.runAuthorityClass()).append("`\n");
+        builder.append("- authority eligible: `").append(report.authorityEligible()).append("`\n");
         builder.append("- summary: ").append(report.comparisonSummary()).append("\n\n");
         builder.append("## Full V2 Advantages\n\n");
         if (report.fullV2Advantages().isEmpty()) {

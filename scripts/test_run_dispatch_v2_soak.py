@@ -24,7 +24,18 @@ class RunDispatchSoakTest(unittest.TestCase):
         self.assertEqual(0, exit_code)
         self.assertIn("[MATRIX]", output)
         self.assertIn("duration=1h", output)
+        self.assertIn("authority=false", output)
         self.assertIn("sample-count-override=3", output)
+
+    def test_authority_dry_run_leaves_override_unset(self) -> None:
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            exit_code = runner_module.main(["--duration", "6h", "--scenario-pack", "normal-clear", "--authority", "--dry-run"])
+
+        output = stdout.getvalue()
+        self.assertEqual(0, exit_code)
+        self.assertIn("authority=true", output)
+        self.assertIn("sample-count-override=none", output)
 
     def test_runner_collects_json_and_writes_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -37,6 +48,9 @@ class RunDispatchSoakTest(unittest.TestCase):
                         "workloadSize": "M",
                         "durationProfile": "1h",
                         "executionMode": "controlled",
+                        "runAuthorityClass": "LOCAL_NON_AUTHORITY",
+                        "authorityEligible": False,
+                        "sampleCountOverrideApplied": True,
                         "sampleCount": 3,
                         "passed": True,
                     }),

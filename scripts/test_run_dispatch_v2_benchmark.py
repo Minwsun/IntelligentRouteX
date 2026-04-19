@@ -24,6 +24,7 @@ class RunDispatchBenchmarkTest(unittest.TestCase):
         self.assertEqual(0, exit_code)
         self.assertIn("[MATRIX]", output)
         self.assertIn("scenario-pack=normal-clear", output)
+        self.assertIn("authority=false", output)
 
     def test_runner_collects_json_and_writes_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -36,6 +37,8 @@ class RunDispatchBenchmarkTest(unittest.TestCase):
                         "scenarioPack": "normal-clear",
                         "workloadSize": "S",
                         "executionMode": "controlled",
+                        "runAuthorityClass": "LOCAL_NON_AUTHORITY",
+                        "authorityEligible": False,
                         "metrics": {"selectedProposalCount": 1, "executedAssignmentCount": 1, "robustUtilityAverage": 0.5},
                     }),
                     encoding="utf-8",

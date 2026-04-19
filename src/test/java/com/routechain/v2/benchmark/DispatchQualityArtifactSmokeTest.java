@@ -22,6 +22,7 @@ class DispatchQualityArtifactSmokeTest {
                 DispatchQualityBenchmarkHarness.ScenarioPack.fromWire(value("dispatchQuality.scenarioPack", "DISPATCH_QUALITY_SCENARIO_PACK", "normal-clear")),
                 DispatchQualityBenchmarkHarness.ExecutionMode.valueOf(value("dispatchQuality.executionMode", "DISPATCH_QUALITY_EXECUTION_MODE", "CONTROLLED").toUpperCase().replace('-', '_')),
                 value("dispatchQuality.machineLabel", "DISPATCH_QUALITY_MACHINE_LABEL", DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL),
+                Boolean.parseBoolean(value("dispatchQuality.authority", "DISPATCH_QUALITY_AUTHORITY", "false")),
                 Boolean.parseBoolean(value("dispatchQuality.runDeferredXl", "DISPATCH_QUALITY_RUN_DEFERRED_XL", "false")),
                 Path.of(value("dispatchQuality.outputDir", "DISPATCH_QUALITY_OUTPUT_DIR", "build/dispatch-quality-smoke"))));
 

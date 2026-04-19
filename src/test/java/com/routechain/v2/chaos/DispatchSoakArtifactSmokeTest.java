@@ -19,7 +19,8 @@ class DispatchSoakArtifactSmokeTest {
                 DispatchPhase3Support.ScenarioPack.fromWire(value("dispatchSoak.scenarioPack", "DISPATCH_SOAK_SCENARIO_PACK", "normal-clear")),
                 DispatchPhase3Support.ExecutionMode.fromWire(value("dispatchSoak.executionMode", "DISPATCH_SOAK_EXECUTION_MODE", "controlled")),
                 value("dispatchSoak.machineLabel", "DISPATCH_SOAK_MACHINE_LABEL", DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL),
-                Integer.parseInt(value("dispatchSoak.sampleCountOverride", "DISPATCH_SOAK_SAMPLE_COUNT_OVERRIDE", "3")),
+                Boolean.parseBoolean(value("dispatchSoak.authority", "DISPATCH_SOAK_AUTHORITY", "false")),
+                optionalIntegerValue("dispatchSoak.sampleCountOverride", "DISPATCH_SOAK_SAMPLE_COUNT_OVERRIDE"),
                 outputDirectory));
 
         DispatchStabilityArtifactWriter.ArtifactPaths artifacts = DispatchStabilityArtifactWriter.writeSoakResult(result, outputDirectory);
@@ -37,5 +38,17 @@ class DispatchSoakArtifactSmokeTest {
             return envValue;
         }
         return defaultValue;
+    }
+
+    private Integer optionalIntegerValue(String propertyName, String envName) {
+        String propertyValue = System.getProperty(propertyName);
+        if (propertyValue != null && !propertyValue.isBlank()) {
+            return Integer.parseInt(propertyValue);
+        }
+        String envValue = System.getenv(envName);
+        if (envValue != null && !envValue.isBlank()) {
+            return Integer.parseInt(envValue);
+        }
+        return null;
     }
 }

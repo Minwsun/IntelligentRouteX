@@ -111,6 +111,9 @@ public final class DispatchStabilityArtifactWriter {
         builder.append("- scenario: `").append(result.scenarioPack()).append("`\n");
         builder.append("- workload: `").append(result.workloadSize()).append("`\n");
         builder.append("- duration profile: `").append(result.durationProfile()).append("`\n");
+        builder.append("- authority class: `").append(result.runAuthorityClass()).append("`\n");
+        builder.append("- authority eligible: `").append(result.authorityEligible()).append("`\n");
+        builder.append("- sample override applied: `").append(result.sampleCountOverrideApplied()).append("`\n");
         builder.append("- sample count: `").append(result.sampleCount()).append("`\n");
         builder.append("- replay isolation maintained: `").append(result.replayIsolationMaintained()).append("`\n");
         builder.append("- snapshot stability: `").append(result.snapshotStability()).append("`\n");

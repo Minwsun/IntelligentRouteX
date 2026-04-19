@@ -30,6 +30,7 @@ class DispatchQualityBenchmarkHarnessTest {
                 DispatchQualityBenchmarkHarness.ExecutionMode.CONTROLLED,
                 DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL,
                 false,
+                false,
                 tempDir));
 
         assertEquals(3, run.rawResults().size());
@@ -49,6 +50,7 @@ class DispatchQualityBenchmarkHarnessTest {
                 DispatchQualityBenchmarkHarness.ScenarioPack.NORMAL_CLEAR,
                 DispatchQualityBenchmarkHarness.ExecutionMode.CONTROLLED,
                 DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL,
+                false,
                 false,
                 tempDir));
 
@@ -77,5 +79,43 @@ class DispatchQualityBenchmarkHarnessTest {
         assertFalse(result.deltaSummary().isEmpty());
         assertTrue(result.controlMetrics().conflictFreeAssignments());
         assertTrue(result.variantMetrics().conflictFreeAssignments());
+    }
+
+    @Test
+    void authorityLocalRealRunCarriesAuthorityClassification() {
+        DispatchQualityBenchmarkRun run = harness.benchmark(new DispatchQualityBenchmarkHarness.BenchmarkRequest(
+                List.of(DispatchPerfBenchmarkHarness.BaselineId.C),
+                DispatchPerfBenchmarkHarness.WorkloadSize.S,
+                DispatchQualityBenchmarkHarness.ScenarioPack.NORMAL_CLEAR,
+                DispatchQualityBenchmarkHarness.ExecutionMode.LOCAL_REAL,
+                DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL,
+                true,
+                false,
+                tempDir));
+
+        DispatchQualityBenchmarkResult result = run.rawResults().getFirst();
+        assertEquals("AUTHORITY_REAL", result.runAuthorityClass());
+        assertTrue(result.authoritative());
+        assertTrue(result.authorityEligible());
+        assertFalse(result.notes().contains("non-authoritative-local-real-run"));
+    }
+
+    @Test
+    void localRealRunWithoutAuthorityFlagRemainsNonAuthoritative() {
+        DispatchQualityBenchmarkRun run = harness.benchmark(new DispatchQualityBenchmarkHarness.BenchmarkRequest(
+                List.of(DispatchPerfBenchmarkHarness.BaselineId.C),
+                DispatchPerfBenchmarkHarness.WorkloadSize.S,
+                DispatchQualityBenchmarkHarness.ScenarioPack.NORMAL_CLEAR,
+                DispatchQualityBenchmarkHarness.ExecutionMode.LOCAL_REAL,
+                DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL,
+                false,
+                false,
+                tempDir));
+
+        DispatchQualityBenchmarkResult result = run.rawResults().getFirst();
+        assertEquals("LOCAL_NON_AUTHORITY", result.runAuthorityClass());
+        assertFalse(result.authoritative());
+        assertFalse(result.authorityEligible());
+        assertTrue(result.notes().contains("non-authoritative-local-real-run"));
     }
 }

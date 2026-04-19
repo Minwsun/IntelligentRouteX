@@ -111,15 +111,21 @@ public final class DispatchQualityBenchmarkHarness {
     private DispatchQualityBenchmarkResult runScenario(BenchmarkRequest request, DispatchPerfBenchmarkHarness.BaselineId baselineId) {
         DispatchV2Result result = executeDispatch(request, baselineId);
         List<String> notes = new ArrayList<>();
-        if (request.executionMode() == ExecutionMode.LOCAL_REAL) {
+        if (!request.authorityRun() && request.executionMode() == ExecutionMode.LOCAL_REAL) {
             notes.add("non-authoritative-local-real-run");
         }
+        String runAuthorityClass = request.authorityRun() ? "AUTHORITY_REAL" : "LOCAL_NON_AUTHORITY";
+        boolean authorityEligible = request.authorityRun() && notes.stream().noneMatch("non-authoritative-local-real-run"::equals);
         return new DispatchQualityBenchmarkResult(
                 "dispatch-quality-benchmark-result/v1",
                 Instant.now(),
                 gitCommit(),
                 DispatchPerfMachineProfile.capture(request.machineLabel()),
                 request.executionMode().wireName(),
+                runAuthorityClass,
+                request.authorityRun(),
+                authorityEligible,
+                false,
                 baselineId.name(),
                 request.scenarioPack().wireName(),
                 request.scenarioPack().wireName(),
@@ -149,6 +155,10 @@ public final class DispatchQualityBenchmarkHarness {
                 gitCommit(),
                 DispatchPerfMachineProfile.capture(request.machineLabel()),
                 request.executionMode().wireName(),
+                request.authorityRun() ? "AUTHORITY_REAL" : "LOCAL_NON_AUTHORITY",
+                request.authorityRun(),
+                false,
+                false,
                 baselineId.name(),
                 request.scenarioPack().wireName(),
                 request.scenarioPack().wireName(),
@@ -342,6 +352,10 @@ public final class DispatchQualityBenchmarkHarness {
                 request.scenarioPack().wireName(),
                 request.workloadSize().name(),
                 request.executionMode().wireName(),
+                request.authorityRun() ? "AUTHORITY_REAL" : "LOCAL_NON_AUTHORITY",
+                request.authorityRun(),
+                results.stream().allMatch(DispatchQualityBenchmarkResult::authorityEligible),
+                false,
                 List.copyOf(results),
                 List.copyOf(advantages),
                 List.copyOf(regressions),
@@ -848,6 +862,7 @@ public final class DispatchQualityBenchmarkHarness {
             ScenarioPack scenarioPack,
             ExecutionMode executionMode,
             String machineLabel,
+            boolean authorityRun,
             boolean runDeferredXl,
             Path outputRoot) {
     }

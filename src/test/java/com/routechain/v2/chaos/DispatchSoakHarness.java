@@ -49,6 +49,7 @@ public final class DispatchSoakHarness {
         List<Double> reuseHitSamples = new ArrayList<>();
         List<String> failures = new ArrayList<>();
         int sampleCount = request.sampleCountOverride() == null ? request.durationProfile().defaultSamples() : request.sampleCountOverride();
+        boolean sampleCountOverrideApplied = request.sampleCountOverride() != null;
 
         for (int sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++) {
             DispatchV2Request dispatchRequest = scenario.request(
@@ -82,19 +83,27 @@ public final class DispatchSoakHarness {
         if (!replayIsolationMaintained) {
             failures.add("replay-isolation-failed");
         }
-        if (request.executionMode() == DispatchPhase3Support.ExecutionMode.LOCAL_REAL) {
+        if (!request.authorityRun() && request.executionMode() == DispatchPhase3Support.ExecutionMode.LOCAL_REAL) {
             failures.add("non-authoritative-local-real-run");
         }
 
-        List<String> notes = request.executionMode() == DispatchPhase3Support.ExecutionMode.LOCAL_REAL
+        List<String> notes = !request.authorityRun() && request.executionMode() == DispatchPhase3Support.ExecutionMode.LOCAL_REAL
                 ? List.of("non-authoritative-local-real-run")
                 : List.of();
+        String runAuthorityClass = request.authorityRun() ? "AUTHORITY_REAL" : "LOCAL_NON_AUTHORITY";
+        boolean authorityEligible = request.authorityRun()
+                && !sampleCountOverrideApplied
+                && failures.stream().noneMatch("non-authoritative-local-real-run"::equals);
         return new DispatchSoakRunResult(
                 "dispatch-soak-run-result/v1",
                 Instant.now(),
                 DispatchPhase3Support.gitCommit(),
                 DispatchPerfMachineProfile.capture(request.machineLabel()),
                 request.executionMode().wireName(),
+                runAuthorityClass,
+                request.authorityRun(),
+                authorityEligible,
+                sampleCountOverrideApplied,
                 request.durationProfile().wireName(),
                 request.scenarioPack().wireName(),
                 request.workloadSize().name(),
@@ -159,6 +168,7 @@ public final class DispatchSoakHarness {
             DispatchPhase3Support.ScenarioPack scenarioPack,
             DispatchPhase3Support.ExecutionMode executionMode,
             String machineLabel,
+            boolean authorityRun,
             Integer sampleCountOverride,
             Path outputRoot) {
     }
