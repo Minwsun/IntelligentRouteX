@@ -15,20 +15,44 @@ class DispatchQualityArtifactSmokeTest {
 
     @Test
     void writesQualityBenchmarkArtifactsForRequestedCell() throws Exception {
+        String baselinesWire = value("dispatchQuality.baselines", "DISPATCH_QUALITY_BASELINES", "A,B,C");
+        String sizeWire = value("dispatchQuality.size", "DISPATCH_QUALITY_SIZE", "S");
+        String scenarioPackWire = value("dispatchQuality.scenarioPack", "DISPATCH_QUALITY_SCENARIO_PACK", "normal-clear");
+        String executionModeWire = value("dispatchQuality.executionMode", "DISPATCH_QUALITY_EXECUTION_MODE", "CONTROLLED");
+        boolean authority = Boolean.parseBoolean(value("dispatchQuality.authority", "DISPATCH_QUALITY_AUTHORITY", "false"));
+        String outputDirWire = value("dispatchQuality.outputDir", "DISPATCH_QUALITY_OUTPUT_DIR", "build/dispatch-quality-smoke");
+        System.out.printf(
+                "[CELL STARTED] baselines=%s size=%s scenario-pack=%s execution-mode=%s authority=%s%n",
+                baselinesWire,
+                sizeWire,
+                scenarioPackWire,
+                executionModeWire,
+                authority);
         List<DispatchPerfBenchmarkHarness.BaselineId> baselines = parseBaselines(value("dispatchQuality.baselines", "DISPATCH_QUALITY_BASELINES", "A,B,C"));
         DispatchQualityBenchmarkRun run = harness.benchmark(new DispatchQualityBenchmarkHarness.BenchmarkRequest(
                 baselines,
-                DispatchPerfBenchmarkHarness.WorkloadSize.valueOf(value("dispatchQuality.size", "DISPATCH_QUALITY_SIZE", "S")),
-                DispatchQualityBenchmarkHarness.ScenarioPack.fromWire(value("dispatchQuality.scenarioPack", "DISPATCH_QUALITY_SCENARIO_PACK", "normal-clear")),
-                DispatchQualityBenchmarkHarness.ExecutionMode.valueOf(value("dispatchQuality.executionMode", "DISPATCH_QUALITY_EXECUTION_MODE", "CONTROLLED").toUpperCase().replace('-', '_')),
+                DispatchPerfBenchmarkHarness.WorkloadSize.valueOf(sizeWire),
+                DispatchQualityBenchmarkHarness.ScenarioPack.fromWire(scenarioPackWire),
+                DispatchQualityBenchmarkHarness.ExecutionMode.valueOf(executionModeWire.toUpperCase().replace('-', '_')),
                 value("dispatchQuality.machineLabel", "DISPATCH_QUALITY_MACHINE_LABEL", DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL),
-                Boolean.parseBoolean(value("dispatchQuality.authority", "DISPATCH_QUALITY_AUTHORITY", "false")),
+                authority,
                 Boolean.parseBoolean(value("dispatchQuality.runDeferredXl", "DISPATCH_QUALITY_RUN_DEFERRED_XL", "false")),
-                Path.of(value("dispatchQuality.outputDir", "DISPATCH_QUALITY_OUTPUT_DIR", "build/dispatch-quality-smoke"))));
+                Path.of(outputDirWire)));
+        System.out.printf("[CELL ATTACH SNAPSHOT CAPTURED] worker-snapshots=%d%n",
+                run.rawResults().stream()
+                        .mapToInt(result -> result.workerStatusSnapshot().size())
+                        .sum());
+        System.out.printf("[CELL DISPATCH COMPLETED] raw-results=%d comparison=%s%n",
+                run.rawResults().size(),
+                run.comparisonReport() != null);
 
         DispatchQualityArtifactWriter.BenchmarkArtifacts artifacts = DispatchQualityArtifactWriter.writeBenchmarkRun(
                 run,
-                Path.of(value("dispatchQuality.outputDir", "DISPATCH_QUALITY_OUTPUT_DIR", "build/dispatch-quality-smoke")));
+                Path.of(outputDirWire));
+        System.out.printf("[CELL ARTIFACT WRITTEN] raw-json=%d raw-md=%d comparison-json=%s%n",
+                artifacts.rawJsonPaths().size(),
+                artifacts.rawMarkdownPaths().size(),
+                artifacts.comparisonJsonPath() != null);
 
         assertFalse(artifacts.rawJsonPaths().isEmpty());
         assertTrue(artifacts.rawJsonPaths().stream().allMatch(path -> path.toFile().isFile()));

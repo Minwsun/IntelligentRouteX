@@ -31,6 +31,13 @@ class BenchmarkCell:
     authority: bool
 
 
+@dataclass(frozen=True)
+class CellArtifacts:
+    json_paths: tuple[Path, ...]
+    markdown_paths: tuple[Path, ...]
+    csv_paths: tuple[Path, ...]
+
+
 def expand_selector(value: str, allowed: Sequence[str]) -> list[str]:
     if value == "all":
         return list(allowed)
@@ -41,6 +48,10 @@ def expand_selector(value: str, allowed: Sequence[str]) -> list[str]:
 
 def gradle_command() -> list[str]:
     return [str(REPO_ROOT / "gradlew.bat")] if os.name == "nt" else [str(REPO_ROOT / "gradlew")]
+
+
+def cell_label(cell: BenchmarkCell) -> str:
+    return f"{cell.baselines}/{cell.size}/{cell.scenario_pack}/{cell.execution_mode}/authority={str(cell.authority).lower()}"
 
 
 def planned_cells(args: argparse.Namespace) -> list[BenchmarkCell]:
@@ -75,6 +86,30 @@ def run_cell(cell: BenchmarkCell, output_dir: Path, runner=subprocess.run, run_d
         "DISPATCH_QUALITY_RUN_DEFERRED_XL": "true" if run_deferred_xl else "false",
     })
     return runner(command, cwd=REPO_ROOT, text=True, check=False, env=env)
+
+
+def artifact_snapshot(output_dir: Path) -> CellArtifacts:
+    if not output_dir.exists():
+        return CellArtifacts((), (), ())
+    json_paths = tuple(sorted(output_dir.glob("dispatch-quality*.json")))
+    markdown_paths = tuple(sorted(output_dir.glob("dispatch-quality*.md")))
+    csv_paths = tuple(sorted(output_dir.glob("dispatch-quality*.csv")))
+    return CellArtifacts(json_paths, markdown_paths, csv_paths)
+
+
+def artifact_delta(before: CellArtifacts, after: CellArtifacts) -> CellArtifacts:
+    return CellArtifacts(
+        tuple(path for path in after.json_paths if path not in before.json_paths),
+        tuple(path for path in after.markdown_paths if path not in before.markdown_paths),
+        tuple(path for path in after.csv_paths if path not in before.csv_paths),
+    )
+
+
+def ensure_cell_artifacts(cell: BenchmarkCell, delta: CellArtifacts) -> None:
+    if not delta.json_paths:
+        raise RuntimeError(f"{cell_label(cell)} completed without new JSON artifacts")
+    if not delta.markdown_paths:
+        raise RuntimeError(f"{cell_label(cell)} completed without new Markdown artifacts")
 
 
 def collect_results(output_dir: Path) -> list[dict]:
@@ -149,9 +184,27 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     failures: list[str] = []
     for cell in cells:
+        print(f"[CELL STARTED] {cell_label(cell)}")
+        before = artifact_snapshot(output_dir)
         completed = run_cell(cell, output_dir, run_deferred_xl=args.run_deferred_xl)
         if completed.returncode != 0:
-            failures.append(f"{cell.baselines}/{cell.size}/{cell.scenario_pack}/{cell.execution_mode}")
+            failures.append(cell_label(cell))
+            print(f"[CELL FAILED] {cell_label(cell)} returncode={completed.returncode}")
+            continue
+        after = artifact_snapshot(output_dir)
+        try:
+            delta = artifact_delta(before, after)
+            ensure_cell_artifacts(cell, delta)
+            print(f"[CELL DISPATCH COMPLETED] {cell_label(cell)} returncode=0")
+            summary_path = write_summary(collect_results(output_dir), output_dir)
+            print(
+                f"[CELL ARTIFACT WRITTEN] {cell_label(cell)} "
+                f"json={len(delta.json_paths)} md={len(delta.markdown_paths)} csv={len(delta.csv_paths)}"
+            )
+            print(f"[CELL SUMMARY UPDATED] {summary_path}")
+        except Exception as error:
+            failures.append(cell_label(cell))
+            print(f"[CELL FAILED] {cell_label(cell)} {error}")
 
     results = collect_results(output_dir)
     summary_path = write_summary(results, output_dir)

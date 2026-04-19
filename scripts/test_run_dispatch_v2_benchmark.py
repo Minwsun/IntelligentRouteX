@@ -31,7 +31,8 @@ class RunDispatchBenchmarkTest(unittest.TestCase):
             output_dir = Path(temp_dir)
 
             def fake_runner(command, cwd=None, text=None, check=None, env=None):
-                (output_dir / "dispatch-quality-normal-clear-s-controlled-a-20260418-000000.json").write_text(
+                stem = "dispatch-quality-normal-clear-s-controlled-a-20260418-000000"
+                (output_dir / f"{stem}.json").write_text(
                     json.dumps({
                         "baselineId": "A",
                         "scenarioPack": "normal-clear",
@@ -43,6 +44,7 @@ class RunDispatchBenchmarkTest(unittest.TestCase):
                     }),
                     encoding="utf-8",
                 )
+                (output_dir / f"{stem}.md").write_text("# result", encoding="utf-8")
                 return type("Completed", (), {"returncode": 0})()
 
             original_run_cell = benchmark_runner.run_cell
@@ -56,6 +58,76 @@ class RunDispatchBenchmarkTest(unittest.TestCase):
 
             self.assertEqual(0, exit_code)
             self.assertTrue((output_dir / "dispatch-quality-summary.md").is_file())
+
+    def test_runner_updates_summary_after_each_completed_cell(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            calls = {"count": 0}
+
+            def fake_run_cell(cell, output_dir_arg, runner=None, run_deferred_xl=False):
+                calls["count"] += 1
+                stem = f"dispatch-quality-{cell.scenario_pack}-{cell.size.lower()}-{cell.execution_mode}-a-20260418-00000{calls['count']}"
+                (output_dir_arg / f"{stem}.json").write_text(
+                    json.dumps({
+                        "baselineId": "A",
+                        "scenarioPack": cell.scenario_pack,
+                        "workloadSize": cell.size,
+                        "executionMode": cell.execution_mode,
+                        "runAuthorityClass": "LOCAL_NON_AUTHORITY",
+                        "authorityEligible": False,
+                        "metrics": {"selectedProposalCount": 1, "executedAssignmentCount": 1, "robustUtilityAverage": 0.5},
+                    }),
+                    encoding="utf-8",
+                )
+                (output_dir_arg / f"{stem}.md").write_text("# result", encoding="utf-8")
+                return type("Completed", (), {"returncode": 0})()
+
+            original_run_cell = benchmark_runner.run_cell
+            try:
+                benchmark_runner.run_cell = fake_run_cell
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = benchmark_runner.main([
+                        "--scenario-pack", "all",
+                        "--size", "S",
+                        "--execution-mode", "controlled",
+                        "--baseline", "A",
+                        "--output-dir", str(output_dir),
+                    ])
+            finally:
+                benchmark_runner.run_cell = original_run_cell
+
+            output = stdout.getvalue()
+            self.assertEqual(0, exit_code)
+            self.assertEqual(6, calls["count"])
+            self.assertIn("[CELL ARTIFACT WRITTEN]", output)
+            self.assertIn("[CELL SUMMARY UPDATED]", output)
+            self.assertTrue((output_dir / "dispatch-quality-summary.md").is_file())
+
+    def test_runner_fails_when_completed_cell_writes_no_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+
+            def fake_run_cell(cell, output_dir_arg, runner=None, run_deferred_xl=False):
+                return type("Completed", (), {"returncode": 0})()
+
+            original_run_cell = benchmark_runner.run_cell
+            try:
+                benchmark_runner.run_cell = fake_run_cell
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    exit_code = benchmark_runner.main([
+                        "--scenario-pack", "normal-clear",
+                        "--size", "S",
+                        "--baseline", "A",
+                        "--output-dir", str(output_dir),
+                    ])
+            finally:
+                benchmark_runner.run_cell = original_run_cell
+
+            output = stdout.getvalue()
+            self.assertEqual(1, exit_code)
+            self.assertIn("completed without new JSON artifacts", output)
 
 
 if __name__ == "__main__":
