@@ -7,17 +7,24 @@ import com.routechain.v2.DispatchStageLatency;
 import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
 import com.routechain.v2.LiveStageMetadata;
+import com.routechain.v2.harvest.emitters.DispatchHarvestService;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class DispatchEtaContextService {
     private final RouteChainDispatchV2Properties properties;
     private final EtaService etaService;
+    private final DispatchHarvestService dispatchHarvestService;
 
-    public DispatchEtaContextService(RouteChainDispatchV2Properties properties, EtaService etaService) {
+    public DispatchEtaContextService(RouteChainDispatchV2Properties properties,
+                                     EtaService etaService,
+                                     DispatchHarvestService dispatchHarvestService) {
         this.properties = properties;
         this.etaService = etaService;
+        this.dispatchHarvestService = dispatchHarvestService;
     }
 
     public DispatchEtaContextStage evaluate(DispatchV2Request request) {
@@ -33,7 +40,7 @@ public final class DispatchEtaContextService {
                     false,
                     false,
                     false);
-            return new DispatchEtaContextStage(
+            DispatchEtaContextStage stage = new DispatchEtaContextStage(
                     "dispatch-eta-context-stage/v1",
                     EtaContext.empty(request.traceId()),
                     new EtaStageTrace(
@@ -55,6 +62,8 @@ public final class DispatchEtaContextService {
                     List.of(),
                     LiveStageMetadata.emptyList(),
                     List.copyOf(degradeReasons));
+            emitObservation(request, stage);
+            return stage;
         }
 
         FreshnessMetadata freshnessMetadata = new FreshnessMetadata(
@@ -105,7 +114,7 @@ public final class DispatchEtaContextService {
                 estimate.trafficSourceAgeMs(),
                 estimate.etaUncertainty(),
                 estimate.degradeReasons());
-        return new DispatchEtaContextStage(
+        DispatchEtaContextStage stage = new DispatchEtaContextStage(
                 "dispatch-eta-context-stage/v1",
                 etaContext,
                 etaStageTrace,
@@ -114,6 +123,8 @@ public final class DispatchEtaContextService {
                 estimate.mlStageMetadata(),
                 estimate.liveStageMetadata(),
                 estimate.degradeReasons());
+        emitObservation(request, stage);
+        return stage;
     }
 
     public EtaContext buildDispatchContext(DispatchV2Request request) {
@@ -153,5 +164,46 @@ public final class DispatchEtaContextService {
 
     private long elapsedMs(long startedAt) {
         return (System.nanoTime() - startedAt) / 1_000_000L;
+    }
+
+    private void emitObservation(DispatchV2Request request, DispatchEtaContextStage stage) {
+        LinkedHashMap<String, Object> manifest = new LinkedHashMap<>();
+        manifest.put("startedAt", request.decisionTime());
+        manifest.put("environment", properties.isEnabled() ? "dispatch-v2" : "disabled");
+        manifest.put("profile", properties.getHarvest().getRuntimeProfile());
+        manifest.put("policyVersion", properties.getHarvest().getPolicyVersion());
+        manifest.put("bundleVersion", "dispatch-v2");
+        manifest.put("configDigest", Integer.toHexString(properties.hashCode()));
+        manifest.put("workerFingerprints", List.of());
+        manifest.put("notes", List.of("distillation-logging-v1"));
+        dispatchHarvestService.writeRunManifest(request, manifest);
+
+        LinkedHashMap<String, Object> observation = new LinkedHashMap<>();
+        observation.put("decisionTime", request.decisionTime());
+        observation.put("visibleOrders", request.openOrders() == null ? 0 : request.openOrders().size());
+        observation.put("visibleDrivers", request.availableDrivers() == null ? 0 : request.availableDrivers().size());
+        observation.put("visibleMerchantState", request.openOrders() == null ? List.of() : request.openOrders().stream().map(order -> order.orderId()).toList());
+        observation.put("visibleTrafficState", stage.freshnessMetadata().trafficFresh());
+        observation.put("visibleWeatherState", stage.freshnessMetadata().weatherFresh());
+        observation.put("warmState", stage.etaContext().corridorId());
+        observation.put("workerAvailability", stage.mlStageMetadata());
+        observation.put("liveSourceFreshness", stage.freshnessMetadata());
+        observation.put("degradeState", stage.degradeReasons());
+        dispatchHarvestService.writeObservation(request, observation);
+        for (var metadata : stage.mlStageMetadata()) {
+            dispatchHarvestService.writeTeacherTrace(
+                    "tabular-teacher-trace",
+                    "eta/context",
+                    request,
+                    "ETA",
+                    request.traceId() + "|eta-context",
+                    metadata,
+                    stage.etaContext().averageEtaMinutes(),
+                    stage.etaContext().averageUncertainty(),
+                    null,
+                    metadata.fallbackUsed(),
+                    stage.degradeReasons().isEmpty() ? "" : stage.degradeReasons().getFirst(),
+                    Map.of("corridorId", stage.etaContext().corridorId()));
+        }
     }
 }

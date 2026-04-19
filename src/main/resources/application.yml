@@ -129,6 +129,15 @@ routechain:
       replay-enabled: true
       storage-mode: IN_MEMORY
       base-dir: build/dispatch-v2-feedback
+    harvest:
+      enabled: false
+      compression-enabled: false
+      replay-emit-enabled: false
+      base-dir: data
+      runtime-profile: default
+      policy-version: dispatch-v2-distillation-logging/v1
+      build-commit: ${IRX_BUILD_COMMIT:unknown}
+      harvest-mode: LIVE
     warm-hot-start:
       load-latest-snapshot-on-boot: true
     performance:

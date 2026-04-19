@@ -28,6 +28,7 @@ public final class PairSimilarityGraphBuilder {
         List<PairEdge> edges = new ArrayList<>();
         List<String> degradeReasons = new ArrayList<>();
         List<MlStageMetadata> mlStageMetadata = new ArrayList<>();
+        List<PairScoringTrace> pairScoringTraces = new ArrayList<>();
         List<Order> orders = window.orders();
         int gatedPairCount = 0;
         for (int i = 0; i < orders.size(); i++) {
@@ -35,7 +36,9 @@ public final class PairSimilarityGraphBuilder {
                 Order left = orders.get(i);
                 Order right = orders.get(j);
                 PairFeatureVector featureVector = pairFeatureBuilder.build(window, left, right, etaContext, etaLegCache);
-                PairCompatibility compatibility = pairSimilarityScorer.score(featureVector);
+                PairScoringTrace scoringTrace = pairSimilarityScorer.scoreDetailed(featureVector);
+                PairCompatibility compatibility = scoringTrace.compatibility();
+                pairScoringTraces.add(scoringTrace);
                 if (compatibility.hardGatePassed()) {
                     gatedPairCount++;
                 }
@@ -59,6 +62,7 @@ public final class PairSimilarityGraphBuilder {
                         sortedEdges),
                 Math.max(0, (orders.size() * (orders.size() - 1)) / 2),
                 gatedPairCount,
+                List.copyOf(pairScoringTraces),
                 List.copyOf(mlStageMetadata.stream().distinct().toList()),
                 List.copyOf(degradeReasons.stream().distinct().toList()));
     }

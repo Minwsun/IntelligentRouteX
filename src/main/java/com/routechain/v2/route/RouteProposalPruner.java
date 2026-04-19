@@ -15,12 +15,27 @@ public final class RouteProposalPruner {
     }
 
     public List<RouteProposalCandidate> prune(List<RouteProposalCandidate> candidates) {
-        return candidates.stream()
+        return pruneDetailed(candidates).retainedCandidates();
+    }
+
+    RouteProposalPruneResult pruneDetailed(List<RouteProposalCandidate> candidates) {
+        java.util.List<RouteProposalPruneTrace> traces = new java.util.ArrayList<>();
+        java.util.List<RouteProposalCandidate> retained = candidates.stream()
                 .collect(java.util.stream.Collectors.groupingBy(RouteProposalCandidate::tupleKey, LinkedHashMap::new, java.util.stream.Collectors.toList()))
                 .values().stream()
-                .flatMap(tupleCandidates -> pruneTuple(tupleCandidates).stream())
+                .flatMap(tupleCandidates -> pruneTuple(tupleCandidates, traces).stream())
                 .sorted(comparator())
                 .toList();
+        java.util.Set<String> retainedIds = retained.stream().map(candidate -> candidate.proposal().proposalId()).collect(java.util.stream.Collectors.toSet());
+        for (RouteProposalCandidate candidate : candidates) {
+            if (traces.stream().noneMatch(trace -> trace.candidate().proposal().proposalId().equals(candidate.proposal().proposalId()))) {
+                traces.add(new RouteProposalPruneTrace(
+                        candidate,
+                        retainedIds.contains(candidate.proposal().proposalId()),
+                        retainedIds.contains(candidate.proposal().proposalId()) ? "" : "route-proposal-pruned"));
+            }
+        }
+        return new RouteProposalPruneResult(retained, java.util.List.copyOf(traces));
     }
 
     Comparator<RouteProposalCandidate> comparator() {
@@ -29,18 +44,31 @@ public final class RouteProposalPruner {
                 .thenComparing(candidate -> candidate.proposal().proposalId());
     }
 
-    private List<RouteProposalCandidate> pruneTuple(List<RouteProposalCandidate> tupleCandidates) {
+    private List<RouteProposalCandidate> pruneTuple(List<RouteProposalCandidate> tupleCandidates,
+                                                    java.util.List<RouteProposalPruneTrace> traces) {
         Map<String, RouteProposalCandidate> deduped = new LinkedHashMap<>();
         for (RouteProposalCandidate candidate : tupleCandidates.stream()
                 .filter(candidate -> candidate.proposal().feasible())
                 .sorted(comparator())
                 .toList()) {
             String dedupeKey = candidate.proposal().source().name() + "|" + RouteProposalEngine.stopOrderSignature(candidate.proposal().stopOrder());
+            if (deduped.containsKey(dedupeKey)) {
+                traces.add(new RouteProposalPruneTrace(candidate, false, "route-proposal-deduped"));
+                continue;
+            }
             deduped.putIfAbsent(dedupeKey, candidate);
         }
-        return deduped.values().stream()
+        List<RouteProposalCandidate> ranked = deduped.values().stream()
                 .sorted(comparator())
                 .limit(Math.max(1, properties.getCandidate().getMaxRouteAlternatives()))
                 .toList();
+        java.util.Set<String> retainedIds = ranked.stream().map(candidate -> candidate.proposal().proposalId()).collect(java.util.stream.Collectors.toSet());
+        for (RouteProposalCandidate candidate : deduped.values()) {
+            traces.add(new RouteProposalPruneTrace(
+                    candidate,
+                    retainedIds.contains(candidate.proposal().proposalId()),
+                    retainedIds.contains(candidate.proposal().proposalId()) ? "" : "route-proposal-top-n-truncated"));
+        }
+        return ranked;
     }
 }

@@ -29,6 +29,8 @@ import com.routechain.v2.feedback.SnapshotBuilder;
 import com.routechain.v2.feedback.SnapshotService;
 import com.routechain.v2.feedback.SnapshotStore;
 import com.routechain.v2.feedback.WarmStartManager;
+import com.routechain.v2.harvest.emitters.DispatchHarvestService;
+import com.routechain.v2.harvest.writers.HarvestWriter;
 import com.routechain.v2.bundle.BoundaryCandidateSelector;
 import com.routechain.v2.bundle.BoundaryExpansionEngine;
 import com.routechain.v2.bundle.BundleDominancePruner;
@@ -188,7 +190,9 @@ public final class TestDispatchV2Factory {
                 tabularScoringClient,
                 etaFeatureBuilder,
                 etaUncertaintyEstimator);
-        DispatchEtaContextService dispatchEtaContextService = configuration.dispatchEtaContextService(properties, etaService);
+        HarvestWriter harvestWriter = configuration.harvestWriter(properties);
+        DispatchHarvestService dispatchHarvestService = configuration.dispatchHarvestService(properties, harvestWriter);
+        DispatchEtaContextService dispatchEtaContextService = configuration.dispatchEtaContextService(properties, etaService, dispatchHarvestService);
         OrderBuffer orderBuffer = configuration.orderBuffer(properties);
         PairFeatureBuilder pairFeatureBuilder = configuration.pairFeatureBuilder(baselineTravelTimeEstimator);
         PairHardGateEvaluator pairHardGateEvaluator = configuration.pairHardGateEvaluator(properties);
@@ -207,7 +211,8 @@ public final class TestDispatchV2Factory {
                 orderBuffer,
                 pairSimilarityGraphBuilder,
                 etaLegCacheFactory,
-                microClusterer);
+                microClusterer,
+                dispatchHarvestService);
         BoundaryCandidateSelector boundaryCandidateSelector = configuration.boundaryCandidateSelector(properties);
         BoundaryExpansionEngine boundaryExpansionEngine = configuration.boundaryExpansionEngine(properties);
         BundleSeedGenerator bundleSeedGenerator = configuration.bundleSeedGenerator(properties);
@@ -224,7 +229,8 @@ public final class TestDispatchV2Factory {
                 bundleValidator,
                 bundleScorer,
                 bundleDominancePruner,
-                greedRlClient);
+                greedRlClient,
+                dispatchHarvestService);
         PickupAnchorSelector pickupAnchorSelector = configuration.pickupAnchorSelector(properties);
         DriverRouteFeatureBuilder driverRouteFeatureBuilder = configuration.driverRouteFeatureBuilder();
         CandidateDriverShortlister candidateDriverShortlister = configuration.candidateDriverShortlister(properties, driverRouteFeatureBuilder, tabularScoringClient);
@@ -233,7 +239,8 @@ public final class TestDispatchV2Factory {
                 pickupAnchorSelector,
                 candidateDriverShortlister,
                 driverReranker,
-                etaLegCacheFactory);
+                etaLegCacheFactory,
+                dispatchHarvestService);
         RouteProposalEngine routeProposalEngine = configuration.routeProposalEngine();
         RouteProposalValidator routeProposalValidator = configuration.routeProposalValidator();
         RouteValueScorer routeValueScorer = configuration.routeValueScorer(properties, tabularScoringClient);
@@ -245,7 +252,8 @@ public final class TestDispatchV2Factory {
                 routeValueScorer,
                 routeProposalPruner,
                 etaLegCacheFactory,
-                routeFinderClient);
+                routeFinderClient,
+                dispatchHarvestService);
         ScenarioGateEvaluator scenarioGateEvaluator = configuration.scenarioGateEvaluator(properties);
         ScenarioEvaluator scenarioEvaluator = configuration.scenarioEvaluator(properties);
         var demandShiftFeatureBuilder = configuration.demandShiftFeatureBuilder();
@@ -260,7 +268,8 @@ public final class TestDispatchV2Factory {
                 postDropShiftFeatureBuilder,
                 scenarioGateEvaluator,
                 scenarioEvaluator,
-                robustUtilityAggregator);
+                robustUtilityAggregator,
+                dispatchHarvestService);
         SelectorCandidateBuilder selectorCandidateBuilder = configuration.selectorCandidateBuilder(properties);
         ConflictGraphBuilder conflictGraphBuilder = configuration.conflictGraphBuilder();
         GreedyRepairSelector greedyRepairSelector = configuration.greedyRepairSelector();
@@ -272,7 +281,8 @@ public final class TestDispatchV2Factory {
         DispatchSelectorService dispatchSelectorService = configuration.dispatchSelectorService(
                 selectorCandidateBuilder,
                 conflictGraphBuilder,
-                globalSelector);
+                globalSelector,
+                dispatchHarvestService);
         DispatchAssignmentBuilder dispatchAssignmentBuilder = configuration.dispatchAssignmentBuilder();
         SelectedProposalResolver selectedProposalResolver = configuration.selectedProposalResolver();
         ExecutionConflictValidator executionConflictValidator = configuration.executionConflictValidator();
@@ -280,7 +290,7 @@ public final class TestDispatchV2Factory {
                 selectedProposalResolver,
                 executionConflictValidator,
                 dispatchAssignmentBuilder);
-        DispatchExecutorService dispatchExecutorService = configuration.dispatchExecutorService(dispatchExecutor);
+        DispatchExecutorService dispatchExecutorService = configuration.dispatchExecutorService(dispatchExecutor, dispatchHarvestService);
         DecisionLogAssembler decisionLogAssembler = configuration.decisionLogAssembler();
         DecisionLogWriter decisionLogWriter = configuration.decisionLogWriter(properties);
         DecisionLogService decisionLogService = configuration.decisionLogService(properties, decisionLogAssembler, decisionLogWriter);
@@ -311,7 +321,8 @@ public final class TestDispatchV2Factory {
                 dispatchSelectorService,
                 dispatchExecutorService,
                 warmStartManager,
-                postDispatchHardeningService);
+                postDispatchHardeningService,
+                dispatchHarvestService);
         DispatchReplayLoader dispatchReplayLoader = configuration.dispatchReplayLoader(
                 dispatchReplayRecorder,
                 decisionLogService,

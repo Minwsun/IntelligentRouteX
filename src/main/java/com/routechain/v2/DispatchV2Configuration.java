@@ -34,6 +34,11 @@ import com.routechain.v2.feedback.SnapshotBuilder;
 import com.routechain.v2.feedback.SnapshotService;
 import com.routechain.v2.feedback.SnapshotStore;
 import com.routechain.v2.feedback.WarmStartManager;
+import com.routechain.v2.harvest.emitters.DispatchHarvestService;
+import com.routechain.v2.harvest.reconcile.DispatchOutcomeReconciler;
+import com.routechain.v2.harvest.writers.FileHarvestWriter;
+import com.routechain.v2.harvest.writers.HarvestWriter;
+import com.routechain.v2.harvest.writers.NoOpHarvestWriter;
 import com.routechain.v2.cluster.DispatchPairClusterService;
 import com.routechain.v2.cluster.EtaLegCacheFactory;
 import com.routechain.v2.cluster.MicroClusterer;
@@ -248,8 +253,10 @@ public class DispatchV2Configuration {
     }
 
     @Bean
-    DispatchEtaContextService dispatchEtaContextService(RouteChainDispatchV2Properties properties, EtaService etaService) {
-        return new DispatchEtaContextService(properties, etaService);
+    DispatchEtaContextService dispatchEtaContextService(RouteChainDispatchV2Properties properties,
+                                                        EtaService etaService,
+                                                        DispatchHarvestService dispatchHarvestService) {
+        return new DispatchEtaContextService(properties, etaService, dispatchHarvestService);
     }
 
     @Bean
@@ -296,13 +303,15 @@ public class DispatchV2Configuration {
                                                           OrderBuffer orderBuffer,
                                                           PairSimilarityGraphBuilder pairSimilarityGraphBuilder,
                                                           EtaLegCacheFactory etaLegCacheFactory,
-                                                          MicroClusterer microClusterer) {
+                                                          MicroClusterer microClusterer,
+                                                          DispatchHarvestService dispatchHarvestService) {
         return new DispatchPairClusterService(
                 properties,
                 orderBuffer,
                 pairSimilarityGraphBuilder,
                 etaLegCacheFactory,
-                microClusterer);
+                microClusterer,
+                dispatchHarvestService);
     }
 
     @Bean
@@ -349,7 +358,8 @@ public class DispatchV2Configuration {
                                                           BundleValidator bundleValidator,
                                                           BundleScorer bundleScorer,
                                                           BundleDominancePruner bundleDominancePruner,
-                                                          GreedRlClient greedRlClient) {
+                                                          GreedRlClient greedRlClient,
+                                                          DispatchHarvestService dispatchHarvestService) {
         return new DispatchBundleStageService(
                 properties,
                 boundaryCandidateSelector,
@@ -359,7 +369,8 @@ public class DispatchV2Configuration {
                 bundleValidator,
                 bundleScorer,
                 bundleDominancePruner,
-                greedRlClient);
+                greedRlClient,
+                dispatchHarvestService);
     }
 
     @Bean
@@ -388,12 +399,14 @@ public class DispatchV2Configuration {
     DispatchRouteCandidateService dispatchRouteCandidateService(PickupAnchorSelector pickupAnchorSelector,
                                                                 CandidateDriverShortlister candidateDriverShortlister,
                                                                 DriverReranker driverReranker,
-                                                                EtaLegCacheFactory etaLegCacheFactory) {
+                                                                EtaLegCacheFactory etaLegCacheFactory,
+                                                                DispatchHarvestService dispatchHarvestService) {
         return new DispatchRouteCandidateService(
                 pickupAnchorSelector,
                 candidateDriverShortlister,
                 driverReranker,
-                etaLegCacheFactory);
+                etaLegCacheFactory,
+                dispatchHarvestService);
     }
 
     @Bean
@@ -424,7 +437,8 @@ public class DispatchV2Configuration {
                                                               RouteValueScorer routeValueScorer,
                                                               RouteProposalPruner routeProposalPruner,
                                                               EtaLegCacheFactory etaLegCacheFactory,
-                                                              RouteFinderClient routeFinderClient) {
+                                                              RouteFinderClient routeFinderClient,
+                                                              DispatchHarvestService dispatchHarvestService) {
         return new DispatchRouteProposalService(
                 properties,
                 routeProposalEngine,
@@ -432,7 +446,8 @@ public class DispatchV2Configuration {
                 routeValueScorer,
                 routeProposalPruner,
                 etaLegCacheFactory,
-                routeFinderClient);
+                routeFinderClient,
+                dispatchHarvestService);
     }
 
     @Bean
@@ -473,7 +488,8 @@ public class DispatchV2Configuration {
                                                     PostDropShiftFeatureBuilder postDropShiftFeatureBuilder,
                                                     ScenarioGateEvaluator scenarioGateEvaluator,
                                                     ScenarioEvaluator scenarioEvaluator,
-                                                    RobustUtilityAggregator robustUtilityAggregator) {
+                                                    RobustUtilityAggregator robustUtilityAggregator,
+                                                    DispatchHarvestService dispatchHarvestService) {
         return new DispatchScenarioService(
                 properties,
                 forecastClient,
@@ -482,7 +498,8 @@ public class DispatchV2Configuration {
                 postDropShiftFeatureBuilder,
                 scenarioGateEvaluator,
                 scenarioEvaluator,
-                robustUtilityAggregator);
+                robustUtilityAggregator,
+                dispatchHarvestService);
     }
 
     @Bean
@@ -515,8 +532,13 @@ public class DispatchV2Configuration {
     @Bean
     DispatchSelectorService dispatchSelectorService(SelectorCandidateBuilder selectorCandidateBuilder,
                                                     ConflictGraphBuilder conflictGraphBuilder,
-                                                    GlobalSelector globalSelector) {
-        return new DispatchSelectorService(selectorCandidateBuilder, conflictGraphBuilder, globalSelector);
+                                                    GlobalSelector globalSelector,
+                                                    DispatchHarvestService dispatchHarvestService) {
+        return new DispatchSelectorService(
+                selectorCandidateBuilder,
+                conflictGraphBuilder,
+                globalSelector,
+                dispatchHarvestService);
     }
 
     @Bean
@@ -542,8 +564,30 @@ public class DispatchV2Configuration {
     }
 
     @Bean
-    DispatchExecutorService dispatchExecutorService(DispatchExecutor dispatchExecutor) {
-        return new DispatchExecutorService(dispatchExecutor);
+    DispatchExecutorService dispatchExecutorService(DispatchExecutor dispatchExecutor,
+                                                    DispatchHarvestService dispatchHarvestService) {
+        return new DispatchExecutorService(
+                dispatchExecutor,
+                dispatchHarvestService);
+    }
+
+    @Bean
+    HarvestWriter harvestWriter(RouteChainDispatchV2Properties properties) {
+        if (!properties.getHarvest().isEnabled()) {
+            return new NoOpHarvestWriter();
+        }
+        return new FileHarvestWriter(java.nio.file.Path.of(properties.getHarvest().getBaseDir()));
+    }
+
+    @Bean
+    DispatchHarvestService dispatchHarvestService(RouteChainDispatchV2Properties properties,
+                                                  HarvestWriter harvestWriter) {
+        return new DispatchHarvestService(properties.getHarvest(), harvestWriter);
+    }
+
+    @Bean
+    DispatchOutcomeReconciler dispatchOutcomeReconciler(HarvestWriter harvestWriter) {
+        return new DispatchOutcomeReconciler(harvestWriter);
     }
 
     @Bean
@@ -662,7 +706,8 @@ public class DispatchV2Configuration {
                                   DispatchSelectorService dispatchSelectorService,
                                   DispatchExecutorService dispatchExecutorService,
                                   WarmStartManager warmStartManager,
-                                  PostDispatchHardeningService postDispatchHardeningService) {
+                                  PostDispatchHardeningService postDispatchHardeningService,
+                                  DispatchHarvestService dispatchHarvestService) {
         return new DispatchV2Core(
                 properties,
                 dispatchEtaContextService,
@@ -674,7 +719,8 @@ public class DispatchV2Configuration {
                 dispatchSelectorService,
                 dispatchExecutorService,
                 warmStartManager,
-                postDispatchHardeningService);
+                postDispatchHardeningService,
+                dispatchHarvestService);
     }
 
     @Bean

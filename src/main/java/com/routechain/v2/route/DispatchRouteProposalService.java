@@ -14,6 +14,8 @@ import com.routechain.v2.cluster.EtaLegCache;
 import com.routechain.v2.cluster.EtaLegCacheFactory;
 import com.routechain.v2.feedback.ReuseStateBuilder;
 import com.routechain.v2.feedback.RouteProposalTupleReuseEntry;
+import com.routechain.v2.harvest.emitters.DispatchHarvestService;
+import com.routechain.v2.harvest.writers.NoOpHarvestWriter;
 import com.routechain.v2.integration.MlStageMetadataAccumulator;
 import com.routechain.v2.integration.RouteFinderClient;
 import com.routechain.v2.integration.RouteFinderFeatureVector;
@@ -22,6 +24,7 @@ import com.routechain.v2.integration.RouteFinderResult;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -34,6 +37,7 @@ public final class DispatchRouteProposalService {
     private final RouteProposalPruner routeProposalPruner;
     private final EtaLegCacheFactory etaLegCacheFactory;
     private final RouteFinderClient routeFinderClient;
+    private final DispatchHarvestService dispatchHarvestService;
 
     public DispatchRouteProposalService(RouteChainDispatchV2Properties properties,
                                         RouteProposalEngine routeProposalEngine,
@@ -42,6 +46,25 @@ public final class DispatchRouteProposalService {
                                         RouteProposalPruner routeProposalPruner,
                                         EtaLegCacheFactory etaLegCacheFactory,
                                         RouteFinderClient routeFinderClient) {
+        this(
+                properties,
+                routeProposalEngine,
+                routeProposalValidator,
+                routeValueScorer,
+                routeProposalPruner,
+                etaLegCacheFactory,
+                routeFinderClient,
+                new DispatchHarvestService(RouteChainDispatchV2Properties.defaults().getHarvest(), new NoOpHarvestWriter()));
+    }
+
+    public DispatchRouteProposalService(RouteChainDispatchV2Properties properties,
+                                        RouteProposalEngine routeProposalEngine,
+                                        RouteProposalValidator routeProposalValidator,
+                                        RouteValueScorer routeValueScorer,
+                                        RouteProposalPruner routeProposalPruner,
+                                        EtaLegCacheFactory etaLegCacheFactory,
+                                        RouteFinderClient routeFinderClient,
+                                        DispatchHarvestService dispatchHarvestService) {
         this.properties = properties;
         this.routeProposalEngine = routeProposalEngine;
         this.routeProposalValidator = routeProposalValidator;
@@ -49,6 +72,7 @@ public final class DispatchRouteProposalService {
         this.routeProposalPruner = routeProposalPruner;
         this.etaLegCacheFactory = etaLegCacheFactory;
         this.routeFinderClient = routeFinderClient;
+        this.dispatchHarvestService = dispatchHarvestService;
     }
 
     public DispatchRouteProposalStage evaluate(DispatchV2Request request,
@@ -93,12 +117,15 @@ public final class DispatchRouteProposalService {
         List<RouteValueScoringOutcome> scoringOutcomes = validatedFresh.stream()
                 .map(candidate -> routeValueScorer.score(request.traceId(), candidate, context))
                 .toList();
+        emitRouteValueTeacherTraces(request, scoringOutcomes);
         List<RouteProposalCandidate> scored = new ArrayList<>(reusePreparation.reusedCandidates());
         scored.addAll(scoringOutcomes.stream()
                 .map(RouteValueScoringOutcome::candidate)
                 .toList());
-        List<RouteProposalCandidate> retained = routeProposalPruner.prune(scored);
+        RouteProposalPruneResult pruneResult = routeProposalPruner.pruneDetailed(scored);
+        List<RouteProposalCandidate> retained = pruneResult.retainedCandidates();
         List<RouteProposal> routeProposals = retained.stream().map(RouteProposalCandidate::proposal).toList();
+        emitRouteProposalCandidates(request, scored, pruneResult);
         List<String> degradeReasons = java.util.stream.Stream.of(
                         reusePreparation.degradeReasons().stream(),
                         routeFinderGeneration.degradeReasons().stream(),
@@ -229,6 +256,7 @@ public final class DispatchRouteProposalService {
                     featureVector,
                     properties.getMl().getRoutefinder().getAlternativesTimeout().toMillis());
             mlStageMetadataAccumulator.accept(alternatives);
+            emitRouteFinderTeacherTrace(traceId, seed, "ROUTE_ALTERNATIVES", alternatives);
             if (alternatives.applied()) {
                 generatedCandidates.addAll(alternatives.routes().stream()
                         .limit(Math.max(1, properties.getMl().getRoutefinder().getMaxAlternativesPerDriverCandidate()))
@@ -249,6 +277,7 @@ public final class DispatchRouteProposalService {
                     featureVector,
                     properties.getMl().getRoutefinder().getRefineTimeout().toMillis());
             mlStageMetadataAccumulator.accept(refined);
+            emitRouteFinderTeacherTrace(traceId, seed, "ROUTE_REFINED", refined);
             if (refined.applied()) {
                 refined.routes().stream().findFirst()
                         .map(route -> routeProposalEngine.externalCandidate(
@@ -360,5 +389,92 @@ public final class DispatchRouteProposalService {
 
     private long elapsedMs(long startedAt) {
         return (System.nanoTime() - startedAt) / 1_000_000L;
+    }
+
+    private void emitRouteFinderTeacherTrace(String traceId,
+                                             RouteProposalCandidate seed,
+                                             String entityType,
+                                             RouteFinderResult result) {
+        if (result.workerMetadata().sourceModel().isBlank()) {
+            return;
+        }
+        DispatchV2Request request = new DispatchV2Request(
+                "dispatch-v2-request/v1",
+                traceId,
+                List.of(),
+                List.of(),
+                List.of(),
+                null,
+                java.time.Instant.now());
+        dispatchHarvestService.writeTeacherTrace(
+                "routefinder-teacher-trace",
+                "route-proposal-pool",
+                request,
+                entityType,
+                seed.proposal().bundleId() + "|" + seed.proposal().anchorOrderId() + "|" + seed.proposal().driverId(),
+                new MlStageMetadata(
+                        "ml-stage-metadata/v1",
+                        "route-proposal-pool",
+                        result.workerMetadata().sourceModel(),
+                        result.workerMetadata().modelVersion(),
+                        result.workerMetadata().artifactDigest(),
+                        result.workerMetadata().latencyMs(),
+                        result.applied(),
+                        result.fallbackUsed()),
+                null,
+                null,
+                null,
+                result.fallbackUsed(),
+                result.degradeReason(),
+                Map.of("routeCount", result.routes().size()));
+    }
+
+    private void emitRouteValueTeacherTraces(DispatchV2Request request,
+                                             List<RouteValueScoringOutcome> scoringOutcomes) {
+        for (RouteValueScoringOutcome outcome : scoringOutcomes) {
+            for (MlStageMetadata metadata : outcome.mlStageMetadata()) {
+                dispatchHarvestService.writeTeacherTrace(
+                        "tabular-teacher-trace",
+                        "route-proposal-pool",
+                        request,
+                        "ROUTE_VALUE",
+                        outcome.candidate().proposal().proposalId(),
+                        metadata,
+                        outcome.candidate().proposal().routeValue(),
+                        null,
+                        null,
+                        metadata.fallbackUsed(),
+                        outcome.degradeReasons().isEmpty() ? "" : outcome.degradeReasons().getFirst(),
+                        Map.of("proposalId", outcome.candidate().proposal().proposalId()));
+            }
+        }
+    }
+
+    private void emitRouteProposalCandidates(DispatchV2Request request,
+                                             List<RouteProposalCandidate> scored,
+                                             RouteProposalPruneResult pruneResult) {
+        Map<String, RouteProposalPruneTrace> byProposalId = pruneResult.traces().stream()
+                .collect(java.util.stream.Collectors.toMap(trace -> trace.candidate().proposal().proposalId(), trace -> trace, (left, right) -> left));
+        List<Map<String, Object>> payloads = new ArrayList<>();
+        for (RouteProposalCandidate candidate : scored) {
+            RouteProposalPruneTrace trace = byProposalId.get(candidate.proposal().proposalId());
+            LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+            payload.put("proposalId", candidate.proposal().proposalId());
+            payload.put("bundleId", candidate.proposal().bundleId());
+            payload.put("driverId", candidate.proposal().driverId());
+            payload.put("anchorOrderId", candidate.proposal().anchorOrderId());
+            payload.put("source", candidate.proposal().source().name());
+            payload.put("stopOrder", candidate.proposal().stopOrder());
+            payload.put("projectedPickupEtaMinutes", candidate.proposal().projectedPickupEtaMinutes());
+            payload.put("projectedCompletionEtaMinutes", candidate.proposal().projectedCompletionEtaMinutes());
+            payload.put("routeValue", candidate.proposal().routeValue());
+            payload.put("routeFinderTraceKeys", List.of(candidate.proposal().bundleId(), candidate.proposal().driverId()));
+            payload.put("feasible", candidate.proposal().feasible());
+            payload.put("pruned", trace != null && !trace.retained());
+            payload.put("pruneReason", trace == null ? "" : trace.pruneReason());
+            payload.put("retained", trace != null && trace.retained());
+            payloads.add(payload);
+        }
+        dispatchHarvestService.writeRecords("route-proposal-candidate", "route-proposal-pool", request, payloads);
     }
 }

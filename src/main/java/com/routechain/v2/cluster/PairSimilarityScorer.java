@@ -22,39 +22,59 @@ public final class PairSimilarityScorer {
     }
 
     public PairCompatibility score(PairFeatureVector features) {
+        return scoreDetailed(features).compatibility();
+    }
+
+    PairScoringTrace scoreDetailed(PairFeatureVector features) {
         PairGateDecision gate = pairHardGateEvaluator.evaluate(features);
         List<String> degradeReasons = new ArrayList<>(gate.reasons());
         if (!gate.passed()) {
-            return new PairCompatibility(
+            return new PairScoringTrace(
+                    features,
+                    gate,
+                    0.0,
+                    null,
+                    new PairCompatibility(
                     "pair-compatibility/v1",
                     features.leftOrderId(),
                     features.rightOrderId(),
                     0.0,
                     false,
                     List.of(),
-                    List.copyOf(degradeReasons));
+                    List.copyOf(degradeReasons)),
+                    TabularScoreResult.notApplied("pair-hard-gate-failed"));
         }
 
-        double score = deterministicScore(features);
+        double deterministicScore = deterministicScore(features);
+        double score = deterministicScore;
+        Double tabularScore = null;
+        TabularScoreResult tabularScoreResult = TabularScoreResult.notApplied("pair-ml-disabled");
         MlStageMetadataAccumulator mlStageMetadataAccumulator = new MlStageMetadataAccumulator("pair-graph");
         if (properties.isMlEnabled() && properties.getMl().getTabular().isEnabled()) {
-            TabularScoreResult scoreResult = tabularScoringClient.scorePair(features, properties.getPair().getMlTimeout().toMillis());
-            mlStageMetadataAccumulator.accept(scoreResult);
-            if (scoreResult.applied()) {
-                score = Math.max(0.0, Math.min(1.0, score + scoreResult.value()));
+            tabularScoreResult = tabularScoringClient.scorePair(features, properties.getPair().getMlTimeout().toMillis());
+            mlStageMetadataAccumulator.accept(tabularScoreResult);
+            if (tabularScoreResult.applied()) {
+                tabularScore = tabularScoreResult.value();
+                score = Math.max(0.0, Math.min(1.0, score + tabularScoreResult.value()));
             } else {
                 degradeReasons.add("pair-ml-unavailable");
             }
         }
 
-        return new PairCompatibility(
+        return new PairScoringTrace(
+                features,
+                gate,
+                deterministicScore,
+                tabularScore,
+                new PairCompatibility(
                 "pair-compatibility/v1",
                 features.leftOrderId(),
                 features.rightOrderId(),
                 score,
                 true,
                 mlStageMetadataAccumulator.build().map(List::of).orElse(List.of()),
-                List.copyOf(degradeReasons));
+                List.copyOf(degradeReasons)),
+                tabularScoreResult);
     }
 
     private double deterministicScore(PairFeatureVector features) {

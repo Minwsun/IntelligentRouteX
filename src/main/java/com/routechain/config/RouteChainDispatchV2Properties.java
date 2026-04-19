@@ -1,6 +1,7 @@
 package com.routechain.config;
 
 import com.routechain.v2.feedback.FeedbackStorageMode;
+import com.routechain.v2.harvest.contracts.HarvestMode;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
@@ -32,6 +33,7 @@ public class RouteChainDispatchV2Properties {
     private final Weather weather = new Weather();
     private final Traffic traffic = new Traffic();
     private final Feedback feedback = new Feedback();
+    private final Harvest harvest = new Harvest();
     private final WarmHotStart warmHotStart = new WarmHotStart();
     private final Performance performance = new Performance();
 
@@ -165,6 +167,10 @@ public class RouteChainDispatchV2Properties {
 
     public Feedback getFeedback() {
         return feedback;
+    }
+
+    public Harvest getHarvest() {
+        return harvest;
     }
 
     public WarmHotStart getWarmHotStart() {
@@ -1107,6 +1113,81 @@ public class RouteChainDispatchV2Properties {
 
         public void setLoadLatestSnapshotOnBoot(boolean loadLatestSnapshotOnBoot) {
             this.loadLatestSnapshotOnBoot = loadLatestSnapshotOnBoot;
+        }
+    }
+
+    public static final class Harvest {
+        private boolean enabled = false;
+        private boolean compressionEnabled = false;
+        private boolean replayEmitEnabled = false;
+        private String baseDir = "data";
+        private String runtimeProfile = "default";
+        private String policyVersion = "dispatch-v2-distillation-logging/v1";
+        private String buildCommit = System.getenv().getOrDefault("IRX_BUILD_COMMIT", "unknown");
+        private HarvestMode harvestMode = HarvestMode.LIVE;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public boolean isCompressionEnabled() {
+            return compressionEnabled;
+        }
+
+        public void setCompressionEnabled(boolean compressionEnabled) {
+            this.compressionEnabled = compressionEnabled;
+        }
+
+        public boolean isReplayEmitEnabled() {
+            return replayEmitEnabled;
+        }
+
+        public void setReplayEmitEnabled(boolean replayEmitEnabled) {
+            this.replayEmitEnabled = replayEmitEnabled;
+        }
+
+        public String getBaseDir() {
+            return baseDir;
+        }
+
+        public void setBaseDir(String baseDir) {
+            this.baseDir = baseDir;
+        }
+
+        public String getRuntimeProfile() {
+            return runtimeProfile;
+        }
+
+        public void setRuntimeProfile(String runtimeProfile) {
+            this.runtimeProfile = runtimeProfile;
+        }
+
+        public String getPolicyVersion() {
+            return policyVersion;
+        }
+
+        public void setPolicyVersion(String policyVersion) {
+            this.policyVersion = policyVersion;
+        }
+
+        public String getBuildCommit() {
+            return buildCommit;
+        }
+
+        public void setBuildCommit(String buildCommit) {
+            this.buildCommit = buildCommit;
+        }
+
+        public HarvestMode getHarvestMode() {
+            return harvestMode;
+        }
+
+        public void setHarvestMode(HarvestMode harvestMode) {
+            this.harvestMode = harvestMode == null ? HarvestMode.LIVE : harvestMode;
         }
     }
 

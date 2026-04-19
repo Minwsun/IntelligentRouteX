@@ -5,26 +5,48 @@ import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.DispatchStageLatency;
 import com.routechain.v2.EtaContext;
 import com.routechain.v2.HotStartReuseSummary;
+import com.routechain.v2.MlStageMetadata;
 import com.routechain.v2.feedback.ReuseStateBuilder;
+import com.routechain.v2.harvest.emitters.DispatchHarvestService;
+import com.routechain.v2.harvest.writers.NoOpHarvestWriter;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class DispatchPairClusterService {
     private final OrderBuffer orderBuffer;
     private final PairSimilarityGraphBuilder pairSimilarityGraphBuilder;
     private final EtaLegCacheFactory etaLegCacheFactory;
     private final MicroClusterer microClusterer;
+    private final DispatchHarvestService dispatchHarvestService;
 
     public DispatchPairClusterService(RouteChainDispatchV2Properties properties,
                                       OrderBuffer orderBuffer,
                                       PairSimilarityGraphBuilder pairSimilarityGraphBuilder,
                                       EtaLegCacheFactory etaLegCacheFactory,
                                       MicroClusterer microClusterer) {
+        this(
+                properties,
+                orderBuffer,
+                pairSimilarityGraphBuilder,
+                etaLegCacheFactory,
+                microClusterer,
+                new DispatchHarvestService(RouteChainDispatchV2Properties.defaults().getHarvest(), new NoOpHarvestWriter()));
+    }
+
+    public DispatchPairClusterService(RouteChainDispatchV2Properties properties,
+                                      OrderBuffer orderBuffer,
+                                      PairSimilarityGraphBuilder pairSimilarityGraphBuilder,
+                                      EtaLegCacheFactory etaLegCacheFactory,
+                                      MicroClusterer microClusterer,
+                                      DispatchHarvestService dispatchHarvestService) {
         this.orderBuffer = orderBuffer;
         this.pairSimilarityGraphBuilder = pairSimilarityGraphBuilder;
         this.etaLegCacheFactory = etaLegCacheFactory;
         this.microClusterer = microClusterer;
+        this.dispatchHarvestService = dispatchHarvestService;
     }
 
     public DispatchPairClusterStage evaluate(DispatchV2Request request, EtaContext etaContext) {
@@ -100,6 +122,7 @@ public final class DispatchPairClusterService {
                 bufferedOrderWindow,
                 etaContext,
                 etaLegCache);
+        emitPairCandidates(request, graphBuildResult);
         long pairGraphElapsedMs = elapsedMs(pairGraphStartedAt);
         PairSimilarityGraph graph = graphBuildResult.graph();
         List<String> degradeReasons = new ArrayList<>(graphBuildResult.degradeReasons());
@@ -148,5 +171,45 @@ public final class DispatchPairClusterService {
 
     private long elapsedMs(long startedAt) {
         return (System.nanoTime() - startedAt) / 1_000_000L;
+    }
+
+    private void emitPairCandidates(DispatchV2Request request, PairSimilarityGraphBuildResult graphBuildResult) {
+        List<Map<String, Object>> payloads = new ArrayList<>();
+        for (PairScoringTrace trace : graphBuildResult.pairScoringTraces()) {
+            LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+            String pairKey = trace.featureVector().leftOrderId() + "|" + trace.featureVector().rightOrderId();
+            payload.put("pairKey", pairKey);
+            payload.put("leftOrderId", trace.featureVector().leftOrderId());
+            payload.put("rightOrderId", trace.featureVector().rightOrderId());
+            payload.put("pairFeatures", trace.featureVector());
+            payload.put("hardGatePassed", trace.gateDecision().passed());
+            payload.put("hardGateReasons", trace.gateDecision().reasons());
+            payload.put("deterministicPairScore", trace.deterministicScore());
+            payload.put("tabularPairScore", trace.tabularScore());
+            payload.put("finalPairScore", trace.compatibility().score());
+            payload.put("kept", trace.compatibility().hardGatePassed() && trace.compatibility().score() > 0.0);
+            payload.put("dropped", !trace.compatibility().hardGatePassed() || trace.compatibility().score() <= 0.0);
+            payload.put("edgeCreated", trace.compatibility().hardGatePassed() && trace.compatibility().score() > 0.0);
+            payloads.add(payload);
+
+            List<MlStageMetadata> metadata = trace.compatibility().mlStageMetadata();
+            if (!metadata.isEmpty()) {
+                MlStageMetadata current = metadata.getFirst();
+                dispatchHarvestService.writeTeacherTrace(
+                        "tabular-teacher-trace",
+                        "pair-graph",
+                        request,
+                        "PAIR",
+                        pairKey,
+                        current,
+                        trace.tabularScore(),
+                        trace.tabularScoreResult().uncertainty(),
+                        null,
+                        trace.tabularScoreResult().fallbackUsed(),
+                        trace.tabularScoreResult().degradeReason(),
+                        Map.of("leftOrderId", trace.featureVector().leftOrderId(), "rightOrderId", trace.featureVector().rightOrderId()));
+            }
+        }
+        dispatchHarvestService.writeRecords("pair-candidate", "pair-graph", request, payloads);
     }
 }

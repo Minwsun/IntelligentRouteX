@@ -18,18 +18,34 @@ public final class PickupAnchorSelector {
     }
 
     public List<PickupAnchor> select(List<com.routechain.v2.bundle.BundleCandidate> bundles, DispatchCandidateContext context) {
+        return selectDetailed(bundles, context).selectedAnchors();
+    }
+
+    AnchorSelectionResult selectDetailed(List<com.routechain.v2.bundle.BundleCandidate> bundles, DispatchCandidateContext context) {
         List<PickupAnchor> anchors = new ArrayList<>();
+        List<AnchorCandidateTrace> candidateTraces = new ArrayList<>();
         for (BundleCandidate bundle : bundles.stream().sorted(Comparator.comparing(BundleCandidate::bundleId)).toList()) {
             List<Order> orders = bundle.orderIds().stream()
                     .map(context::order)
                     .filter(java.util.Objects::nonNull)
                     .toList();
-            List<PickupAnchor> rankedAnchors = orders.stream()
+            List<PickupAnchor> allAnchors = orders.stream()
                     .map(order -> anchor(bundle, order, context, orders))
+                    .sorted(Comparator.comparingDouble(PickupAnchor::score).reversed()
+                            .thenComparing(PickupAnchor::anchorOrderId))
+                    .toList();
+            List<PickupAnchor> rankedAnchors = allAnchors.stream()
                     .sorted(Comparator.comparingDouble(PickupAnchor::score).reversed()
                             .thenComparing(PickupAnchor::anchorOrderId))
                     .limit(Math.max(1, properties.getCandidate().getMaxAnchors()))
                     .toList();
+            java.util.Set<String> retained = rankedAnchors.stream().map(PickupAnchor::anchorOrderId).collect(java.util.stream.Collectors.toSet());
+            for (PickupAnchor candidate : allAnchors) {
+                candidateTraces.add(new AnchorCandidateTrace(
+                        candidate,
+                        retained.contains(candidate.anchorOrderId()),
+                        retained.contains(candidate.anchorOrderId()) ? "" : "anchor-top-n-truncated"));
+            }
             int rank = 1;
             for (PickupAnchor anchor : rankedAnchors) {
                 anchors.add(new PickupAnchor(
@@ -42,7 +58,7 @@ public final class PickupAnchorSelector {
                         anchor.reasons()));
             }
         }
-        return List.copyOf(anchors);
+        return new AnchorSelectionResult(List.copyOf(anchors), List.copyOf(candidateTraces));
     }
 
     private PickupAnchor anchor(BundleCandidate bundle, Order anchorOrder, DispatchCandidateContext context, List<Order> bundleOrders) {

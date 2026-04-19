@@ -9,24 +9,43 @@ import com.routechain.v2.bundle.DispatchBundleStage;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.cluster.EtaLegCache;
 import com.routechain.v2.cluster.EtaLegCacheFactory;
+import com.routechain.v2.harvest.emitters.DispatchHarvestService;
+import com.routechain.v2.harvest.writers.NoOpHarvestWriter;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class DispatchRouteCandidateService {
     private final PickupAnchorSelector pickupAnchorSelector;
     private final CandidateDriverShortlister candidateDriverShortlister;
     private final DriverReranker driverReranker;
     private final EtaLegCacheFactory etaLegCacheFactory;
+    private final DispatchHarvestService dispatchHarvestService;
 
     public DispatchRouteCandidateService(PickupAnchorSelector pickupAnchorSelector,
                                          CandidateDriverShortlister candidateDriverShortlister,
                                          DriverReranker driverReranker,
                                          EtaLegCacheFactory etaLegCacheFactory) {
+        this(
+                pickupAnchorSelector,
+                candidateDriverShortlister,
+                driverReranker,
+                etaLegCacheFactory,
+                new DispatchHarvestService(com.routechain.config.RouteChainDispatchV2Properties.defaults().getHarvest(), new NoOpHarvestWriter()));
+    }
+
+    public DispatchRouteCandidateService(PickupAnchorSelector pickupAnchorSelector,
+                                         CandidateDriverShortlister candidateDriverShortlister,
+                                         DriverReranker driverReranker,
+                                         EtaLegCacheFactory etaLegCacheFactory,
+                                         DispatchHarvestService dispatchHarvestService) {
         this.pickupAnchorSelector = pickupAnchorSelector;
         this.candidateDriverShortlister = candidateDriverShortlister;
         this.driverReranker = driverReranker;
         this.etaLegCacheFactory = etaLegCacheFactory;
+        this.dispatchHarvestService = dispatchHarvestService;
     }
 
     public DispatchRouteCandidateStage evaluate(DispatchV2Request request,
@@ -39,7 +58,8 @@ public final class DispatchRouteCandidateService {
                 pairClusterStage,
                 bundleStage);
         long pickupAnchorStartedAt = System.nanoTime();
-        List<PickupAnchor> pickupAnchors = pickupAnchorSelector.select(bundleStage.bundleCandidates(), context);
+        AnchorSelectionResult anchorSelection = pickupAnchorSelector.selectDetailed(bundleStage.bundleCandidates(), context);
+        List<PickupAnchor> pickupAnchors = anchorSelection.selectedAnchors();
         long pickupAnchorElapsedMs = elapsedMs(pickupAnchorStartedAt);
         EtaLegCache etaLegCache = etaLegCacheFactory.create(
                 request.traceId(),
@@ -51,7 +71,7 @@ public final class DispatchRouteCandidateService {
         List<String> stageDegradeReasons = new ArrayList<>();
         int rawShortlistedCount = 0;
         for (PickupAnchor pickupAnchor : pickupAnchors) {
-            DriverShortlistResult shortlistResult = candidateDriverShortlister.shortlist(
+            DriverShortlistDetailedResult shortlistResult = candidateDriverShortlister.shortlistDetailed(
                     request.traceId(),
                     context.availableDrivers(),
                     pickupAnchor,
@@ -62,8 +82,11 @@ public final class DispatchRouteCandidateService {
             rawShortlistedCount += shortlisted.size();
             stageDegradeReasons.addAll(shortlistResult.degradeReasons());
             mlStageMetadata.addAll(shortlistResult.mlStageMetadata());
-            driverCandidates.addAll(driverReranker.rerank(pickupAnchor, shortlisted));
+            List<DriverCandidate> rerankedCandidates = driverReranker.rerank(pickupAnchor, shortlisted);
+            emitDriverCandidates(request, pickupAnchor, shortlistResult, rerankedCandidates);
+            driverCandidates.addAll(rerankedCandidates);
         }
+        emitAnchorCandidates(request, anchorSelection);
         long shortlistElapsedMs = elapsedMs(shortlistStartedAt);
         List<String> degradeReasons = java.util.stream.Stream.concat(
                         driverCandidates.stream().flatMap(candidate -> candidate.degradeReasons().stream()),
@@ -110,5 +133,62 @@ public final class DispatchRouteCandidateService {
 
     private long elapsedMs(long startedAt) {
         return (System.nanoTime() - startedAt) / 1_000_000L;
+    }
+
+    private void emitAnchorCandidates(DispatchV2Request request, AnchorSelectionResult anchorSelection) {
+        List<Map<String, Object>> payloads = new ArrayList<>();
+        for (AnchorCandidateTrace trace : anchorSelection.candidateTraces()) {
+            LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+            payload.put("bundleId", trace.anchor().bundleId());
+            payload.put("anchorOrderId", trace.anchor().anchorOrderId());
+            payload.put("anchorRank", trace.anchor().anchorRank());
+            payload.put("anchorFeatures", Map.of("bundleOrderSetSignature", trace.anchor().bundleOrderSetSignature(), "reasons", trace.anchor().reasons()));
+            payload.put("anchorScore", trace.anchor().score());
+            payload.put("selected", trace.retained());
+            payload.put("rejectReason", trace.rejectReason());
+            payloads.add(payload);
+        }
+        dispatchHarvestService.writeRecords("anchor-candidate", "pickup-anchor", request, payloads);
+    }
+
+    private void emitDriverCandidates(DispatchV2Request request,
+                                      PickupAnchor pickupAnchor,
+                                      DriverShortlistDetailedResult shortlistResult,
+                                      List<DriverCandidate> rerankedCandidates) {
+        Map<String, DriverCandidate> rerankedByDriverId = rerankedCandidates.stream()
+                .collect(java.util.stream.Collectors.toMap(DriverCandidate::driverId, candidate -> candidate, (left, right) -> left));
+        List<Map<String, Object>> payloads = new ArrayList<>();
+        for (DriverShortlistCandidateTrace trace : shortlistResult.candidateTraces()) {
+            DriverCandidate reranked = rerankedByDriverId.get(trace.features().driverId());
+            LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+            payload.put("bundleId", pickupAnchor.bundleId());
+            payload.put("anchorOrderId", pickupAnchor.anchorOrderId());
+            payload.put("driverId", trace.features().driverId());
+            payload.put("driverFeatures", trace.features());
+            payload.put("deterministicDriverFit", trace.features().driverFitScore());
+            payload.put("tabularDriverFit", null);
+            payload.put("finalDriverFit", trace.features().driverFitScore());
+            payload.put("finalRerank", reranked == null ? null : reranked.rerankScore());
+            payload.put("shortlistRank", reranked == null ? null : reranked.rank());
+            payload.put("retained", trace.retained());
+            payload.put("rejectReason", trace.rejectReason());
+            payloads.add(payload);
+            for (MlStageMetadata metadata : shortlistResult.mlStageMetadata()) {
+                dispatchHarvestService.writeTeacherTrace(
+                        "tabular-teacher-trace",
+                        "driver-shortlist/rerank",
+                        request,
+                        "DRIVER_FIT",
+                        pickupAnchor.bundleId() + "|" + pickupAnchor.anchorOrderId() + "|" + trace.features().driverId(),
+                        metadata,
+                        trace.features().driverFitScore(),
+                        null,
+                        null,
+                        metadata.fallbackUsed(),
+                        trace.rejectReason(),
+                        Map.of("driverId", trace.features().driverId()));
+            }
+        }
+        dispatchHarvestService.writeRecords("driver-candidate", "driver-shortlist/rerank", request, payloads);
     }
 }

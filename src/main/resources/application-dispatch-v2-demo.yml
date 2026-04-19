@@ -29,6 +29,13 @@ routechain:
     feedback:
       storage-mode: FILE
       base-dir: data/dispatch-v2-feedback
+    harvest:
+      enabled: true
+      base-dir: data
+      compression-enabled: false
+      replay-emit-enabled: false
+      runtime-profile: dispatch-v2-demo
+      harvest-mode: SIMULATION
     performance:
       telemetry-enabled: true
       budget-enforcement-enabled: false

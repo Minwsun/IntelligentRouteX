@@ -2,10 +2,13 @@ package com.routechain.v2.bundle;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.v2.DispatchStageLatency;
+import com.routechain.v2.DispatchV2Request;
 import com.routechain.v2.EtaContext;
 import com.routechain.v2.HotStartReuseSummary;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.feedback.ReuseStateBuilder;
+import com.routechain.v2.harvest.emitters.DispatchHarvestService;
+import com.routechain.v2.harvest.writers.NoOpHarvestWriter;
 import com.routechain.v2.integration.GreedRlBundleCandidate;
 import com.routechain.v2.integration.GreedRlBundleFeatureVector;
 import com.routechain.v2.integration.GreedRlBundleResult;
@@ -14,6 +17,7 @@ import com.routechain.v2.integration.MlStageMetadataAccumulator;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -28,6 +32,7 @@ public final class DispatchBundleStageService {
     private final BundleScorer bundleScorer;
     private final BundleDominancePruner bundleDominancePruner;
     private final GreedRlClient greedRlClient;
+    private final DispatchHarvestService dispatchHarvestService;
 
     public DispatchBundleStageService(RouteChainDispatchV2Properties properties,
                                       BoundaryCandidateSelector boundaryCandidateSelector,
@@ -38,6 +43,29 @@ public final class DispatchBundleStageService {
                                       BundleScorer bundleScorer,
                                       BundleDominancePruner bundleDominancePruner,
                                       GreedRlClient greedRlClient) {
+        this(
+                properties,
+                boundaryCandidateSelector,
+                boundaryExpansionEngine,
+                bundleSeedGenerator,
+                bundleFamilyEnumerator,
+                bundleValidator,
+                bundleScorer,
+                bundleDominancePruner,
+                greedRlClient,
+                new DispatchHarvestService(RouteChainDispatchV2Properties.defaults().getHarvest(), new NoOpHarvestWriter()));
+    }
+
+    public DispatchBundleStageService(RouteChainDispatchV2Properties properties,
+                                      BoundaryCandidateSelector boundaryCandidateSelector,
+                                      BoundaryExpansionEngine boundaryExpansionEngine,
+                                      BundleSeedGenerator bundleSeedGenerator,
+                                      BundleFamilyEnumerator bundleFamilyEnumerator,
+                                      BundleValidator bundleValidator,
+                                      BundleScorer bundleScorer,
+                                      BundleDominancePruner bundleDominancePruner,
+                                      GreedRlClient greedRlClient,
+                                      DispatchHarvestService dispatchHarvestService) {
         this.properties = properties;
         this.boundaryCandidateSelector = boundaryCandidateSelector;
         this.boundaryExpansionEngine = boundaryExpansionEngine;
@@ -47,6 +75,7 @@ public final class DispatchBundleStageService {
         this.bundleScorer = bundleScorer;
         this.bundleDominancePruner = bundleDominancePruner;
         this.greedRlClient = greedRlClient;
+        this.dispatchHarvestService = dispatchHarvestService;
     }
 
     public DispatchBundleStage evaluate(EtaContext etaContext, DispatchPairClusterStage pairClusterStage) {
@@ -128,17 +157,20 @@ public final class DispatchBundleStageService {
                 boundaryExpansions);
         List<BundleSeed> seeds = bundleSeedGenerator.generate(pairClusterStage.microClusters(), context);
         List<BundleCandidate> feasibleCandidates = new ArrayList<>();
+        List<BundleCandidate> generatedCandidates = new ArrayList<>();
         MlStageMetadataAccumulator greedRlMetadata = new MlStageMetadataAccumulator("bundle-pool");
         for (BundleSeed seed : seeds) {
-            List<BundleCandidate> generatedCandidates = new ArrayList<>(bundleFamilyEnumerator.enumerate(seed, context));
+            List<BundleCandidate> seedGeneratedCandidates = new ArrayList<>(bundleFamilyEnumerator.enumerate(seed, context));
             GreedRlBundleResult greedRlResult = proposeGreedRlBundles(seed);
             greedRlMetadata.accept(greedRlResult);
             if (greedRlResult.applied()) {
-                generatedCandidates.addAll(toBundleCandidates(seed, context, greedRlResult.proposals()));
+                emitGreedRlTeacherTrace(pairClusterStage.bufferedOrderWindow().traceId(), seed, greedRlResult);
+                seedGeneratedCandidates.addAll(toBundleCandidates(seed, context, greedRlResult.proposals()));
             } else if (!greedRlResult.degradeReason().isBlank() && !"greedrl-client-disabled".equals(greedRlResult.degradeReason())) {
                 degradeReasons.add(mapGreedRlDegradeReason(greedRlResult.degradeReason()));
             }
-            List<BundleCandidate> familyCandidates = generatedCandidates.stream()
+            generatedCandidates.addAll(seedGeneratedCandidates);
+            List<BundleCandidate> familyCandidates = seedGeneratedCandidates.stream()
                     .map(candidate -> bundleValidator.validate(candidate, context))
                     .filter(BundleCandidate::feasible)
                     .map(candidate -> bundleScorer.score(candidate, context))
@@ -152,6 +184,7 @@ public final class DispatchBundleStageService {
         feasibleCandidates.forEach(candidate -> familyCounts.merge(candidate.family(), 1, Integer::sum));
         feasibleCandidates.forEach(candidate -> sourceCounts.merge(candidate.proposalSource(), 1, Integer::sum));
         List<BundleCandidate> retained = bundleDominancePruner.prune(feasibleCandidates);
+        emitBundleCandidates(pairClusterStage.bufferedOrderWindow().traceId(), generatedCandidates, feasibleCandidates, retained);
         long bundlePoolElapsedMs = elapsedMs(bundlePoolStartedAt);
         BundlePoolSummary bundlePoolSummary = new BundlePoolSummary(
                 "bundle-pool-summary/v1",
@@ -278,5 +311,74 @@ public final class DispatchBundleStageService {
 
     private long elapsedMs(long startedAt) {
         return (System.nanoTime() - startedAt) / 1_000_000L;
+    }
+
+    private void emitGreedRlTeacherTrace(String traceId, BundleSeed seed, GreedRlBundleResult greedRlResult) {
+        if (greedRlResult.workerMetadata().sourceModel().isBlank()) {
+            return;
+        }
+        DispatchV2Request request = new DispatchV2Request(
+                "dispatch-v2-request/v1",
+                traceId,
+                List.of(),
+                List.of(),
+                List.of(),
+                null,
+                java.time.Instant.now());
+        dispatchHarvestService.writeTeacherTrace(
+                "greedrl-teacher-trace",
+                "bundle-pool",
+                request,
+                "BUNDLE_PROPOSAL",
+                seed.cluster().clusterId(),
+                new com.routechain.v2.MlStageMetadata(
+                        "ml-stage-metadata/v1",
+                        "bundle-pool",
+                        greedRlResult.workerMetadata().sourceModel(),
+                        greedRlResult.workerMetadata().modelVersion(),
+                        greedRlResult.workerMetadata().artifactDigest(),
+                        greedRlResult.workerMetadata().latencyMs(),
+                        greedRlResult.applied(),
+                        greedRlResult.fallbackUsed()),
+                null,
+                null,
+                null,
+                greedRlResult.fallbackUsed(),
+                greedRlResult.degradeReason(),
+                Map.of("proposalCount", greedRlResult.proposals().size()));
+    }
+
+    private void emitBundleCandidates(String traceId,
+                                      List<BundleCandidate> generatedCandidates,
+                                      List<BundleCandidate> feasibleCandidates,
+                                      List<BundleCandidate> retained) {
+        DispatchV2Request request = new DispatchV2Request(
+                "dispatch-v2-request/v1",
+                traceId,
+                List.of(),
+                List.of(),
+                List.of(),
+                null,
+                java.time.Instant.now());
+        java.util.Set<String> feasibleIds = feasibleCandidates.stream().map(BundleCandidate::bundleId).collect(java.util.stream.Collectors.toSet());
+        java.util.Set<String> retainedIds = retained.stream().map(BundleCandidate::bundleId).collect(java.util.stream.Collectors.toSet());
+        List<Map<String, Object>> payloads = new ArrayList<>();
+        for (BundleCandidate candidate : generatedCandidates) {
+            LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+            payload.put("bundleId", candidate.bundleId());
+            payload.put("family", candidate.family().name());
+            payload.put("source", candidate.proposalSource().name());
+            payload.put("orderIds", candidate.orderIds());
+            payload.put("clusterId", candidate.clusterId());
+            payload.put("anchorCandidateLinkage", candidate.seedOrderId());
+            payload.put("deterministicScore", candidate.score());
+            payload.put("greedRlTraceKeys", List.of(candidate.clusterId()));
+            payload.put("feasible", feasibleIds.contains(candidate.bundleId()));
+            payload.put("pruned", feasibleIds.contains(candidate.bundleId()) && !retainedIds.contains(candidate.bundleId()));
+            payload.put("pruneReason", feasibleIds.contains(candidate.bundleId()) && !retainedIds.contains(candidate.bundleId()) ? "bundle-dominance-pruned" : "");
+            payload.put("retained", retainedIds.contains(candidate.bundleId()));
+            payloads.add(payload);
+        }
+        dispatchHarvestService.writeRecords("bundle-candidate", "bundle-pool", request, payloads);
     }
 }

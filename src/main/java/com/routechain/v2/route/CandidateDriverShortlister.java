@@ -37,6 +37,15 @@ public final class CandidateDriverShortlister {
                                            DispatchCandidateContext context,
                                            EtaContext etaContext,
                                            EtaLegCache etaLegCache) {
+        return shortlistDetailed(traceId, availableDrivers, pickupAnchor, context, etaContext, etaLegCache).toDriverShortlistResult();
+    }
+
+    DriverShortlistDetailedResult shortlistDetailed(String traceId,
+                                                    List<Driver> availableDrivers,
+                                                    PickupAnchor pickupAnchor,
+                                                    DispatchCandidateContext context,
+                                                    EtaContext etaContext,
+                                                    EtaLegCache etaLegCache) {
         List<DriverRouteFeatures> deterministicRanking = availableDrivers.stream()
                 .sorted(Comparator.comparing(Driver::driverId))
                 .map(driver -> driverRouteFeatureBuilder.build(driver, pickupAnchor, context, etaContext, etaLegCache))
@@ -47,8 +56,14 @@ public final class CandidateDriverShortlister {
         List<DriverRouteFeatures> boundedShortlist = deterministicRanking.stream()
                 .limit(Math.max(1, properties.getCandidate().getMaxDrivers()))
                 .toList();
+        List<DriverShortlistCandidateTrace> traces = deterministicRanking.stream()
+                .map(features -> new DriverShortlistCandidateTrace(
+                        features,
+                        boundedShortlist.stream().anyMatch(current -> current.driverId().equals(features.driverId())),
+                        boundedShortlist.stream().anyMatch(current -> current.driverId().equals(features.driverId())) ? "" : "driver-shortlist-top-n-truncated"))
+                .toList();
         if (!properties.isMlEnabled() || !properties.getMl().getTabular().isEnabled()) {
-            return new DriverShortlistResult(boundedShortlist, List.of(), List.of());
+            return new DriverShortlistDetailedResult(boundedShortlist, List.copyOf(traces), List.of(), List.of());
         }
         MlStageMetadataAccumulator mlStageMetadataAccumulator = new MlStageMetadataAccumulator("driver-shortlist/rerank");
         List<String> degradeReasons = new ArrayList<>();
@@ -58,8 +73,9 @@ public final class CandidateDriverShortlister {
                         .thenComparingDouble(DriverRouteFeatures::pickupEtaMinutes)
                         .thenComparing(DriverRouteFeatures::driverId))
                 .toList();
-        return new DriverShortlistResult(
+        return new DriverShortlistDetailedResult(
                 rescored,
+                List.copyOf(traces),
                 List.copyOf(degradeReasons.stream().distinct().toList()),
                 mlStageMetadataAccumulator.build().map(List::of).orElse(List.of()));
     }

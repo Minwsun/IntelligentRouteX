@@ -14,6 +14,7 @@ import com.routechain.v2.feedback.HotStartAppliedReuse;
 import com.routechain.v2.feedback.HotStartReusePlan;
 import com.routechain.v2.feedback.PostDispatchHardeningService;
 import com.routechain.v2.feedback.WarmStartManager;
+import com.routechain.v2.harvest.emitters.DispatchHarvestService;
 import com.routechain.v2.route.DispatchRouteCandidateService;
 import com.routechain.v2.route.DispatchRouteCandidateStage;
 import com.routechain.v2.route.DispatchRouteProposalService;
@@ -55,6 +56,7 @@ public final class DispatchV2Core {
     private final DispatchExecutorService dispatchExecutorService;
     private final WarmStartManager warmStartManager;
     private final PostDispatchHardeningService postDispatchHardeningService;
+    private final DispatchHarvestService dispatchHarvestService;
 
     public DispatchV2Core(RouteChainDispatchV2Properties properties,
                           DispatchEtaContextService dispatchEtaContextService,
@@ -66,7 +68,8 @@ public final class DispatchV2Core {
                           DispatchSelectorService dispatchSelectorService,
                           DispatchExecutorService dispatchExecutorService,
                           WarmStartManager warmStartManager,
-                          PostDispatchHardeningService postDispatchHardeningService) {
+                          PostDispatchHardeningService postDispatchHardeningService,
+                          DispatchHarvestService dispatchHarvestService) {
         this.properties = properties;
         this.dispatchEtaContextService = dispatchEtaContextService;
         this.dispatchPairClusterService = dispatchPairClusterService;
@@ -78,10 +81,13 @@ public final class DispatchV2Core {
         this.dispatchExecutorService = dispatchExecutorService;
         this.warmStartManager = warmStartManager;
         this.postDispatchHardeningService = postDispatchHardeningService;
+        this.dispatchHarvestService = dispatchHarvestService;
     }
 
     public DispatchV2Result dispatch(DispatchV2Request request) {
-        DispatchPipelineExecution execution = executePipeline(request, true);
+        dispatchHarvestService.beginDispatch(false);
+        try {
+            DispatchPipelineExecution execution = executePipeline(request, true);
         DispatchLatencyBudgetSummary latencyBudgetSummary = execution.result().latencyBudgetSummary();
         List<String> reusedStageNames = execution.result().stageLatencies().stream()
                 .filter(DispatchStageLatency::hotStartReused)
@@ -108,10 +114,18 @@ public final class DispatchV2Core {
                 execution,
                 execution.hotStartReusePlan(),
                 appliedReuse);
+        } finally {
+            dispatchHarvestService.endDispatch();
+        }
     }
 
     public DispatchV2Result dispatchForReplay(DispatchV2Request request) {
-        return executePipeline(request, false).result();
+        dispatchHarvestService.beginDispatch(true);
+        try {
+            return executePipeline(request, false).result();
+        } finally {
+            dispatchHarvestService.endDispatch();
+        }
     }
 
     private DispatchPipelineExecution executePipeline(DispatchV2Request request, boolean allowHotStartReuse) {

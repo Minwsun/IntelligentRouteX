@@ -8,6 +8,7 @@ public record PairSimilarityGraphBuildResult(
         PairSimilarityGraph graph,
         int candidatePairCount,
         int gatedPairCount,
+        List<PairScoringTrace> pairScoringTraces,
         List<MlStageMetadata> mlStageMetadata,
         List<String> degradeReasons) {
 }

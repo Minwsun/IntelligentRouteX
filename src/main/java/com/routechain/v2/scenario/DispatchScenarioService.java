@@ -8,6 +8,8 @@ import com.routechain.v2.LiveStageMetadata;
 import com.routechain.v2.bundle.DispatchBundleStage;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.context.FreshnessMetadata;
+import com.routechain.v2.harvest.emitters.DispatchHarvestService;
+import com.routechain.v2.harvest.writers.NoOpHarvestWriter;
 import com.routechain.v2.integration.DemandShiftFeatureVector;
 import com.routechain.v2.integration.ForecastClient;
 import com.routechain.v2.integration.ForecastResult;
@@ -22,6 +24,7 @@ import com.routechain.v2.route.RouteProposal;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -34,6 +37,7 @@ public final class DispatchScenarioService {
     private final ScenarioGateEvaluator scenarioGateEvaluator;
     private final ScenarioEvaluator scenarioEvaluator;
     private final RobustUtilityAggregator robustUtilityAggregator;
+    private final DispatchHarvestService dispatchHarvestService;
 
     public DispatchScenarioService(RouteChainDispatchV2Properties properties,
                                    ForecastClient forecastClient,
@@ -43,6 +47,27 @@ public final class DispatchScenarioService {
                                    ScenarioGateEvaluator scenarioGateEvaluator,
                                    ScenarioEvaluator scenarioEvaluator,
                                    RobustUtilityAggregator robustUtilityAggregator) {
+        this(
+                properties,
+                forecastClient,
+                demandShiftFeatureBuilder,
+                zoneBurstFeatureBuilder,
+                postDropShiftFeatureBuilder,
+                scenarioGateEvaluator,
+                scenarioEvaluator,
+                robustUtilityAggregator,
+                new DispatchHarvestService(RouteChainDispatchV2Properties.defaults().getHarvest(), new NoOpHarvestWriter()));
+    }
+
+    public DispatchScenarioService(RouteChainDispatchV2Properties properties,
+                                   ForecastClient forecastClient,
+                                   DemandShiftFeatureBuilder demandShiftFeatureBuilder,
+                                   ZoneBurstFeatureBuilder zoneBurstFeatureBuilder,
+                                   PostDropShiftFeatureBuilder postDropShiftFeatureBuilder,
+                                   ScenarioGateEvaluator scenarioGateEvaluator,
+                                   ScenarioEvaluator scenarioEvaluator,
+                                   RobustUtilityAggregator robustUtilityAggregator,
+                                   DispatchHarvestService dispatchHarvestService) {
         this.properties = properties;
         this.forecastClient = forecastClient;
         this.demandShiftFeatureBuilder = demandShiftFeatureBuilder;
@@ -51,6 +76,7 @@ public final class DispatchScenarioService {
         this.scenarioGateEvaluator = scenarioGateEvaluator;
         this.scenarioEvaluator = scenarioEvaluator;
         this.robustUtilityAggregator = robustUtilityAggregator;
+        this.dispatchHarvestService = dispatchHarvestService;
     }
 
     public DispatchScenarioStage evaluate(DispatchV2Request request,
@@ -114,6 +140,7 @@ public final class DispatchScenarioService {
                 .map(proposalId -> robustUtilityAggregator.aggregate(proposalId, evaluations))
                 .toList();
         List<String> distinctDegradeReasons = degradeReasons.stream().distinct().toList();
+        emitScenarioCandidates(request, evaluations, robustUtilities);
         long scenarioElapsedMs = elapsedMs(scenarioStartedAt);
         return new DispatchScenarioStage(
                 "dispatch-scenario-stage/v1",
@@ -140,6 +167,9 @@ public final class DispatchScenarioService {
         ForecastResult demandShift = forecastClient.forecastDemandShift(demandShiftFeatures, 180L);
         ForecastResult zoneBurst = forecastClient.forecastZoneBurst(zoneBurstFeatures, 180L);
         ForecastResult postDropShift = forecastClient.forecastPostDropShift(postDropShiftFeatures, 180L);
+        emitForecastTeacherTrace(request, "DEMAND_SHIFT", "forecast-demand-shift", demandShift);
+        emitForecastTeacherTrace(request, "ZONE_BURST", "forecast-zone-burst", zoneBurst);
+        emitForecastTeacherTrace(request, "POST_DROP_SHIFT", "forecast-post-drop-shift", postDropShift);
         acceptMetadata(metadataAccumulator, demandShift);
         acceptMetadata(metadataAccumulator, zoneBurst);
         acceptMetadata(metadataAccumulator, postDropShift);
@@ -214,5 +244,57 @@ public final class DispatchScenarioService {
 
     private long elapsedMs(long startedAt) {
         return (System.nanoTime() - startedAt) / 1_000_000L;
+    }
+
+    private void emitForecastTeacherTrace(DispatchV2Request request,
+                                          String entityType,
+                                          String entityKey,
+                                          ForecastResult result) {
+        if (result.workerMetadata().sourceModel().isBlank()) {
+            return;
+        }
+        dispatchHarvestService.writeTeacherTrace(
+                "forecast-teacher-trace",
+                "scenario-evaluation",
+                request,
+                entityType,
+                entityKey,
+                new com.routechain.v2.MlStageMetadata(
+                        "ml-stage-metadata/v1",
+                        "scenario-evaluation",
+                        result.workerMetadata().sourceModel(),
+                        result.workerMetadata().modelVersion(),
+                        result.workerMetadata().artifactDigest(),
+                        result.workerMetadata().latencyMs(),
+                        result.applied(),
+                        result.fallbackUsed()),
+                result.probability(),
+                null,
+                result.confidence(),
+                result.fallbackUsed(),
+                result.degradeReason(),
+                Map.of("horizonMinutes", result.horizonMinutes(), "quantiles", result.quantiles()));
+    }
+
+    private void emitScenarioCandidates(DispatchV2Request request,
+                                        List<ScenarioEvaluation> evaluations,
+                                        List<RobustUtility> robustUtilities) {
+        Map<String, RobustUtility> byProposalId = robustUtilities.stream()
+                .collect(java.util.stream.Collectors.toMap(RobustUtility::proposalId, value -> value, (left, right) -> left));
+        List<Map<String, Object>> payloads = new ArrayList<>();
+        for (ScenarioEvaluation evaluation : evaluations) {
+            RobustUtility utility = byProposalId.get(evaluation.proposalId());
+            LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+            payload.put("proposalId", evaluation.proposalId());
+            payload.put("scenarioName", evaluation.scenario().name());
+            payload.put("forecastTraceKeys", List.of(evaluation.scenario().name()));
+            payload.put("scenarioAdjustedEtaMinutes", evaluation.projectedCompletionEtaMinutes());
+            payload.put("scenarioAdjustedValue", evaluation.value());
+            payload.put("robustUtilityContribution", utility == null ? null : utility.robustUtility());
+            payload.put("applied", evaluation.applied());
+            payload.put("reason", evaluation.reasons());
+            payloads.add(payload);
+        }
+        dispatchHarvestService.writeRecords("scenario-candidate", "scenario-evaluation", request, payloads);
     }
 }
