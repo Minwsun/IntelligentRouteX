@@ -1,0 +1,27 @@
+routechain:
+  dispatch-v2:
+    enabled: true
+    ml-enabled: true
+    warm-start-enabled: true
+    hot-start-enabled: true
+    open-meteo-enabled: true
+    ml:
+      tabular:
+        enabled: true
+      routefinder:
+        enabled: true
+        max-alternatives-per-driver-candidate: 1
+      greedrl:
+        enabled: false
+        max-proposals-per-cluster: 1
+      forecast:
+        enabled: true
+    bundle:
+      top-neighbors: 4
+      beam-width: 6
+    candidate:
+      max-anchors: 1
+      max-drivers: 3
+      max-route-alternatives: 1
+    pair:
+      max-candidate-neighbors-per-order: 6
