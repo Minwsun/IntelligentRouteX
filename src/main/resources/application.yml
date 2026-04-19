@@ -8,6 +8,10 @@ management:
         include: health,info
 
 routechain:
+  simulator:
+    enabled: true
+    artifact-base-dir: build/simulator
+    max-recent-runs: 50
   dispatch-v2:
     enabled: false
     ml-enabled: false
