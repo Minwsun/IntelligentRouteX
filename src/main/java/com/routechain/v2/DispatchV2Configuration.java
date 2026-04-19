@@ -109,6 +109,10 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class DispatchV2Configuration {
 
+    private java.nio.file.Path modelManifestPath(RouteChainDispatchV2Properties properties) {
+        return java.nio.file.Path.of(properties.getMl().getModelManifestPath());
+    }
+
     @Bean
     BaselineTravelTimeEstimator baselineTravelTimeEstimator() {
         return new BaselineTravelTimeEstimator();
@@ -158,7 +162,7 @@ public class DispatchV2Configuration {
                 properties.getMl().getTabular().getBaseUrl(),
                 properties.getMl().getTabular().getConnectTimeout(),
                 properties.getMl().getTabular().getReadTimeout(),
-                java.nio.file.Path.of("services", "models", "model-manifest.yaml"));
+                modelManifestPath(properties));
         if (properties.isSidecarRequired() && !client.readyState().ready()) {
             throw new IllegalStateException("Tabular worker is required but not ready: " + client.readyState().reason());
         }
@@ -174,7 +178,7 @@ public class DispatchV2Configuration {
                 properties.getMl().getRoutefinder().getBaseUrl(),
                 properties.getMl().getRoutefinder().getConnectTimeout(),
                 properties.getMl().getRoutefinder().getReadTimeout(),
-                java.nio.file.Path.of("services", "models", "model-manifest.yaml"));
+                modelManifestPath(properties));
         if (properties.isSidecarRequired() && !client.readyState().ready()) {
             throw new IllegalStateException("RouteFinder worker is required but not ready: " + client.readyState().reason());
         }
@@ -190,7 +194,7 @@ public class DispatchV2Configuration {
                 properties.getMl().getGreedrl().getBaseUrl(),
                 properties.getMl().getGreedrl().getConnectTimeout(),
                 properties.getMl().getGreedrl().getReadTimeout(),
-                java.nio.file.Path.of("services", "models", "model-manifest.yaml"));
+                modelManifestPath(properties));
         if (properties.isSidecarRequired() && !client.readyState().ready()) {
             throw new IllegalStateException("GreedRL worker is required but not ready: " + client.readyState().reason());
         }
@@ -206,7 +210,7 @@ public class DispatchV2Configuration {
                 properties.getMl().getForecast().getBaseUrl(),
                 properties.getMl().getForecast().getConnectTimeout(),
                 properties.getMl().getForecast().getReadTimeout(),
-                java.nio.file.Path.of("services", "models", "model-manifest.yaml"));
+                modelManifestPath(properties));
         if (properties.isSidecarRequired() && !client.readyState().ready()) {
             throw new IllegalStateException("Forecast worker is required but not ready: " + client.readyState().reason());
         }
@@ -711,7 +715,7 @@ public class DispatchV2Configuration {
                 routeFinderClient,
                 greedRlClient,
                 forecastClient,
-                java.nio.file.Path.of("services", "models", "model-manifest.yaml"));
+                modelManifestPath(properties));
     }
 
     @Bean

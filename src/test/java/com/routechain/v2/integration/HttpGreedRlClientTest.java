@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HttpGreedRlClientTest {
+    private static final String LOCAL_ARTIFACT_PATH = "materialized/greedrl/model/greedrl-runtime-manifest.json";
     private static final String LOADED_MODEL_FINGERPRINT = "sha256:greedrl-fingerprint";
 
     @TempDir
@@ -25,7 +26,7 @@ class HttpGreedRlClientTest {
                         "v1",
                         "sha256:greedrl",
                         true,
-                        "E:/Code _Project/IntelligentRouteX/services/models/materialized/greedrl/model/greedrl-runtime-manifest.json",
+                        LOCAL_ARTIFACT_PATH,
                         "LOCAL_PACKAGE_PROMOTION",
                         LOADED_MODEL_FINGERPRINT)),
                 "/ready", HttpGreedRlTestSupport.json(HttpGreedRlTestSupport.readyBody(true, "")),

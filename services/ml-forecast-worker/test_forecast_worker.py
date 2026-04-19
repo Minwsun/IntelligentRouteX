@@ -1,6 +1,7 @@
 import importlib.util
 import hashlib
 import json
+import os
 import socket
 import tempfile
 import textwrap
@@ -84,6 +85,13 @@ class ForecastWorkerReadyTest(unittest.TestCase):
             self.assertFalse(ready)
             self.assertEqual("local-model-root-missing", reason)
             self.assertFalse(version_payload["loadedFromLocal"])
+
+    def test_manifest_path_env_override_is_used(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest_path = self._write_manifest(temp_root, fingerprint="sha256:expected")
+            with patch.dict(os.environ, {"IRX_MODEL_MANIFEST_PATH": str(manifest_path)}):
+                self.assertEqual(manifest_path.resolve(), forecast_app._manifest_path())
 
     def test_fingerprint_mismatch_is_not_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

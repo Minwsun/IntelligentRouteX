@@ -11,6 +11,8 @@ SEED_ENV_VAR = "IRX_PORTABLE_RUNTIME_SEED_ROOT"
 SEED_MANIFEST_NAME = "seed-manifest.json"
 SEED_MANIFEST_SCHEMA_VERSION = "dispatch-v2-portable-runtime-seed/v1"
 BUNDLE_CONTRACT_VERSION = "dispatch-v2-bundle-contract/v1"
+RUNTIME_KIND_STANDALONE_CPYTHON = "standalone-cpython"
+BOOTSTRAP_MODE_EXPLICIT_PYTHONHOME = "explicit-pythonhome"
 
 
 def sha256_file(path: Path) -> str:

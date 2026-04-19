@@ -1,6 +1,7 @@
 import importlib.util
 import hashlib
 import json
+import os
 import socket
 import sys
 import tempfile
@@ -66,6 +67,57 @@ class GreedRlWorkerReadyTest(unittest.TestCase):
             self.assertFalse(ready)
             self.assertEqual("local-model-root-missing", reason)
             self.assertFalse(version_payload["loadedFromLocal"])
+
+    def test_manifest_path_env_override_is_used(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest_path = self._write_manifest(temp_root, fingerprint="sha256:expected")
+            with patch.dict(os.environ, {"IRX_MODEL_MANIFEST_PATH": str(manifest_path)}):
+                self.assertEqual(manifest_path.resolve(), greedrl_app._manifest_path())
+
+    def test_runtime_python_env_override_unblocks_bundle_local_python(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            _model_root, _runtime_manifest_path, fingerprint = self._write_materialized_model(temp_root)
+            bundle_python = temp_root / "bundle" / "runtimes" / "py-greedrl" / "python.exe"
+            bundle_python.parent.mkdir(parents=True, exist_ok=True)
+            bundle_python.write_text("", encoding="utf-8")
+            manifest_path = self._write_manifest(temp_root, fingerprint=fingerprint)
+            greedrl_app.MANIFEST_PATH = manifest_path
+
+            def fake_adapter(runtime_manifest, artifact_path, action, payload=None, timeout_seconds=5.0):
+                self.assertEqual(bundle_python.resolve(), greedrl_app._runtime_python(runtime_manifest, artifact_path))
+                if action == "self-check":
+                    return {"ok": True}
+                if action == "bundle-propose":
+                    return {"bundleProposals": [{"family": "COMPACT_CLIQUE"}], "sequenceProposals": []}
+                return {"bundleProposals": [], "sequenceProposals": [{"stopOrder": ["order-1", "order-2"]}]}
+
+            with patch.dict(os.environ, {"IRX_GREEDRL_RUNTIME_PYTHON": str(bundle_python)}), patch.object(
+                    greedrl_app, "_run_runtime_adapter", side_effect=fake_adapter):
+                ready, reason, _manifest, _runtime_manifest, _version_payload = greedrl_app._readiness()
+
+            self.assertTrue(ready)
+            self.assertEqual("", reason)
+
+    def test_runtime_env_sets_pythonhome_from_overridden_bundle_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            _model_root, runtime_manifest_path, _fingerprint = self._write_materialized_model(temp_root)
+            runtime_manifest = json.loads(runtime_manifest_path.read_text(encoding="utf-8"))
+            bundle_python = temp_root / "bundle" / "runtimes" / "py-greedrl-model" / "python.exe"
+            bundle_python.parent.mkdir(parents=True, exist_ok=True)
+            bundle_python.write_text("", encoding="utf-8")
+
+            with patch.dict(os.environ, {"IRX_GREEDRL_RUNTIME_PYTHON": str(bundle_python), "PYTHONHOME": "host-runtime"}):
+                env = greedrl_app._runtime_env(runtime_manifest, runtime_manifest_path)
+
+            self.assertEqual(str(bundle_python.parent), env["PYTHONHOME"])
+            self.assertIn(str(bundle_python.parent), env["PATH"])
+            self.assertEqual(
+                str((runtime_manifest_path.parent / "runtime" / "build-lib").resolve()),
+                env["PYTHONPATH"],
+            )
 
     def test_fingerprint_mismatch_is_not_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

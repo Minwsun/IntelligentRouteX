@@ -1,6 +1,7 @@
 import hashlib
 import json
 import math
+import os
 import time
 from pathlib import Path
 
@@ -21,10 +22,18 @@ REQUIRED_STAGES = ("eta-residual", "pair", "driver-fit", "route-value")
 app = FastAPI(title="ml-tabular-worker")
 
 
+def _manifest_path() -> Path:
+    override = os.getenv("IRX_MODEL_MANIFEST_PATH", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return MANIFEST_PATH
+
+
 def _load_manifest_entry() -> dict | None:
-    if not MANIFEST_PATH.exists():
+    manifest_path = _manifest_path()
+    if not manifest_path.exists():
         return None
-    manifest = yaml.safe_load(MANIFEST_PATH.read_text(encoding="utf-8")) or {}
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
     for worker in manifest.get("workers", []):
         if worker.get("worker_name") == WORKER_NAME:
             return worker
@@ -37,7 +46,7 @@ def _canonical_path(path_value: str | None) -> Path | None:
     path = Path(path_value)
     if path.is_absolute():
         return path
-    return (MANIFEST_PATH.parent / path).resolve()
+    return (_manifest_path().parent / path).resolve()
 
 
 def _artifact_path(manifest_entry: dict | None) -> Path:
@@ -334,7 +343,7 @@ def _readiness() -> tuple[bool, str, dict | None, dict | None, dict]:
         expected_artifact_path = _canonical_path(manifest_entry.get("local_artifact_path"))
         if (
                 expected_artifact_path is None
-                or metadata.get("modelArtifactPath") != expected_artifact_path.relative_to(MANIFEST_PATH.parent).as_posix()
+                or metadata.get("modelArtifactPath") != expected_artifact_path.relative_to(_manifest_path().parent).as_posix()
         ):
             return False, "materialization-artifact-path-mismatch", manifest_entry, runtime_manifest, version_payload
 

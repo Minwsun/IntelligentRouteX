@@ -49,6 +49,9 @@ Each worker entry must contain:
 - `hostRuntimeRole`
 - `modelRuntimeRole`
 - `runtimeFingerprint`
+- `runtimeKind`
+- `relocatable`
+- `bootstrapMode`
 - `sourceType`
 - `sourcePath`
 - `restoredAt`
@@ -60,12 +63,18 @@ Optional additive fields are allowed when a worker uses separate host and model 
 - `hostPythonExecutableRelativePath`
 - `modelRuntimeRoot`
 - `modelPythonExecutableRelativePath`
+- `modelRuntimeKind`
+- `modelRelocatable`
+- `modelBootstrapMode`
 - `notes`
 
 ## Runtime Role Semantics
 
 - `hostRuntimeRole` is the Python runtime used to boot the FastAPI worker process.
 - `modelRuntimeRole` is the Python runtime used by the packaged model itself when it differs from the host runtime.
+- `runtimeKind` must currently be `standalone-cpython`.
+- `relocatable=true` means the runtime has already passed a stripped-environment self-check from its own seed root and is allowed to be copied to a different bundle root.
+- `bootstrapMode` must currently be `explicit-pythonhome`, meaning launcher wrappers set `PYTHONHOME` from the bundle-local runtime root instead of relying on Python prefix auto-detection.
 - `tabular`, `routefinder`, and `greedrl` host workers use the shared bundled host Python.
 - `greedrl` keeps a separate bundled model runtime Python because the runtime adapter still depends on its packaged model-side Python environment.
 - `chronos` uses the same packaged runtime for both host and model execution.
@@ -78,8 +87,9 @@ The portable seed restore rail is:
 2. create or refresh `tabular/`, `routefinder/`, `greedrl/`, and `chronos/`
 3. restore the required runtime inputs for each worker
 4. verify the declared Python executable paths exist under the restored seeds
-5. compute runtime fingerprints
-6. write `seed-manifest.json`
+5. run a stripped-environment relocatability self-check from the restored seed root
+6. compute runtime fingerprints
+7. write `seed-manifest.json`
 
 The restore flow may read from:
 
@@ -98,6 +108,7 @@ The bundle builder must:
 - read `seed-manifest.json`
 - verify the stored seed manifest fingerprint
 - verify declared runtime roots and Python paths exist
+- verify `runtimeKind`, `relocatable`, and `bootstrapMode`
 - verify stored runtime fingerprints against actual seed contents
 - package runtimes only from the seed root
 - fail clearly if the seed manifest is missing, incomplete, or drifted

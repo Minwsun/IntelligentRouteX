@@ -35,6 +35,7 @@ routechain:
       refine-budget-per-tick: 8
       max-refined-legs-per-request: 1
     ml:
+      model-manifest-path: ${IRX_MODEL_MANIFEST_PATH:services/models/model-manifest.yaml}
       tabular:
         enabled: false
         base-url: http://127.0.0.1:8091
@@ -122,3 +123,14 @@ routechain:
       ortools:
         timeout: 150ms
         objective-scale-factor: 1000
+    feedback:
+      decision-log-enabled: true
+      snapshot-enabled: true
+      replay-enabled: true
+      storage-mode: IN_MEMORY
+      base-dir: build/dispatch-v2-feedback
+    warm-hot-start:
+      load-latest-snapshot-on-boot: true
+    performance:
+      telemetry-enabled: true
+      budget-enforcement-enabled: false

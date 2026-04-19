@@ -1,0 +1,34 @@
+spring:
+  config:
+    activate:
+      on-profile: dispatch-v2-demo
+
+routechain:
+  dispatch-v2:
+    enabled: true
+    ml-enabled: true
+    sidecar-required: false
+    selector-ortools-enabled: true
+    warm-start-enabled: true
+    hot-start-enabled: true
+    tomtom-enabled: false
+    open-meteo-enabled: false
+    weather:
+      enabled: false
+    traffic:
+      enabled: false
+    ml:
+      tabular:
+        enabled: true
+      routefinder:
+        enabled: true
+      greedrl:
+        enabled: true
+      forecast:
+        enabled: true
+    feedback:
+      storage-mode: FILE
+      base-dir: data/dispatch-v2-feedback
+    performance:
+      telemetry-enabled: true
+      budget-enforcement-enabled: false

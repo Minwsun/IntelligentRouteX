@@ -630,10 +630,19 @@ public class RouteChainDispatchV2Properties {
     }
 
     public static final class Ml {
+        private String modelManifestPath = "services/models/model-manifest.yaml";
         private final Tabular tabular = new Tabular();
         private final Routefinder routefinder = new Routefinder();
         private final Greedrl greedrl = new Greedrl();
         private final MlForecast forecast = new MlForecast();
+
+        public String getModelManifestPath() {
+            return modelManifestPath;
+        }
+
+        public void setModelManifestPath(String modelManifestPath) {
+            this.modelManifestPath = modelManifestPath;
+        }
 
         public Tabular getTabular() {
             return tabular;

@@ -87,8 +87,8 @@ class BuildDispatchV2BundleTest(unittest.TestCase):
         for dir_path in (seed_root / "routefinder", seed_root / "greedrl", seed_root / "chronos"):
             dir_path.mkdir(parents=True, exist_ok=True)
         host_python_relative = _write_runtime(host_root, venv_style=False)
-        greedrl_python_relative = _write_runtime(greedrl_model_root, venv_style=True)
-        chronos_python_relative = _write_runtime(chronos_root, venv_style=True)
+        greedrl_python_relative = _write_runtime(greedrl_model_root, venv_style=False)
+        chronos_python_relative = _write_runtime(chronos_root, venv_style=False)
         manifest = {
             "schemaVersion": support_module.SEED_MANIFEST_SCHEMA_VERSION,
             "seedRoot": str(seed_root.resolve()),
@@ -102,6 +102,9 @@ class BuildDispatchV2BundleTest(unittest.TestCase):
                     "hostRuntimeRole": "shared-host-python",
                     "modelRuntimeRole": "shared-host-python",
                     "runtimeFingerprint": support_module.sha256_tree(host_root),
+                    "runtimeKind": support_module.RUNTIME_KIND_STANDALONE_CPYTHON,
+                    "relocatable": True,
+                    "bootstrapMode": support_module.BOOTSTRAP_MODE_EXPLICIT_PYTHONHOME,
                     "sourceType": "system-python-install",
                     "sourcePath": "C:/Python313",
                     "restoredAt": "2026-04-19T00:00:00+00:00",
@@ -114,6 +117,9 @@ class BuildDispatchV2BundleTest(unittest.TestCase):
                     "hostRuntimeRole": "shared-host-python",
                     "modelRuntimeRole": "shared-host-python",
                     "runtimeFingerprint": support_module.sha256_tree(host_root),
+                    "runtimeKind": support_module.RUNTIME_KIND_STANDALONE_CPYTHON,
+                    "relocatable": True,
+                    "bootstrapMode": support_module.BOOTSTRAP_MODE_EXPLICIT_PYTHONHOME,
                     "sourceType": "system-python-install",
                     "sourcePath": "C:/Python313",
                     "restoredAt": "2026-04-19T00:00:00+00:00",
@@ -126,6 +132,9 @@ class BuildDispatchV2BundleTest(unittest.TestCase):
                     "hostRuntimeRole": "shared-host-python",
                     "modelRuntimeRole": "greedrl-model-python",
                     "runtimeFingerprint": support_module.sha256_tree(host_root),
+                    "runtimeKind": support_module.RUNTIME_KIND_STANDALONE_CPYTHON,
+                    "relocatable": True,
+                    "bootstrapMode": support_module.BOOTSTRAP_MODE_EXPLICIT_PYTHONHOME,
                     "sourceType": "greedrl-source-build",
                     "sourcePath": "https://huggingface.co/Cainiao-AI/GreedRL",
                     "restoredAt": "2026-04-19T00:00:00+00:00",
@@ -134,6 +143,9 @@ class BuildDispatchV2BundleTest(unittest.TestCase):
                     "hostPythonExecutableRelativePath": host_python_relative,
                     "modelRuntimeRoot": "greedrl/model-python",
                     "modelPythonExecutableRelativePath": greedrl_python_relative,
+                    "modelRuntimeKind": support_module.RUNTIME_KIND_STANDALONE_CPYTHON,
+                    "modelRelocatable": True,
+                    "modelBootstrapMode": support_module.BOOTSTRAP_MODE_EXPLICIT_PYTHONHOME,
                 },
                 {
                     "workerName": "ml-forecast-worker",
@@ -142,6 +154,9 @@ class BuildDispatchV2BundleTest(unittest.TestCase):
                     "hostRuntimeRole": "chronos-python",
                     "modelRuntimeRole": "chronos-python",
                     "runtimeFingerprint": support_module.sha256_tree(chronos_root),
+                    "runtimeKind": support_module.RUNTIME_KIND_STANDALONE_CPYTHON,
+                    "relocatable": True,
+                    "bootstrapMode": support_module.BOOTSTRAP_MODE_EXPLICIT_PYTHONHOME,
                     "sourceType": "chronos-source-build",
                     "sourcePath": "https://github.com/amazon-science/chronos-forecasting.git",
                     "restoredAt": "2026-04-19T00:00:00+00:00",
@@ -150,6 +165,9 @@ class BuildDispatchV2BundleTest(unittest.TestCase):
                     "hostPythonExecutableRelativePath": chronos_python_relative,
                     "modelRuntimeRoot": "chronos/runtime-python",
                     "modelPythonExecutableRelativePath": chronos_python_relative,
+                    "modelRuntimeKind": support_module.RUNTIME_KIND_STANDALONE_CPYTHON,
+                    "modelRelocatable": True,
+                    "modelBootstrapMode": support_module.BOOTSTRAP_MODE_EXPLICIT_PYTHONHOME,
                 },
             ],
         }
@@ -225,10 +243,64 @@ class BuildDispatchV2BundleTest(unittest.TestCase):
             )
             bundle_root = builder_module.build_bundle(args, repo_root=repo_root)
             self.assertTrue((bundle_root / "runtimes" / "py-host" / "python.exe").exists())
-            self.assertTrue((bundle_root / "runtimes" / "py-greedrl-model" / "Scripts" / "python.exe").exists())
-            self.assertTrue((bundle_root / "runtimes" / "py-chronos" / "Scripts" / "python.exe").exists())
+            self.assertTrue((bundle_root / "runtimes" / "py-greedrl-model" / "python.exe").exists())
+            self.assertTrue((bundle_root / "runtimes" / "py-chronos" / "python.exe").exists())
             build_manifest = json.loads((bundle_root / "bundle-build-manifest.json").read_text(encoding="utf-8"))
             self.assertIn("seedManifestFingerprint", build_manifest)
+            self.assertEqual("dispatch-v2-launcher-boot-path/v2", build_manifest["launcherBootPathContractVersion"])
+            self.assertEqual("standalone-cpython", build_manifest["workerRuntimeKinds"]["ml-tabular-worker"])
+            launcher_cmd = (bundle_root / "launcher" / "DispatchV2Launcher.cmd").read_text(encoding="utf-8")
+            self.assertNotIn("powershell -ExecutionPolicy", launcher_cmd)
+            self.assertIn("curl.exe", launcher_cmd)
+            self.assertTrue((bundle_root / "launcher" / "worker-ml-tabular-worker.cmd").exists())
+            smoke_cmd = (bundle_root / "launcher" / "DispatchSmoke.cmd").read_text(encoding="utf-8")
+            self.assertIn('"--spring.main.web-application-type=none"', smoke_cmd)
+            self.assertIn('"--routechain.dispatch-v2.smoke-runner.enabled=true"', smoke_cmd)
+            self.assertIn('call "%SCRIPT_DIR%HealthCheck.cmd" >nul || exit /b 1', smoke_cmd)
+            stop_cmd = (bundle_root / "launcher" / "StopDispatchV2.cmd").read_text(encoding="utf-8")
+            self.assertIn('for /f "skip=4 tokens=2,4,5" %%A in (\'"%NETSTAT_EXE%" -ano -p TCP\') do (', stop_cmd)
+            self.assertIn('if /I "%%B"=="LISTENING" (', stop_cmd)
+            self.assertIn('if /I "%%A"=="127.0.0.1:%~1" "%TASKKILL_EXE%" /PID %%C /F >nul 2>nul', stop_cmd)
+            self.assertNotIn('FINDSTR_EXE', stop_cmd)
+            self.assertNotIn('2^>nul', stop_cmd)
+
+    def test_builder_can_skip_archive_for_local_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            repo_root, seed_root, java_home = self._create_repo_fixture(temp_root)
+            args = argparse.Namespace(
+                output_dir=str(temp_root / "out"),
+                bundle_version="portable-seed-nozip",
+                java_home=str(java_home),
+                commit_sha="abc123",
+                seed_root=str(seed_root),
+                skip_boot_jar=True,
+                skip_archive=True,
+            )
+            bundle_root = builder_module.build_bundle(args, repo_root=repo_root)
+            self.assertTrue((bundle_root / "bundle-build-manifest.json").exists())
+            self.assertTrue((bundle_root / "bundle-integrity-manifest.json").exists())
+            self.assertFalse((bundle_root.parent / f"{bundle_root.name}.zip").exists())
+
+    def test_builder_fails_if_runtime_is_not_relocatable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            repo_root, seed_root, java_home = self._create_repo_fixture(temp_root)
+            manifest_path = seed_root / support_module.SEED_MANIFEST_NAME
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["workers"][0]["relocatable"] = False
+            manifest["seedManifestFingerprint"] = support_module.compute_manifest_fingerprint(manifest)
+            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+            args = argparse.Namespace(
+                output_dir=str(temp_root / "out"),
+                bundle_version="test",
+                java_home=str(java_home),
+                commit_sha="abc123",
+                seed_root=str(seed_root),
+                skip_boot_jar=True,
+            )
+            with self.assertRaises(ValueError):
+                builder_module.build_bundle(args, repo_root=repo_root)
 
 
 if __name__ == "__main__":

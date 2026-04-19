@@ -23,10 +23,18 @@ RUNTIME_CACHE: dict[str, Any] = {"fingerprint": None}
 app = FastAPI(title="ml-greedrl-worker")
 
 
+def _manifest_path() -> Path:
+    override = os.getenv("IRX_MODEL_MANIFEST_PATH", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return MANIFEST_PATH
+
+
 def _load_manifest_entry() -> dict | None:
-    if not MANIFEST_PATH.exists():
+    manifest_path = _manifest_path()
+    if not manifest_path.exists():
         return None
-    manifest = yaml.safe_load(MANIFEST_PATH.read_text(encoding="utf-8")) or {}
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
     for worker in manifest.get("workers", []):
         if worker.get("worker_name") == WORKER_NAME:
             return worker
@@ -39,7 +47,7 @@ def _canonical_path(path_value: str | None) -> Path | None:
     path = Path(path_value)
     if path.is_absolute():
         return path
-    return (MANIFEST_PATH.parent / path).resolve()
+    return (_manifest_path().parent / path).resolve()
 
 
 def _artifact_path(manifest_entry: dict | None) -> Path:
@@ -159,8 +167,20 @@ def _validate_runtime_manifest(runtime_manifest: dict) -> str:
     return ""
 
 
-def _runtime_python(runtime_manifest: dict) -> Path:
-    return Path(runtime_manifest["runtimePythonExecutable"])
+def _runtime_python(runtime_manifest: dict, artifact_path: Path) -> Path:
+    override = os.getenv("IRX_GREEDRL_RUNTIME_PYTHON", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    configured = Path(runtime_manifest["runtimePythonExecutable"])
+    if configured.is_absolute():
+        return configured
+    return (_model_directory(artifact_path) / configured).resolve()
+
+
+def _runtime_root(runtime_python: Path) -> Path:
+    if runtime_python.parent.name.lower() in {"scripts", "bin"}:
+        return runtime_python.parent.parent
+    return runtime_python.parent
 
 
 def _runtime_module_root(runtime_manifest: dict, artifact_path: Path) -> Path:
@@ -172,7 +192,7 @@ def _runtime_adapter_path(runtime_manifest: dict, artifact_path: Path) -> Path:
 
 
 def _validate_runtime_paths(runtime_manifest: dict, artifact_path: Path) -> str:
-    if not _runtime_python(runtime_manifest).exists():
+    if not _runtime_python(runtime_manifest, artifact_path).exists():
         return "runtime-python-missing"
     if not _runtime_module_root(runtime_manifest, artifact_path).exists():
         return "runtime-module-root-missing"
@@ -218,8 +238,21 @@ def _version_payload(manifest_entry: dict | None,
 
 def _runtime_env(runtime_manifest: dict, artifact_path: Path) -> dict[str, str]:
     env = dict(**os.environ)
+    runtime_python = _runtime_python(runtime_manifest, artifact_path)
+    runtime_root = _runtime_root(runtime_python)
+    for key in ("VIRTUAL_ENV", "CONDA_PREFIX", "CONDA_DEFAULT_ENV", "PIP_REQUIRE_VIRTUALENV"):
+        env.pop(key, None)
+    env["PYTHONHOME"] = str(runtime_root)
     module_root = _runtime_module_root(runtime_manifest, artifact_path)
     env["PYTHONPATH"] = str(module_root) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    env["PATH"] = os.pathsep.join(
+        [
+            str(runtime_root),
+            str(runtime_root / "Scripts"),
+            os.environ.get("SystemRoot", r"C:\Windows") + r"\System32",
+            os.environ.get("SystemRoot", r"C:\Windows"),
+        ]
+    )
     return env
 
 
@@ -230,7 +263,7 @@ def _run_runtime_adapter(runtime_manifest: dict,
                          *,
                          timeout_seconds: float = 5.0) -> dict:
     completed = subprocess.run(
-        [str(_runtime_python(runtime_manifest)), str(_runtime_adapter_path(runtime_manifest, artifact_path)), "--runtime-manifest", str(artifact_path)],
+        [str(_runtime_python(runtime_manifest, artifact_path)), str(_runtime_adapter_path(runtime_manifest, artifact_path)), "--runtime-manifest", str(artifact_path)],
         input=json.dumps({"action": action, "payload": payload or {}}),
         text=True,
         capture_output=True,
@@ -376,7 +409,7 @@ def _readiness() -> tuple[bool, str, dict | None, dict | None, dict]:
             if metadata.get(metadata_field) != runtime_manifest.get(runtime_field):
                 return False, reason, manifest_entry, runtime_manifest, version_payload
         expected_artifact_path = _canonical_path(manifest_entry.get("local_artifact_path"))
-        if expected_artifact_path is None or metadata.get("modelArtifactPath") != expected_artifact_path.relative_to(MANIFEST_PATH.parent).as_posix():
+        if expected_artifact_path is None or metadata.get("modelArtifactPath") != expected_artifact_path.relative_to(_manifest_path().parent).as_posix():
             return False, "materialization-artifact-path-mismatch", manifest_entry, runtime_manifest, version_payload
 
     manifest_field_pairs = (

@@ -14,7 +14,9 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from dispatch_v2_portable_seed_support import (  # noqa: E402
+    BOOTSTRAP_MODE_EXPLICIT_PYTHONHOME,
     BUNDLE_CONTRACT_VERSION,
+    RUNTIME_KIND_STANDALONE_CPYTHON,
     SEED_MANIFEST_NAME,
     copy_tree,
     load_json,
@@ -29,6 +31,7 @@ from dispatch_v2_portable_seed_support import (  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BUILD_ROOT = REPO_ROOT / "build" / "portable"
 LAUNCHER_VERSION = "dispatch-v2-launcher/v1"
+LAUNCHER_BOOT_PATH_CONTRACT_VERSION = "dispatch-v2-launcher-boot-path/v2"
 DEFAULT_PORTS = {
     "ml-tabular-worker": 8091,
     "ml-routefinder-worker": 8092,
@@ -36,6 +39,7 @@ DEFAULT_PORTS = {
     "ml-forecast-worker": 8096,
     "app": 8080,
 }
+SYSTEM_ROOT_DEFAULT = r"C:\Windows"
 WORKERS = [
     {
         "worker_name": "ml-tabular-worker",
@@ -109,6 +113,140 @@ def bundled_python_relative_path(bundle_runtime_dir: Path) -> Path:
 def render_launcher(bundle_root: Path, worker_python_paths: dict[str, str]) -> None:
     launcher_dir = bundle_root / "launcher"
     launcher_dir.mkdir(parents=True, exist_ok=True)
+    worker_launchers = {
+        "ml-tabular-worker": {
+            "script_name": "worker-ml-tabular-worker.cmd",
+            "python_path": worker_python_paths["ml-tabular-worker"],
+            "worker_dir": r"workers\ml-tabular-worker",
+            "port": 8091,
+            "stdout": r"data\logs\ml-tabular-worker.out.log",
+            "stderr": r"data\logs\ml-tabular-worker.err.log",
+        },
+        "ml-routefinder-worker": {
+            "script_name": "worker-ml-routefinder-worker.cmd",
+            "python_path": worker_python_paths["ml-routefinder-worker"],
+            "worker_dir": r"workers\ml-routefinder-worker",
+            "port": 8092,
+            "stdout": r"data\logs\ml-routefinder-worker.out.log",
+            "stderr": r"data\logs\ml-routefinder-worker.err.log",
+        },
+        "ml-greedrl-worker": {
+            "script_name": "worker-ml-greedrl-worker.cmd",
+            "python_path": worker_python_paths["ml-greedrl-worker"],
+            "worker_dir": r"workers\ml-greedrl-worker",
+            "port": 8093,
+            "stdout": r"data\logs\ml-greedrl-worker.out.log",
+            "stderr": r"data\logs\ml-greedrl-worker.err.log",
+            "runtime_override": worker_python_paths["ml-greedrl-model-runtime"],
+        },
+        "ml-forecast-worker": {
+            "script_name": "worker-ml-forecast-worker.cmd",
+            "python_path": worker_python_paths["ml-forecast-worker"],
+            "worker_dir": r"workers\ml-forecast-worker",
+            "port": 8096,
+            "stdout": r"data\logs\ml-forecast-worker.out.log",
+            "stderr": r"data\logs\ml-forecast-worker.err.log",
+        },
+    }
+    worker_wrapper_template = r"""@echo off
+setlocal EnableExtensions
+for %%I in ("%~dp0..") do set "BUNDLE_ROOT=%%~fI"
+set "SYSTEM_ROOT=%SystemRoot%"
+if not defined SYSTEM_ROOT set "SYSTEM_ROOT={system_root_default}"
+set "RUNTIME_PYTHON=%BUNDLE_ROOT%\{python_path}"
+for %%I in ("%RUNTIME_PYTHON%\..") do set "RUNTIME_ROOT=%%~fI"
+set "WORKER_ROOT=%BUNDLE_ROOT%\{worker_dir}"
+set "LOG_OUT=%BUNDLE_ROOT%\{stdout_rel}"
+set "LOG_ERR=%BUNDLE_ROOT%\{stderr_rel}"
+set "PYTHONHOME=%RUNTIME_ROOT%"
+set "PYTHONPATH="
+set "VIRTUAL_ENV="
+set "CONDA_PREFIX="
+set "CONDA_DEFAULT_ENV="
+set "PIP_REQUIRE_VIRTUALENV="
+set "IRX_MODEL_MANIFEST_PATH=%BUNDLE_ROOT%\models\model-manifest.yaml"
+{runtime_override_line}
+set "PATH=%RUNTIME_ROOT%;%RUNTIME_ROOT%\Scripts;%SYSTEM_ROOT%\System32;%SYSTEM_ROOT%"
+if not exist "%WORKER_ROOT%" exit /b 1
+if not exist "%RUNTIME_PYTHON%" exit /b 1
+pushd "%WORKER_ROOT%" >nul || exit /b 1
+"%RUNTIME_PYTHON%" -m uvicorn app:app --host 127.0.0.1 --port {port} 1>>"%LOG_OUT%" 2>>"%LOG_ERR%"
+set "EXIT_CODE=%ERRORLEVEL%"
+popd >nul
+exit /b %EXIT_CODE%
+"""
+    for worker in worker_launchers.values():
+        runtime_override_line = "set \"IRX_GREEDRL_RUNTIME_PYTHON=\""
+        if worker.get("runtime_override"):
+            runtime_override_line = f"set \"IRX_GREEDRL_RUNTIME_PYTHON=%BUNDLE_ROOT%\\{worker['runtime_override']}\""
+        (launcher_dir / worker["script_name"]).write_text(
+            worker_wrapper_template.format(
+                system_root_default=SYSTEM_ROOT_DEFAULT,
+                python_path=worker["python_path"],
+                worker_dir=worker["worker_dir"],
+                stdout_rel=worker["stdout"],
+                stderr_rel=worker["stderr"],
+                runtime_override_line=runtime_override_line,
+                port=worker["port"],
+            ),
+            encoding="utf-8",
+        )
+    app_wrapper = r"""@echo off
+setlocal EnableExtensions
+for %%I in ("%~dp0..") do set "BUNDLE_ROOT=%%~fI"
+set "SYSTEM_ROOT=%SystemRoot%"
+if not defined SYSTEM_ROOT set "SYSTEM_ROOT={system_root_default}"
+set "JAVA_HOME=%BUNDLE_ROOT%\runtimes\jre"
+set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
+set "APP_JAR=%BUNDLE_ROOT%\app\intelligent-route-x.jar"
+set "APP_OUT=%BUNDLE_ROOT%\data\logs\app.out.log"
+set "APP_ERR=%BUNDLE_ROOT%\data\logs\app.err.log"
+set "SPRING_CONFIG_ADDITIONAL_LOCATION=file:%BUNDLE_ROOT%\config\"
+if not defined SPRING_PROFILES_ACTIVE set "SPRING_PROFILES_ACTIVE=dispatch-v2-prod"
+set "IRX_MODEL_MANIFEST_PATH=%BUNDLE_ROOT%\models\model-manifest.yaml"
+set "PATH=%JAVA_HOME%\bin;%SYSTEM_ROOT%\System32;%SYSTEM_ROOT%"
+if not exist "%JAVA_EXE%" exit /b 1
+if not exist "%APP_JAR%" exit /b 1
+pushd "%BUNDLE_ROOT%" >nul || exit /b 1
+"%JAVA_EXE%" -jar "%APP_JAR%" 1>>"%APP_OUT%" 2>>"%APP_ERR%"
+set "EXIT_CODE=%ERRORLEVEL%"
+popd >nul
+exit /b %EXIT_CODE%
+""".format(system_root_default=SYSTEM_ROOT_DEFAULT)
+    (launcher_dir / "start-app.cmd").write_text(app_wrapper, encoding="utf-8")
+    smoke_wrapper = r"""@echo off
+setlocal EnableExtensions
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "BUNDLE_ROOT=%%~fI"
+set "SYSTEM_ROOT=%SystemRoot%"
+if not defined SYSTEM_ROOT set "SYSTEM_ROOT={system_root_default}"
+set "JAVA_HOME=%BUNDLE_ROOT%\runtimes\jre"
+set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
+set "APP_JAR=%BUNDLE_ROOT%\app\intelligent-route-x.jar"
+set "SMOKE_ROOT=%BUNDLE_ROOT%\data\run\dispatch-smoke"
+set "TRACE_ID=%~1"
+if not defined TRACE_ID set "TRACE_ID=portable-smoke"
+set "EXPECT_HOT_START=%~2"
+if not defined EXPECT_HOT_START set "EXPECT_HOT_START=false"
+set "EXPECTED_PREVIOUS_TRACE_ID=%~3"
+set "SMOKE_OUT=%BUNDLE_ROOT%\data\logs\dispatch-smoke-%TRACE_ID%.out.log"
+set "SMOKE_ERR=%BUNDLE_ROOT%\data\logs\dispatch-smoke-%TRACE_ID%.err.log"
+set "SPRING_CONFIG_ADDITIONAL_LOCATION=file:%BUNDLE_ROOT%\config\"
+if not defined SPRING_PROFILES_ACTIVE set "SPRING_PROFILES_ACTIVE=dispatch-v2-prod"
+set "IRX_MODEL_MANIFEST_PATH=%BUNDLE_ROOT%\models\model-manifest.yaml"
+set "PATH=%JAVA_HOME%\bin;%SYSTEM_ROOT%\System32;%SYSTEM_ROOT%"
+if not exist "%SMOKE_ROOT%" mkdir "%SMOKE_ROOT%" >nul 2>nul
+if not exist "%JAVA_EXE%" exit /b 1
+if not exist "%APP_JAR%" exit /b 1
+pushd "%BUNDLE_ROOT%" >nul || exit /b 1
+"%JAVA_EXE%" -jar "%APP_JAR%" "--spring.main.web-application-type=none" "--routechain.dispatch-v2.smoke-runner.enabled=true" "--routechain.dispatch-v2.smoke-runner.trace-id=%TRACE_ID%" "--routechain.dispatch-v2.smoke-runner.output-dir=%SMOKE_ROOT%" "--routechain.dispatch-v2.smoke-runner.bundle-root=%BUNDLE_ROOT%" "--routechain.dispatch-v2.smoke-runner.expect-hot-start=%EXPECT_HOT_START%" "--routechain.dispatch-v2.smoke-runner.expected-previous-trace-id=%EXPECTED_PREVIOUS_TRACE_ID%" 1>>"%SMOKE_OUT%" 2>>"%SMOKE_ERR%"
+set "EXIT_CODE=%ERRORLEVEL%"
+popd >nul
+if not "%EXIT_CODE%"=="0" exit /b %EXIT_CODE%
+call "%SCRIPT_DIR%HealthCheck.cmd" >nul || exit /b 1
+exit /b 0
+""".format(system_root_default=SYSTEM_ROOT_DEFAULT)
+    (launcher_dir / "DispatchSmoke.cmd").write_text(smoke_wrapper, encoding="utf-8")
     launcher_script = r"""$ErrorActionPreference = "Stop"
 $bundleRoot = Split-Path -Parent $PSScriptRoot
 $runRoot = Join-Path $bundleRoot "data\run"
@@ -236,7 +374,104 @@ Write-Output $status
     }
     (launcher_dir / "DispatchV2Launcher.ps1").write_text(launcher_script, encoding="utf-8")
     (launcher_dir / "DispatchV2Launcher.cmd").write_text(
-        "@echo off\r\npowershell -ExecutionPolicy Bypass -File \"%~dp0DispatchV2Launcher.ps1\" %*\r\n",
+        r"""@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "BUNDLE_ROOT=%%~fI"
+set "SYSTEM_ROOT=%SystemRoot%"
+if not defined SYSTEM_ROOT set "SYSTEM_ROOT=C:\Windows"
+set "CURL_EXE=%SYSTEM_ROOT%\System32\curl.exe"
+set "TIMEOUT_EXE=%SYSTEM_ROOT%\System32\timeout.exe"
+set "CMD_EXE=%SYSTEM_ROOT%\System32\cmd.exe"
+set "RUN_ROOT=%BUNDLE_ROOT%\data\run"
+set "LOG_ROOT=%BUNDLE_ROOT%\data\logs"
+set "PROBE_ROOT=%RUN_ROOT%\probes"
+set "REQUIRED_DIRS=%BUNDLE_ROOT%\data;%RUN_ROOT%;%LOG_ROOT%;%PROBE_ROOT%;%BUNDLE_ROOT%\data\snapshots;%BUNDLE_ROOT%\data\replay;%BUNDLE_ROOT%\data\bronze;%BUNDLE_ROOT%\data\silver"
+if not exist "%CURL_EXE%" goto boot_failed
+if not exist "%CMD_EXE%" goto boot_failed
+for %%D in (%REQUIRED_DIRS%) do if not exist "%%~D" mkdir "%%~D" >nul 2>nul
+if not exist "%BUNDLE_ROOT%\bundle-build-manifest.json" goto boot_failed
+if not exist "%BUNDLE_ROOT%\bundle-integrity-manifest.json" goto boot_failed
+if not exist "%BUNDLE_ROOT%\models\model-manifest.yaml" goto boot_failed
+if not exist "%BUNDLE_ROOT%\runtimes\jre\bin\java.exe" goto boot_failed
+if not exist "%BUNDLE_ROOT%\app\intelligent-route-x.jar" goto boot_failed
+call "%SCRIPT_DIR%StopDispatchV2.cmd" >nul 2>nul
+call :launch "%SCRIPT_DIR%worker-ml-tabular-worker.cmd" || goto boot_failed
+call :launch "%SCRIPT_DIR%worker-ml-routefinder-worker.cmd" || goto boot_failed
+call :launch "%SCRIPT_DIR%worker-ml-greedrl-worker.cmd" || goto boot_failed
+call :launch "%SCRIPT_DIR%worker-ml-forecast-worker.cmd" || goto boot_failed
+call :wait_worker 8091 ml-tabular-worker || goto boot_failed
+call :wait_worker 8092 ml-routefinder-worker || goto boot_failed
+call :wait_worker 8093 ml-greedrl-worker || goto boot_failed
+call :wait_worker 8096 ml-forecast-worker || goto boot_failed
+call :launch "%SCRIPT_DIR%start-app.cmd" || goto boot_failed
+call :wait_app || goto boot_failed
+echo READY_FULL
+exit /b 0
+
+:launch
+start "" /B "%CMD_EXE%" /d /c call "%~1"
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:wait_worker
+set /a ATTEMPTS=45
+:wait_worker_loop
+call :worker_ready %1 %2 && exit /b 0
+set /a ATTEMPTS-=1
+if exist "%TIMEOUT_EXE%" (
+  "%TIMEOUT_EXE%" /t 2 /nobreak >nul
+) else (
+  >nul ping 127.0.0.1 -n 3
+)
+if !ATTEMPTS! GTR 0 goto wait_worker_loop
+exit /b 1
+
+:worker_ready
+call :fetch "http://127.0.0.1:%1/health" "%PROBE_ROOT%\%2-health.json" || exit /b 1
+call :contains "%PROBE_ROOT%\%2-health.json" status || exit /b 1
+call :contains "%PROBE_ROOT%\%2-health.json" ok || exit /b 1
+call :fetch "http://127.0.0.1:%1/ready" "%PROBE_ROOT%\%2-ready.json" || exit /b 1
+call :contains "%PROBE_ROOT%\%2-ready.json" ready || exit /b 1
+call :contains "%PROBE_ROOT%\%2-ready.json" true || exit /b 1
+call :fetch "http://127.0.0.1:%1/version" "%PROBE_ROOT%\%2-version.json" || exit /b 1
+call :contains "%PROBE_ROOT%\%2-version.json" artifactDigest || exit /b 1
+call :contains "%PROBE_ROOT%\%2-version.json" sha256: || exit /b 1
+exit /b 0
+
+:wait_app
+set /a ATTEMPTS=45
+:wait_app_loop
+call :app_ready && exit /b 0
+set /a ATTEMPTS-=1
+if exist "%TIMEOUT_EXE%" (
+  "%TIMEOUT_EXE%" /t 2 /nobreak >nul
+) else (
+  >nul ping 127.0.0.1 -n 3
+)
+if !ATTEMPTS! GTR 0 goto wait_app_loop
+exit /b 1
+
+:app_ready
+call :fetch "http://127.0.0.1:8080/actuator/health" "%PROBE_ROOT%\app-health.json" || exit /b 1
+call :contains "%PROBE_ROOT%\app-health.json" status || exit /b 1
+call :contains "%PROBE_ROOT%\app-health.json" UP || exit /b 1
+call :fetch "http://127.0.0.1:8080/actuator/info" "%PROBE_ROOT%\app-info.json" || exit /b 1
+call :contains "%PROBE_ROOT%\app-info.json" dispatchV2Readiness || exit /b 1
+exit /b 0
+
+:fetch
+"%CURL_EXE%" --silent --show-error --fail "%~1" --output "%~2" >nul 2>nul
+exit /b %ERRORLEVEL%
+
+:contains
+findstr /C:"%~2" "%~1" >nul
+exit /b %ERRORLEVEL%
+
+:boot_failed
+echo BOOT_FAILED
+exit /b 1
+""",
         encoding="utf-8",
     )
     (launcher_dir / "StopDispatchV2.ps1").write_text(
@@ -256,7 +491,27 @@ Get-ChildItem -Path $pidDir -Filter *.pid | ForEach-Object {
         encoding="utf-8",
     )
     (launcher_dir / "StopDispatchV2.cmd").write_text(
-        "@echo off\r\npowershell -ExecutionPolicy Bypass -File \"%~dp0StopDispatchV2.ps1\" %*\r\n",
+        r"""@echo off
+setlocal EnableExtensions
+for %%I in ("%~dp0..") do set "BUNDLE_ROOT=%%~fI"
+set "SYSTEM_ROOT=%SystemRoot%"
+if not defined SYSTEM_ROOT set "SYSTEM_ROOT=C:\Windows"
+set "NETSTAT_EXE=%SYSTEM_ROOT%\System32\netstat.exe"
+set "TASKKILL_EXE=%SYSTEM_ROOT%\System32\taskkill.exe"
+for %%P in (8080 8091 8092 8093 8096) do call :kill_port %%P
+exit /b 0
+
+:kill_port
+for /f "skip=4 tokens=2,4,5" %%A in ('"%NETSTAT_EXE%" -ano -p TCP') do (
+  if /I "%%B"=="LISTENING" (
+    if /I "%%A"=="0.0.0.0:%~1" "%TASKKILL_EXE%" /PID %%C /F >nul 2>nul
+    if /I "%%A"=="127.0.0.1:%~1" "%TASKKILL_EXE%" /PID %%C /F >nul 2>nul
+    if /I "%%A"=="[::]:%~1" "%TASKKILL_EXE%" /PID %%C /F >nul 2>nul
+    if /I "%%A"=="[::1]:%~1" "%TASKKILL_EXE%" /PID %%C /F >nul 2>nul
+  )
+)
+exit /b 0
+""",
         encoding="utf-8",
     )
     (launcher_dir / "HealthCheck.ps1").write_text(
@@ -286,7 +541,45 @@ $appInfo = Invoke-RestMethod -Uri "http://127.0.0.1:8080/actuator/info" -Timeout
         encoding="utf-8",
     )
     (launcher_dir / "HealthCheck.cmd").write_text(
-        "@echo off\r\npowershell -ExecutionPolicy Bypass -File \"%~dp0HealthCheck.ps1\" %*\r\n",
+        r"""@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+for %%I in ("%~dp0..") do set "BUNDLE_ROOT=%%~fI"
+set "SYSTEM_ROOT=%SystemRoot%"
+if not defined SYSTEM_ROOT set "SYSTEM_ROOT=C:\Windows"
+set "CURL_EXE=%SYSTEM_ROOT%\System32\curl.exe"
+set "PROBE_ROOT=%BUNDLE_ROOT%\data\run\healthcheck"
+if not exist "%PROBE_ROOT%" mkdir "%PROBE_ROOT%" >nul 2>nul
+call :worker ml-tabular-worker 8091 || exit /b 1
+call :worker ml-routefinder-worker 8092 || exit /b 1
+call :worker ml-greedrl-worker 8093 || exit /b 1
+call :worker ml-forecast-worker 8096 || exit /b 1
+call :fetch "http://127.0.0.1:8080/actuator/health" "%PROBE_ROOT%\app-health.json" || exit /b 1
+findstr /C:"\"status\":\"UP\"" "%PROBE_ROOT%\app-health.json" >nul || findstr /C:"\"status\": \"UP\"" "%PROBE_ROOT%\app-health.json" >nul || exit /b 1
+call :fetch "http://127.0.0.1:8080/actuator/info" "%PROBE_ROOT%\app-info.json" || exit /b 1
+findstr /C:"dispatchV2Readiness" "%PROBE_ROOT%\app-info.json" >nul || exit /b 1
+echo { "status": "ok", "bundleRoot": "%BUNDLE_ROOT%" }
+exit /b 0
+
+:worker
+call :fetch "http://127.0.0.1:%2/health" "%PROBE_ROOT%\%1-health.json" || exit /b 1
+call :contains "%PROBE_ROOT%\%1-health.json" status || exit /b 1
+call :contains "%PROBE_ROOT%\%1-health.json" ok || exit /b 1
+call :fetch "http://127.0.0.1:%2/ready" "%PROBE_ROOT%\%1-ready.json" || exit /b 1
+call :contains "%PROBE_ROOT%\%1-ready.json" ready || exit /b 1
+call :contains "%PROBE_ROOT%\%1-ready.json" true || exit /b 1
+call :fetch "http://127.0.0.1:%2/version" "%PROBE_ROOT%\%1-version.json" || exit /b 1
+call :contains "%PROBE_ROOT%\%1-version.json" artifactDigest || exit /b 1
+call :contains "%PROBE_ROOT%\%1-version.json" sha256: || exit /b 1
+exit /b 0
+
+:fetch
+"%CURL_EXE%" --silent --show-error --fail "%~1" --output "%~2" >nul 2>nul
+exit /b %ERRORLEVEL%
+
+:contains
+findstr /C:"%~2" "%~1" >nul
+exit /b %ERRORLEVEL%
+""",
         encoding="utf-8",
     )
 
@@ -344,6 +637,9 @@ def verify_seed_entry(seed_root: Path, entry: dict) -> None:
         "runtimeRoot",
         "pythonExecutableRelativePath",
         "runtimeFingerprint",
+        "runtimeKind",
+        "relocatable",
+        "bootstrapMode",
         "sourceType",
         "sourcePath",
         "restoredAt",
@@ -359,6 +655,12 @@ def verify_seed_entry(seed_root: Path, entry: dict) -> None:
         raise ValueError(
             f"Seed runtime fingerprint mismatch for {entry['workerName']}: expected {entry['runtimeFingerprint']}, got {actual_fingerprint}"
         )
+    if entry["runtimeKind"] != RUNTIME_KIND_STANDALONE_CPYTHON:
+        raise ValueError(f"Seed runtime kind is not portable for {entry['workerName']}: {entry['runtimeKind']}")
+    if entry["relocatable"] is not True:
+        raise ValueError(f"Seed runtime is not marked relocatable for {entry['workerName']}")
+    if entry["bootstrapMode"] != BOOTSTRAP_MODE_EXPLICIT_PYTHONHOME:
+        raise ValueError(f"Seed bootstrap mode is not portable for {entry['workerName']}: {entry['bootstrapMode']}")
     if entry.get("hostRuntimeRoot"):
         host_root = (seed_root / entry["hostRuntimeRoot"]).resolve()
         require_path(host_root, f"host runtime root for {entry['workerName']}")
@@ -367,6 +669,12 @@ def verify_seed_entry(seed_root: Path, entry: dict) -> None:
         model_root = (seed_root / entry["modelRuntimeRoot"]).resolve()
         require_path(model_root, f"model runtime root for {entry['workerName']}")
         runtime_python_path(model_root, entry.get("modelPythonExecutableRelativePath", entry["pythonExecutableRelativePath"]))
+        if entry.get("modelRuntimeKind") != RUNTIME_KIND_STANDALONE_CPYTHON:
+            raise ValueError(f"Seed model runtime kind is not portable for {entry['workerName']}: {entry.get('modelRuntimeKind')}")
+        if entry.get("modelRelocatable") is not True:
+            raise ValueError(f"Seed model runtime is not marked relocatable for {entry['workerName']}")
+        if entry.get("modelBootstrapMode") != BOOTSTRAP_MODE_EXPLICIT_PYTHONHOME:
+            raise ValueError(f"Seed model bootstrap mode is not portable for {entry['workerName']}: {entry.get('modelBootstrapMode')}")
 
 
 def package_runtime(seed_root: Path, runtime_root_relative: str, bundle_runtime_dir: Path) -> str:
@@ -465,8 +773,16 @@ def build_bundle(args: argparse.Namespace, repo_root: Path = REPO_ROOT) -> Path:
         "buildCommitSha": args.commit_sha or subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo_root, text=True).strip(),
         "buildTimestamp": datetime.now(timezone.utc).isoformat(),
         "launcherVersion": LAUNCHER_VERSION,
+        "launcherBootPathContractVersion": LAUNCHER_BOOT_PATH_CONTRACT_VERSION,
         "profileSet": ["dispatch-v2-prod", "dispatch-v2-demo", "dispatch-v2-fallback"],
         "workerFingerprints": {worker["worker_name"]: worker["loaded_model_fingerprint"] for worker in manifest_workers},
+        "workerRuntimeKinds": {
+            "ml-tabular-worker": host_entry["runtimeKind"],
+            "ml-routefinder-worker": routefinder_entry["runtimeKind"],
+            "ml-greedrl-worker": greedrl_entry["runtimeKind"],
+            "ml-greedrl-model-runtime": greedrl_entry["modelRuntimeKind"],
+            "ml-forecast-worker": chronos_entry["runtimeKind"],
+        },
         "ports": DEFAULT_PORTS,
         "seedManifestFingerprint": seed_manifest["seedManifestFingerprint"],
     }
@@ -474,11 +790,12 @@ def build_bundle(args: argparse.Namespace, repo_root: Path = REPO_ROOT) -> Path:
     integrity_manifest = build_integrity_manifest(bundle_root)
     (bundle_root / "bundle-integrity-manifest.json").write_text(json.dumps(integrity_manifest, indent=2), encoding="utf-8")
 
-    archive_base = output_root / bundle_root.name
-    archive_path = archive_base.with_suffix(".zip")
-    if archive_path.exists():
-        archive_path.unlink()
-    shutil.make_archive(str(archive_base), "zip", bundle_root)
+    if not getattr(args, "skip_archive", False):
+        archive_base = output_root / bundle_root.name
+        archive_path = archive_base.with_suffix(".zip")
+        if archive_path.exists():
+            archive_path.unlink()
+        shutil.make_archive(str(archive_base), "zip", bundle_root)
     return bundle_root
 
 
@@ -490,6 +807,7 @@ def main() -> int:
     parser.add_argument("--commit-sha")
     parser.add_argument("--seed-root")
     parser.add_argument("--skip-boot-jar", action="store_true")
+    parser.add_argument("--skip-archive", action="store_true")
     args = parser.parse_args()
     bundle_root = build_bundle(args)
     print(bundle_root)

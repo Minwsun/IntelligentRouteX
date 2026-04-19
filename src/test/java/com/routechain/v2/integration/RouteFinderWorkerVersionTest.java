@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RouteFinderWorkerVersionTest {
-    private static final String LOCAL_ARTIFACT_PATH = "E:/Code _Project/IntelligentRouteX/services/models/materialized/routefinder/model/routefinder-model.json";
+    private static final String LOCAL_ARTIFACT_PATH = "materialized/routefinder/model/routefinder-model.json";
     private static final String LOADED_MODEL_FINGERPRINT = "sha256:8b52802e0e685f7ae36aa62940ca848042ad81341d55dda36190e90a9e7b10fe";
 
     @TempDir
