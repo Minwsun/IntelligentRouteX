@@ -152,3 +152,76 @@
   - benchmark authority semantics and thresholds must be pinned to an accepted authority baseline
   - soak authority semantics must stop treating `local-real` as non-authoritative and must stop forcing validation-only sample override for authority runs
 - rerun from gate: `benchmark critical matrix`
+
+## Remediation Attempt 2
+
+- attempt commit: `1f0403a`
+- attempted_from: `branch=main; path=E:\Code _Project\IntelligentRouteX`
+- rerun_from_gate: `benchmark critical matrix`
+- remediation scope:
+  - authority benchmark classification fixed
+  - authority soak classification and sample override semantics fixed
+  - local non-authority semantics preserved
+- remediation validation:
+  - `python -m py_compile scripts/run_dispatch_v2_benchmark.py scripts/run_dispatch_v2_soak.py scripts/test_run_dispatch_v2_benchmark.py scripts/test_run_dispatch_v2_soak.py`
+  - `python -m unittest scripts.test_run_dispatch_v2_benchmark scripts.test_run_dispatch_v2_soak`
+  - `.\gradlew.bat --no-daemon test --tests com.routechain.v2.benchmark.DispatchQualityBenchmarkHarnessTest --tests com.routechain.v2.chaos.DispatchSoakHarnessTest --tests com.routechain.v2.benchmark.DispatchQualityArtifactSmokeTest --tests com.routechain.v2.chaos.DispatchSoakArtifactSmokeTest`
+  - result: `PASS`
+
+### Benchmark Critical Matrix Rerun
+
+- commands rerun with authority semantics:
+  - `python scripts/run_dispatch_v2_benchmark.py --baseline all --size L --scenario-pack normal-clear --execution-mode local-real --authority --output-dir artifacts/benchmark`
+  - `python scripts/run_dispatch_v2_benchmark.py --baseline all --size L --scenario-pack heavy-rain --execution-mode local-real --authority --output-dir artifacts/benchmark`
+  - `python scripts/run_dispatch_v2_benchmark.py --baseline all --size L --scenario-pack traffic-shock --execution-mode local-real --authority --output-dir artifacts/benchmark`
+  - `python scripts/run_dispatch_v2_benchmark.py --baseline all --size L --scenario-pack forecast-heavy --execution-mode local-real --authority --output-dir artifacts/benchmark`
+- semantics result:
+  - all rerun comparison artifacts now report `runAuthorityClass=AUTHORITY_REAL`
+  - all rerun comparison artifacts now report `authoritative=true`
+  - all rerun comparison artifacts now report `authorityEligible=true`
+  - raw baseline results no longer carry `non-authoritative-local-real-run`
+- quality result:
+  - `normal-clear`: `Full V2 has 2 advantages and 3 regressions against selected baselines`
+  - `heavy-rain`: `Full V2 has 2 advantages and 3 regressions against selected baselines`
+  - `traffic-shock`: `Full V2 has 0 advantages and 5 regressions against selected baselines`
+  - `forecast-heavy`: `Full V2 has 2 advantages and 3 regressions against selected baselines`
+
+### Traffic-Shock Focused Triage
+
+- ablation commands run on `traffic-shock / L / local-real`:
+  - `python scripts/run_dispatch_v2_ablation.py --component tabular --size L --scenario-pack traffic-shock --execution-mode local-real --output-dir artifacts/benchmark`
+  - `python scripts/run_dispatch_v2_ablation.py --component routefinder --size L --scenario-pack traffic-shock --execution-mode local-real --output-dir artifacts/benchmark`
+  - `python scripts/run_dispatch_v2_ablation.py --component greedrl --size L --scenario-pack traffic-shock --execution-mode local-real --output-dir artifacts/benchmark`
+  - `python scripts/run_dispatch_v2_ablation.py --component forecast --size L --scenario-pack traffic-shock --execution-mode local-real --output-dir artifacts/benchmark`
+  - `python scripts/run_dispatch_v2_ablation.py --component tomtom --size L --scenario-pack traffic-shock --execution-mode local-real --output-dir artifacts/benchmark`
+  - `python scripts/run_dispatch_v2_ablation.py --component open-meteo --size L --scenario-pack traffic-shock --execution-mode local-real --output-dir artifacts/benchmark`
+  - `python scripts/run_dispatch_v2_ablation.py --component ortools --size L --scenario-pack traffic-shock --execution-mode local-real --output-dir artifacts/benchmark`
+- triage finding:
+  - `tabular`, `routefinder`, `greedrl`, `forecast`, `tomtom`, and `open-meteo` toggles produced zero metric delta on the current traffic-shock authority run
+  - only `ortools` changed the selector objective marginally
+  - this indicates the dominant blocker is not a clean single-component regression inside those toggles
+
+### Worker-Backed Benchmark Check
+
+- additional environment check:
+  - booted copied portable bundle `E:\portable-smoke\DispatchV2-rc9`
+  - `launcher\HealthCheck.cmd` returned `PASS`
+  - reran the same 4 authority benchmark cells while bundle workers were listening on `8091`, `8092`, `8093`, `8096`
+- result:
+  - benchmark artifacts remained `AUTHORITY_REAL` and `authorityEligible=true`
+  - baseline `C` still reported `workerFallbackRate=1.0`
+  - `workerAppliedSources` stayed empty across all 4 critical scenario packs
+  - `traffic-shock` still remained `0 advantages and 5 regressions`
+
+### Outcome
+
+- benchmark authority semantics: `FIXED`
+- soak authority semantics: `FIXED AT SOURCE`, but not rerun yet because benchmark gate still blocks the rail
+- benchmark critical matrix: `FAIL`
+- first failing gate remains: `benchmark critical matrix`
+- current recommendation after remediation attempt 2: `NO_GO`
+
+### Next Required Action
+
+- investigate why authority benchmark `baseline C` still runs with `workerFallbackRate=1.0` and empty `workerAppliedSources` under `local-real`, even when bundle workers are healthy on the expected ports
+- do not rerun soak authority or final release verify again until that benchmark blocker is resolved
