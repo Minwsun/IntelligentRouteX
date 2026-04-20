@@ -7,8 +7,8 @@ import java.util.Locale;
 
 public enum DispatchBenchmarkDecisionMode {
     LEGACY("legacy", "legacy", List.of()),
-    LLM_SHADOW("llm-shadow", "llm", List.of()),
-    LLM_AUTHORITATIVE("llm-authoritative", "llm", List.of(
+    LLM_SHADOW("llm-shadow", "llm-shadow", List.of()),
+    LLM_AUTHORITATIVE("llm-authoritative", "llm-authoritative", List.of(
             DecisionStageName.PAIR_BUNDLE.wireName(),
             DecisionStageName.FINAL_SELECTION.wireName()));
 

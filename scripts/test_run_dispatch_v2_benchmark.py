@@ -25,6 +25,7 @@ class RunDispatchBenchmarkTest(unittest.TestCase):
         self.assertIn("[MATRIX]", output)
         self.assertIn("scenario-pack=normal-clear", output)
         self.assertIn("decision-mode=legacy", output)
+        self.assertIn("authoritative-stages=[]", output)
         self.assertIn("authority=false", output)
 
     def test_runner_collects_json_and_writes_summary(self) -> None:

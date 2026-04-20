@@ -1174,6 +1174,7 @@ public class RouteChainDispatchV2Properties {
     public static final class Decision {
         private String mode = "llm";
         private boolean fallbackToLegacy = true;
+        private java.util.List<String> authoritativeStages = new java.util.ArrayList<>(java.util.List.of("pair-bundle", "final-selection"));
         private final Llm llm = new Llm();
 
         public String getMode() {
@@ -1190,6 +1191,16 @@ public class RouteChainDispatchV2Properties {
 
         public void setFallbackToLegacy(boolean fallbackToLegacy) {
             this.fallbackToLegacy = fallbackToLegacy;
+        }
+
+        public java.util.List<String> getAuthoritativeStages() {
+            return authoritativeStages;
+        }
+
+        public void setAuthoritativeStages(java.util.List<String> authoritativeStages) {
+            this.authoritativeStages = authoritativeStages == null
+                    ? new java.util.ArrayList<>()
+                    : new java.util.ArrayList<>(authoritativeStages);
         }
 
         public Llm getLlm() {

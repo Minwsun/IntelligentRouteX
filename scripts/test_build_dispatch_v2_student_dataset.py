@@ -24,6 +24,7 @@ class BuildDispatchV2StudentDatasetTest(unittest.TestCase):
                 "decision_stage_join",
                 "dispatch_execution",
                 "dispatch_outcome",
+                "route_leg_vector_trace",
                 "route_vector_summary_trace",
             ):
                 (base / family).mkdir(parents=True, exist_ok=True)
@@ -40,12 +41,22 @@ class BuildDispatchV2StudentDatasetTest(unittest.TestCase):
                 json.dumps({"traceId": "trace-1", "tickId": "tick-1", "stageName": "pair-bundle", "brainType": "LLM", "selectedIds": ["bundle-1"], "actualSelectedIds": ["bundle-1"], "decisionMode": "llm-shadow"}),
                 encoding="utf-8",
             )
-            (base / "dispatch_execution" / "trace-1.json").write_text(
-                json.dumps({"traceId": "trace-1", "assignmentIds": ["assignment-1"], "decisionMode": "llm-shadow"}),
+            (base / "dispatch_execution" / "trace-1-dispatch-executor.json").write_text(
+                json.dumps({"assignmentIds": ["assignment-1"], "decisionMode": "llm-shadow"}),
                 encoding="utf-8",
             )
             (base / "dispatch_outcome" / "trace-1.json").write_text(
                 json.dumps({"traceId": "trace-1", "selectedProposalIds": ["proposal-1"], "decisionMode": "llm-shadow"}),
+                encoding="utf-8",
+            )
+            (base / "route_leg_vector_trace" / "trace-1-proposal-1.json").write_text(
+                json.dumps({
+                    "schemaVersion": "route-leg-vector-trace/v1",
+                    "traceId": "trace-1",
+                    "proposalId": "proposal-1",
+                    "legs": [{"fromStopId": "a", "toStopId": "b"}],
+                    "decisionMode": "llm-shadow",
+                }),
                 encoding="utf-8",
             )
             (base / "route_vector_summary_trace" / "trace-1-proposal-1.json").write_text(
@@ -76,6 +87,8 @@ class BuildDispatchV2StudentDatasetTest(unittest.TestCase):
             self.assertEqual("normal-clear", manifest["filters"]["scenarioPack"])
             self.assertEqual(1, manifest["counts"]["stage_inputs"])
             self.assertEqual(1, manifest["counts"]["route_vectors"])
+            route_vectors = (output_dir / "route_vectors.jsonl").read_text(encoding="utf-8")
+            self.assertIn("\"legPayloads\": [[{\"fromStopId\": \"a\", \"toStopId\": \"b\"}]]", route_vectors)
 
 
 if __name__ == "__main__":

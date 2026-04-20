@@ -17,8 +17,8 @@ public final class LlmBrain implements DecisionBrain {
 
     @Override
     public DecisionStageOutputV1 evaluateStage(DecisionStageInputV1 input) {
-        if (!input.stageName().llmPhaseOneEnabled()) {
-            return fallback(input, "llm-stage-not-enabled-phase-1");
+        if (!input.stageName().supportsLlmDecision()) {
+            return fallback(input, "llm-stage-not-supported");
         }
         try {
             decisionStageLogger.writeFamily("llm_context_selection_trace", input.traceId(), input.stageName().wireName(), input);
@@ -54,7 +54,7 @@ public final class LlmBrain implements DecisionBrain {
                         legacy.meta().validationPassed(),
                         "legacy",
                         input.stageName().requestedEffort().wireValue(),
-                        DecisionEffort.HIGH.wireValue(),
+                        input.stageName().requestedEffort().wireValue(),
                         legacy.meta().tokenUsage(),
                         legacy.meta().retryCount(),
                         legacy.meta().rawResponseHash()));

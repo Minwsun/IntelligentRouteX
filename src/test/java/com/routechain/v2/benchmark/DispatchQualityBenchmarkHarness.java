@@ -142,7 +142,7 @@ public final class DispatchQualityBenchmarkHarness {
                 gitCommit(),
                 DispatchPerfMachineProfile.capture(request.machineLabel()),
                 request.decisionMode().wireName(),
-                request.decisionMode().authoritativeStages(),
+                execution.authoritativeStages(),
                 request.executionMode().wireName(),
                 runAuthorityClass,
                 request.authorityRun(),
@@ -244,7 +244,10 @@ public final class DispatchQualityBenchmarkHarness {
                 dependencies.openMeteoClient(),
                 dependencies.tomTomTrafficRefineClient());
         DispatchV2Result result = harness.core().dispatch(dispatchRequest);
-        return new ScenarioExecution(result, finalizeAttachDiagnostics(properties, baselineId, request.authorityRun(), attachDiagnostics, result));
+        return new ScenarioExecution(
+                result,
+                finalizeAttachDiagnostics(properties, baselineId, request.authorityRun(), attachDiagnostics, result),
+                List.copyOf(properties.getDecision().getAuthoritativeStages()));
     }
 
     private DispatchV2Result executeAblationRun(AblationRequest request, boolean control) {
@@ -617,6 +620,10 @@ public final class DispatchQualityBenchmarkHarness {
                                                           Path feedbackDirectory) {
         RouteChainDispatchV2Properties properties = RouteChainDispatchV2Properties.defaults();
         properties.getDecision().setMode(decisionMode.runtimeMode());
+        properties.getDecision().setAuthoritativeStages(parseStages(configuredValue(
+                "routechain.dispatch-v2.decision.authoritative-stages",
+                "DISPATCH_QUALITY_AUTHORITATIVE_STAGES",
+                String.join(",", decisionMode.authoritativeStages()))));
         properties.getDecision().getLlm().setBaseUrl(configuredValue(
                 "routechain.dispatch-v2.decision.llm.base-url",
                 "ROUTECHAIN_DECISION_LLM_BASE_URL",
@@ -1302,6 +1309,16 @@ public final class DispatchQualityBenchmarkHarness {
         return defaultValue;
     }
 
+    private static List<String> parseStages(String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(rawValue.split(","))
+                .map(String::trim)
+                .filter(token -> !token.isBlank())
+                .toList();
+    }
+
     private static boolean isReachable(String readyReason) {
         String normalized = blankToEmpty(readyReason).toLowerCase(Locale.ROOT);
         return !(normalized.contains("client-disabled")
@@ -1514,7 +1531,8 @@ public final class DispatchQualityBenchmarkHarness {
 
     private record ScenarioExecution(
             DispatchV2Result result,
-            MlAttachDiagnostics attachDiagnostics) {
+            MlAttachDiagnostics attachDiagnostics,
+            List<String> authoritativeStages) {
     }
 
     private record MlAttachDiagnostics(

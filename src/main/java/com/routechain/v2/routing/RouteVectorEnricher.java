@@ -35,7 +35,11 @@ public final class RouteVectorEnricher {
             corridorPreferenceTotal += result.corridorPreferenceScore();
         }
         RouteVectorSummary summary = summarize(proposal, legs, corridorPreferenceTotal / legs.size());
-        decisionStageLogger.writeFamily("route_leg_vector_trace", traceId, proposal.proposalId(), legs);
+        decisionStageLogger.writeFamily("route_leg_vector_trace", traceId, proposal.proposalId(), java.util.Map.of(
+                "schemaVersion", "route-leg-vector-trace/v1",
+                "traceId", traceId,
+                "proposalId", proposal.proposalId(),
+                "legs", legs));
         decisionStageLogger.writeFamily("route_vector_summary_trace", traceId, proposal.proposalId(), summary);
         return proposal.withRouteVectors(summary, legs);
     }

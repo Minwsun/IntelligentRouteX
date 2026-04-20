@@ -12,7 +12,7 @@ public enum DecisionBrainType {
         return switch (rawMode.trim().toLowerCase(java.util.Locale.ROOT)) {
             case "legacy" -> LEGACY;
             case "student" -> STUDENT;
-            case "llm", "hybrid" -> LLM;
+            case "llm", "hybrid", "llm-shadow", "llm-authoritative" -> LLM;
             default -> LLM;
         };
     }

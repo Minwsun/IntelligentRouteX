@@ -10,6 +10,7 @@ FAMILIES = (
     "decision_stage_join",
     "dispatch_execution",
     "dispatch_outcome",
+    "route_leg_vector_trace",
     "route_vector_summary_trace",
 )
 
@@ -23,19 +24,56 @@ def load_family_files(feedback_root: Path) -> dict[str, list[Path]]:
     return family_files
 
 
-def load_json(path: Path) -> dict:
+def load_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def group_by_trace(paths: list[Path]) -> dict[str, list[dict]]:
-    grouped: dict[str, list[dict]] = defaultdict(list)
+def trace_id_from_filename(path: Path, family: str | None = None) -> str:
+    name = path.stem
+    if family == "dispatch_execution" and name.endswith("-dispatch-executor"):
+        return name[: -len("-dispatch-executor")].strip()
+    if family == "dispatch_outcome" and name.endswith("-dispatch-result"):
+        return name[: -len("-dispatch-result")].strip()
+    if "-" not in name:
+        return ""
+    return name.split("-", 1)[0].strip()
+
+
+def group_by_trace(paths: list[Path], family: str | None = None) -> dict[str, list]:
+    grouped: dict[str, list] = defaultdict(list)
     for path in paths:
         payload = load_json(path)
-        trace_id = str(payload.get("traceId") or payload.get("trace_id") or "").strip()
+        if isinstance(payload, dict):
+            trace_id = str(payload.get("traceId") or payload.get("trace_id") or "").strip()
+            if not trace_id and family in {"route_vector_summary_trace", "route_leg_vector_trace"}:
+                proposal_id = str(payload.get("proposalId") or payload.get("proposal_id") or "").strip()
+                if proposal_id:
+                    proposal_suffix = "-" + sanitize_name(proposal_id)
+                    if path.stem.endswith(proposal_suffix):
+                        trace_id = path.stem[: -len(proposal_suffix)].strip()
+            if not trace_id:
+                trace_id = trace_id_from_filename(path, family)
+        else:
+            trace_id = trace_id_from_filename(path, family)
         if not trace_id:
             continue
         grouped[trace_id].append(payload)
     return grouped
+
+
+def validate_family_schema_versions(family_files: dict[str, list[Path]]) -> None:
+    for family, paths in family_files.items():
+        versions = {
+            str(load_json(path).get("schemaVersion") or "").strip()
+            for path in paths
+            if str(load_json(path).get("schemaVersion") or "").strip()
+        }
+        if len(versions) > 1:
+            raise ValueError(f"Mixed schema versions detected in family '{family}': {sorted(versions)}")
+
+
+def sanitize_name(raw: str) -> str:
+    return "".join(character if character.isalnum() or character in "._-" else "_" for character in raw)
 
 
 def append_jsonl(path: Path, rows: list[dict]) -> None:
@@ -62,9 +100,10 @@ def build_rows(
     scenario_pack: str | None = None,
     decision_mode: str | None = None,
     authority_phase: str | None = None,
+    route_vector_availability: str = "any",
 ) -> dict[str, list[dict]]:
     family_files = load_family_files(feedback_root)
-    grouped = {family: group_by_trace(paths) for family, paths in family_files.items()}
+    grouped = {family: group_by_trace(paths, family) for family, paths in family_files.items()}
     trace_ids = sorted({trace_id for families in grouped.values() for trace_id in families.keys()})
     outputs = {
         "stage_inputs": [],
@@ -76,11 +115,17 @@ def build_rows(
     }
 
     for trace_id in trace_ids:
+        has_route_vectors = bool(grouped["route_vector_summary_trace"].get(trace_id, []))
+        if route_vector_availability == "required" and not has_route_vectors:
+            continue
+        if route_vector_availability == "none" and has_route_vectors:
+            continue
         route_vector_refs = [
             row.get("proposalId")
             for row in grouped["route_vector_summary_trace"].get(trace_id, [])
             if row.get("proposalId")
         ]
+        route_leg_rows = grouped["route_leg_vector_trace"].get(trace_id, [])
         for row in grouped["decision_stage_input"].get(trace_id, []):
             stage_name = row.get("stageName")
             if stage_filters and stage_name not in stage_filters:
@@ -196,9 +241,39 @@ def build_rows(
                 "selectedIds": [row.get("proposalId")] if row.get("proposalId") else [],
                 "outcomeRefs": [],
                 "routeVectorRefs": [row.get("proposalId")] if row.get("proposalId") else [],
+                "vectorKind": "summary",
+                "legPayloads": [
+                    leg_row.get("legs", [])
+                    for leg_row in route_leg_rows
+                    if isinstance(leg_row, dict) and leg_row.get("proposalId") == row.get("proposalId")
+                ],
                 "payload": row,
             })
     return outputs
+
+
+def validate_rows(grouped: dict[str, dict[str, list[dict]]], require_route_vectors: bool) -> None:
+    trace_ids = sorted({trace_id for families in grouped.values() for trace_id in families.keys()})
+    for trace_id in trace_ids:
+        inputs = grouped["decision_stage_input"].get(trace_id, [])
+        outputs = grouped["decision_stage_output"].get(trace_id, [])
+        joins = grouped["decision_stage_join"].get(trace_id, [])
+        executions = grouped["dispatch_execution"].get(trace_id, [])
+        outcomes = grouped["dispatch_outcome"].get(trace_id, [])
+        route_vectors = grouped["route_vector_summary_trace"].get(trace_id, [])
+        input_stages = {(row.get("traceId"), row.get("stageName")) for row in inputs}
+        output_stages = {(row.get("traceId"), row.get("stageName")) for row in outputs}
+        join_stages = {(row.get("traceId"), row.get("stageName")) for row in joins}
+        missing_outputs = sorted(stage for stage in input_stages if stage not in output_stages)
+        if missing_outputs:
+            raise ValueError(f"Missing stage outputs for trace '{trace_id}': {missing_outputs}")
+        missing_joins = sorted(stage for stage in output_stages if stage not in join_stages)
+        if missing_joins:
+            raise ValueError(f"Missing stage joins for trace '{trace_id}': {missing_joins}")
+        if outcomes and not executions:
+            raise ValueError(f"Missing dispatch_execution for trace '{trace_id}'")
+        if require_route_vectors and not route_vectors:
+            raise ValueError(f"Missing route vectors for trace '{trace_id}'")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -210,11 +285,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scenario-pack", help="Optional scenario-pack filter.")
     parser.add_argument("--decision-mode", help="Optional decision-mode filter.")
     parser.add_argument("--authority-phase", help="Optional authority-phase filter.")
+    parser.add_argument("--route-vector-availability", default="any", choices=("any", "required", "none"))
+    parser.add_argument("--allow-partial", action="store_true", help="Allow incomplete linkage instead of failing.")
     args = parser.parse_args(argv)
 
     feedback_root = Path(args.feedback_root)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    family_files = load_family_files(feedback_root)
+    validate_family_schema_versions(family_files)
+    grouped = {family: group_by_trace(paths, family) for family, paths in family_files.items()}
+    if not args.allow_partial:
+        validate_rows(grouped, args.route_vector_availability == "required")
     rows = build_rows(
         feedback_root,
         args.authority_mode,
@@ -222,6 +304,7 @@ def main(argv: list[str] | None = None) -> int:
         args.scenario_pack,
         args.decision_mode,
         args.authority_phase,
+        args.route_vector_availability,
     )
 
     append_jsonl(output_dir / "stage_inputs.jsonl", rows["stage_inputs"])
@@ -240,6 +323,8 @@ def main(argv: list[str] | None = None) -> int:
             "scenarioPack": args.scenario_pack,
             "decisionMode": args.decision_mode,
             "authorityPhase": args.authority_phase,
+            "routeVectorAvailability": args.route_vector_availability,
+            "allowPartial": args.allow_partial,
         },
         "counts": {name: len(entries) for name, entries in rows.items()},
     }

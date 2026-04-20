@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -39,44 +40,73 @@ public final class NineRouterResponsesClient {
     public LlmInvocationResult invoke(DecisionStageInputV1 input, DecisionEffort requestedEffort) {
         String apiKey = System.getenv(properties.getApiKeyEnv());
         if (apiKey == null || apiKey.isBlank()) {
-            throw new IllegalStateException("Missing API key in env " + properties.getApiKeyEnv());
+            throw new IllegalStateException("llm-api-key-missing");
         }
+        String baseUrl = configuredValue(
+                "routechain.dispatch-v2.decision.llm.base-url",
+                "ROUTECHAIN_DECISION_LLM_BASE_URL",
+                properties.getBaseUrl());
+        String model = configuredValue(
+                "routechain.dispatch-v2.decision.llm.model",
+                "ROUTECHAIN_DECISION_LLM_MODEL",
+                properties.getModel());
         DecisionEffort appliedEffort = requestedEffort == null ? DecisionEffort.MEDIUM : requestedEffort;
         int retryCount = 0;
-        while (true) {
-            JsonNode requestBody = buildRequestBody(input, appliedEffort);
-            TransportResponse response = transport.post(
-                    properties.getBaseUrl(),
-                    apiKey,
-                    properties.getTimeoutMs(),
-                    requestBody,
-                    objectMapper);
-            if (response.statusCode() >= 400 && requestedEffort == DecisionEffort.XHIGH && appliedEffort == DecisionEffort.XHIGH) {
-                appliedEffort = DecisionEffort.HIGH;
+        int maxAttempts = Math.max(1, properties.getMaxRetries() + 1);
+        String lastFailureReason = "provider-empty-response";
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            JsonNode requestBody = buildRequestBody(input, appliedEffort, model);
+            try {
+                TransportResponse response = transport.post(
+                        baseUrl,
+                        apiKey,
+                        properties.getTimeoutMs(),
+                        requestBody,
+                        objectMapper);
+                if (response.statusCode() >= 400) {
+                    String failureReason = classifyHttpFailure(response.statusCode(), response.body());
+                    if ("provider-rejected-effort".equals(failureReason)
+                            && requestedEffort == DecisionEffort.XHIGH
+                            && appliedEffort == DecisionEffort.XHIGH) {
+                        appliedEffort = DecisionEffort.HIGH;
+                        retryCount++;
+                        lastFailureReason = failureReason;
+                        continue;
+                    }
+                    if (attempt >= maxAttempts) {
+                        throw new IllegalStateException(failureReason);
+                    }
+                    retryCount++;
+                    lastFailureReason = failureReason;
+                    continue;
+                }
+                return parseResponse(response.body(), requestedEffort, appliedEffort, retryCount, model);
+            } catch (IllegalStateException exception) {
+                String failureReason = exception.getMessage() == null ? "provider-http-error" : exception.getMessage();
+                if (attempt >= maxAttempts || !retryable(failureReason)) {
+                    throw new IllegalStateException(failureReason, exception);
+                }
                 retryCount++;
-                continue;
+                lastFailureReason = failureReason;
             }
-            if (response.statusCode() >= 400) {
-                throw new IllegalStateException("9router responses call failed with status " + response.statusCode());
-            }
-            return parseResponse(response.body(), requestedEffort, appliedEffort, retryCount);
         }
+        throw new IllegalStateException(lastFailureReason);
     }
 
-    private JsonNode buildRequestBody(DecisionStageInputV1 input, DecisionEffort appliedEffort) {
+    private JsonNode buildRequestBody(DecisionStageInputV1 input, DecisionEffort appliedEffort, String model) {
         Map<String, Object> body = new LinkedHashMap<>();
         java.util.List<Map<String, Object>> contentItems = java.util.List.of(
                 Map.of(
                         "role", "system",
                         "content", java.util.List.of(Map.of(
                                 "type", "input_text",
-                                "text", "Return strict JSON only. Honor hard constraints and keep output compact."))),
+                                "text", systemPrompt(input)))),
                 Map.of(
                         "role", "user",
                         "content", java.util.List.of(Map.of(
                                 "type", "input_text",
-                                "text", serialize(input)))));
-        body.put("model", properties.getModel());
+                                "text", dynamicPrompt(input)))));
+        body.put("model", model);
         body.put("parallel_tool_calls", properties.isParallelToolCalls());
         body.put("reasoning", Map.of("effort", appliedEffort.wireValue()));
         body.put("text", Map.of(
@@ -95,15 +125,19 @@ public final class NineRouterResponsesClient {
                 "additionalProperties", false,
                 "properties", Map.of(
                         "selectedIds", Map.of("type", "array", "items", Map.of("type", "string")),
-                        "assessments", Map.of("type", "object")),
+                        "assessments", Map.of("type", "object", "additionalProperties", true)),
                 "required", java.util.List.of("selectedIds", "assessments"));
     }
 
     private LlmInvocationResult parseResponse(String body,
                                               DecisionEffort requestedEffort,
                                               DecisionEffort appliedEffort,
-                                              int retryCount) {
+                                              int retryCount,
+                                              String model) {
         try {
+            if (body == null || body.isBlank()) {
+                throw new IllegalStateException("provider-empty-response");
+            }
             JsonNode node = objectMapper.readTree(body);
             JsonNode usage = node.path("usage");
             Map<String, Object> tokenUsage = usage.isObject()
@@ -111,19 +145,18 @@ public final class NineRouterResponsesClient {
                     })
                     : Map.of();
             JsonNode outputNode = firstOutputNode(node);
-            Map<String, Object> parsedOutput = outputNode.isObject()
-                    ? objectMapper.convertValue(outputNode, new TypeReference<>() {
-                    })
-                    : Map.of("raw", outputNode.asText(""));
+            Map<String, Object> parsedOutput = validateParsedOutput(outputNode);
+            tokenUsage = normalizeTokenUsage(tokenUsage);
             return new LlmInvocationResult(
                     parsedOutput,
                     requestedEffort.wireValue(),
                     appliedEffort.wireValue(),
                     tokenUsage,
                     retryCount,
-                    sha256(body));
+                    sha256(body),
+                    model);
         } catch (IOException exception) {
-            throw new IllegalStateException("Failed to parse 9router response body", exception);
+            throw new IllegalStateException("provider-invalid-json", exception);
         }
     }
 
@@ -145,11 +178,51 @@ public final class NineRouterResponsesClient {
                 try {
                     return objectMapper.readTree(text.asText());
                 } catch (IOException ignored) {
-                    return objectMapper.createObjectNode().put("raw", text.asText());
+                    throw new IllegalStateException("provider-invalid-json");
                 }
             }
         }
-        return objectMapper.createObjectNode();
+        throw new IllegalStateException("provider-empty-response");
+    }
+
+    private Map<String, Object> validateParsedOutput(JsonNode outputNode) {
+        if (!outputNode.isObject()) {
+            throw new IllegalStateException("provider-schema-invalid");
+        }
+        JsonNode selectedIds = outputNode.get("selectedIds");
+        JsonNode assessments = outputNode.get("assessments");
+        if (selectedIds == null || !selectedIds.isArray() || assessments == null || !assessments.isObject()) {
+            throw new IllegalStateException("provider-schema-invalid");
+        }
+        return objectMapper.convertValue(outputNode, new TypeReference<>() {
+        });
+    }
+
+    private Map<String, Object> normalizeTokenUsage(Map<String, Object> tokenUsage) {
+        if (tokenUsage == null || tokenUsage.isEmpty()) {
+            return Map.of();
+        }
+        long inputTokens = longValue(tokenUsage, "input_tokens", "inputTokens", "prompt_tokens", "promptTokens");
+        long outputTokens = longValue(tokenUsage, "output_tokens", "outputTokens", "completion_tokens", "completionTokens");
+        long totalTokens = longValue(tokenUsage, "total_tokens", "totalTokens");
+        if (totalTokens <= 0) {
+            totalTokens = inputTokens + outputTokens;
+        }
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        normalized.put("inputTokens", inputTokens);
+        normalized.put("outputTokens", outputTokens);
+        normalized.put("totalTokens", totalTokens);
+        return Map.copyOf(normalized);
+    }
+
+    private long longValue(Map<String, Object> source, String... keys) {
+        for (String key : keys) {
+            Object value = source.get(key);
+            if (value instanceof Number number) {
+                return number.longValue();
+            }
+        }
+        return 0L;
     }
 
     private String serialize(Object value) {
@@ -174,13 +247,69 @@ public final class NineRouterResponsesClient {
         }
     }
 
+    private String systemPrompt(DecisionStageInputV1 input) {
+        return String.join(
+                "\n",
+                "Return strict JSON only.",
+                "Honor hard constraints and keep output compact.",
+                "Do not invent ids that do not exist in the candidate window.",
+                "Static prefix: " + String.valueOf(input.constraints().getOrDefault("staticPrefix", "")),
+                "Schema: stage_output_v1 with selectedIds[] and assessments{}.");
+    }
+
+    private String dynamicPrompt(DecisionStageInputV1 input) {
+        java.util.List<String> sections = new ArrayList<>();
+        sections.add("dispatchContext=" + serialize(input.dispatchContext()));
+        sections.add("candidateSet=" + serialize(input.candidateSet()));
+        sections.add("constraints=" + serialize(input.constraints()));
+        sections.add("objectiveWeights=" + serialize(input.objectiveWeights()));
+        sections.add("upstreamRefs=" + serialize(input.upstreamRefs()));
+        return String.join("\n", sections);
+    }
+
+    private String classifyHttpFailure(int statusCode, String body) {
+        String normalizedBody = body == null ? "" : body.toLowerCase(java.util.Locale.ROOT);
+        if ((statusCode == 400 || statusCode == 422)
+                && normalizedBody.contains("effort")) {
+            return "provider-rejected-effort";
+        }
+        if (statusCode == 408 || statusCode == 429) {
+            return "provider-timeout";
+        }
+        if (statusCode >= 500) {
+            return "provider-http-error";
+        }
+        return "provider-http-error";
+    }
+
+    private boolean retryable(String failureReason) {
+        return "provider-timeout".equals(failureReason)
+                || "provider-http-error".equals(failureReason)
+                || "provider-empty-response".equals(failureReason)
+                || "provider-invalid-json".equals(failureReason)
+                || "provider-rejected-effort".equals(failureReason);
+    }
+
+    private String configuredValue(String propertyName, String envName, String defaultValue) {
+        String propertyValue = System.getProperty(propertyName);
+        if (propertyValue != null && !propertyValue.isBlank()) {
+            return propertyValue;
+        }
+        String envValue = System.getenv(envName);
+        if (envValue != null && !envValue.isBlank()) {
+            return envValue;
+        }
+        return defaultValue;
+    }
+
     public record LlmInvocationResult(
             Map<String, Object> parsedOutput,
             String requestedEffort,
             String appliedEffort,
             Map<String, Object> tokenUsage,
             int retryCount,
-            String rawResponseHash) {
+            String rawResponseHash,
+            String providerModel) {
     }
 
     interface ResponsesTransport {

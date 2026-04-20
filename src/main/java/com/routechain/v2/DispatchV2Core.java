@@ -1,6 +1,10 @@
 package com.routechain.v2;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
+import com.routechain.v2.bundle.BundleCandidate;
+import com.routechain.v2.bundle.BundleFamily;
+import com.routechain.v2.bundle.BundlePoolSummary;
+import com.routechain.v2.bundle.BundleProposalSource;
 import com.routechain.v2.bundle.DispatchBundleStage;
 import com.routechain.v2.bundle.DispatchBundleStageService;
 import com.routechain.v2.cluster.DispatchPairClusterService;
@@ -8,7 +12,9 @@ import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.context.DispatchEtaContextService;
 import com.routechain.v2.context.DispatchEtaContextStage;
 import com.routechain.v2.decision.ContextAssembler;
+import com.routechain.v2.decision.DecisionBrain;
 import com.routechain.v2.decision.DecisionBrainResolver;
+import com.routechain.v2.decision.DecisionStageMetaV1;
 import com.routechain.v2.decision.DecisionStageInputV1;
 import com.routechain.v2.decision.DecisionStageLogger;
 import com.routechain.v2.decision.DecisionStageOutputV1;
@@ -21,20 +27,38 @@ import com.routechain.v2.feedback.HotStartAppliedReuse;
 import com.routechain.v2.feedback.HotStartReusePlan;
 import com.routechain.v2.feedback.PostDispatchHardeningService;
 import com.routechain.v2.feedback.WarmStartManager;
+import com.routechain.v2.route.DriverCandidate;
 import com.routechain.v2.route.DispatchRouteCandidateService;
 import com.routechain.v2.route.DispatchRouteCandidateStage;
 import com.routechain.v2.route.DispatchRouteProposalService;
 import com.routechain.v2.route.DispatchRouteProposalStage;
+import com.routechain.v2.route.DriverShortlistSummary;
+import com.routechain.v2.route.PickupAnchor;
+import com.routechain.v2.route.RouteProposal;
+import com.routechain.v2.route.RouteProposalSource;
+import com.routechain.v2.route.RouteProposalSummary;
+import com.routechain.v2.route.PickupAnchorSummary;
 import com.routechain.v2.scenario.DispatchScenarioService;
 import com.routechain.v2.scenario.DispatchScenarioStage;
+import com.routechain.v2.scenario.RobustUtility;
+import com.routechain.v2.scenario.ScenarioEvaluation;
+import com.routechain.v2.scenario.ScenarioEvaluationSummary;
 import com.routechain.v2.selector.DispatchSelectorService;
 import com.routechain.v2.selector.DispatchSelectorStage;
+import com.routechain.v2.selector.GlobalSelectionResult;
+import com.routechain.v2.selector.GlobalSelectorSummary;
+import com.routechain.v2.selector.SelectedProposal;
+import com.routechain.v2.selector.SelectionSolverMode;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public final class DispatchV2Core {
     private static final List<String> DECISION_STAGES = List.of(
@@ -134,7 +158,7 @@ public final class DispatchV2Core {
         long dispatchStartedAt = System.nanoTime();
         ResolvedDecisionBrain resolvedDecisionBrain = decisionBrainResolver.resolve();
         DecisionStageOutputV1 observationOutput = runDecisionSidecar(resolvedDecisionBrain, contextAssembler.observationInput(request));
-        writeDecisionJoin(request.traceId(), observationOutput, List.of(), false);
+        writeDecisionJoin(request.traceId(), observationOutput, List.of(), List.of(), false, false, List.of());
         DispatchEtaContextStage etaStage = dispatchEtaContextService.evaluate(request);
         HotStartReusePlan reusePlan = allowHotStartReuse
                 ? postDispatchHardeningService.planHotStartReuse(etaStage.etaContext())
@@ -148,11 +172,16 @@ public final class DispatchV2Core {
                 pairClusterStage,
                 reusePlan.bundleReuseInput());
         DecisionStageOutputV1 pairBundleOutput = runDecisionSidecar(resolvedDecisionBrain, contextAssembler.pairBundleInput(request, etaStage.etaContext(), pairClusterStage, bundleStage));
+        StageAuthorityResult<DispatchBundleStage> pairBundleAuthority = applyPairBundleAuthority(bundleStage, pairBundleOutput, resolvedDecisionBrain);
+        bundleStage = pairBundleAuthority.value();
         writeDecisionJoin(
                 request.traceId(),
-                pairBundleOutput,
-                bundleStage.bundleCandidates().stream().limit(12).map(bundle -> bundle.bundleId()).toList(),
-                true);
+                pairBundleAuthority.output(),
+                bundleStage.bundleCandidates().stream().map(BundleCandidate::bundleId).toList(),
+                pairBundleAuthority.actualSelectedIds(),
+                true,
+                pairBundleAuthority.authoritativeApplied(),
+                List.of("observation-pack"));
         DispatchRouteCandidateStage routeCandidateStage = dispatchRouteCandidateService.evaluate(
                 request,
                 etaStage.etaContext(),
@@ -162,14 +191,22 @@ public final class DispatchV2Core {
         writeDecisionJoin(
                 request.traceId(),
                 anchorOutput,
-                routeCandidateStage.pickupAnchors().stream().limit(12).map(anchor -> anchor.anchorOrderId()).toList(),
-                true);
+                routeCandidateStage.pickupAnchors().stream().map(PickupAnchor::anchorOrderId).toList(),
+                routeCandidateStage.pickupAnchors().stream().map(PickupAnchor::anchorOrderId).toList(),
+                true,
+                false,
+                List.of("pair-bundle"));
         DecisionStageOutputV1 driverOutput = runDecisionSidecar(resolvedDecisionBrain, contextAssembler.driverInput(request, etaStage.etaContext(), routeCandidateStage));
+        StageAuthorityResult<DispatchRouteCandidateStage> driverAuthority = applyDriverAuthority(routeCandidateStage, driverOutput, resolvedDecisionBrain);
+        routeCandidateStage = driverAuthority.value();
         writeDecisionJoin(
                 request.traceId(),
-                driverOutput,
-                routeCandidateStage.driverCandidates().stream().limit(12).map(candidate -> candidate.driverId()).toList(),
-                true);
+                driverAuthority.output(),
+                routeCandidateStage.driverCandidates().stream().map(DriverCandidate::driverId).toList(),
+                driverAuthority.actualSelectedIds(),
+                true,
+                driverAuthority.authoritativeApplied(),
+                List.of("anchor"));
         DispatchRouteProposalStage routeProposalStage = dispatchRouteProposalService.evaluate(
                 request,
                 etaStage.etaContext(),
@@ -178,17 +215,27 @@ public final class DispatchV2Core {
                 routeCandidateStage,
                 reusePlan.routeProposalReuseInput());
         DecisionStageOutputV1 routeGenerationOutput = runDecisionSidecar(resolvedDecisionBrain, contextAssembler.routeGenerationInput(request, etaStage.etaContext(), routeProposalStage));
+        StageAuthorityResult<DispatchRouteProposalStage> routeGenerationAuthority = applyRouteProposalAuthority(routeProposalStage, routeGenerationOutput, resolvedDecisionBrain, "route-generation");
+        routeProposalStage = routeGenerationAuthority.value();
         writeDecisionJoin(
                 request.traceId(),
-                routeGenerationOutput,
-                routeProposalStage.routeProposals().stream().limit(8).map(proposal -> proposal.proposalId()).toList(),
-                true);
+                routeGenerationAuthority.output(),
+                routeProposalStage.routeProposals().stream().map(RouteProposal::proposalId).toList(),
+                routeGenerationAuthority.actualSelectedIds(),
+                true,
+                routeGenerationAuthority.authoritativeApplied(),
+                List.of("driver"));
         DecisionStageOutputV1 routeCritiqueOutput = runDecisionSidecar(resolvedDecisionBrain, contextAssembler.routeCritiqueInput(request, etaStage.etaContext(), routeProposalStage));
+        StageAuthorityResult<DispatchRouteProposalStage> routeCritiqueAuthority = applyRouteProposalAuthority(routeProposalStage, routeCritiqueOutput, resolvedDecisionBrain, "route-critique");
+        routeProposalStage = routeCritiqueAuthority.value();
         writeDecisionJoin(
                 request.traceId(),
-                routeCritiqueOutput,
-                routeProposalStage.routeProposals().stream().limit(8).map(proposal -> proposal.proposalId()).toList(),
-                true);
+                routeCritiqueAuthority.output(),
+                routeProposalStage.routeProposals().stream().map(RouteProposal::proposalId).toList(),
+                routeCritiqueAuthority.actualSelectedIds(),
+                true,
+                routeCritiqueAuthority.authoritativeApplied(),
+                List.of("route-generation"));
         DispatchScenarioStage scenarioStage = dispatchScenarioService.evaluate(
                 request,
                 etaStage.etaContext(),
@@ -199,11 +246,16 @@ public final class DispatchV2Core {
                 bundleStage,
                 pairClusterStage);
         DecisionStageOutputV1 scenarioOutput = runDecisionSidecar(resolvedDecisionBrain, contextAssembler.scenarioInput(request, etaStage.etaContext(), scenarioStage));
+        StageAuthorityResult<DispatchScenarioStage> scenarioAuthority = applyScenarioAuthority(scenarioStage, scenarioOutput, resolvedDecisionBrain);
+        scenarioStage = scenarioAuthority.value();
         writeDecisionJoin(
                 request.traceId(),
-                scenarioOutput,
-                scenarioStage.robustUtilities().stream().limit(8).map(utility -> utility.proposalId()).toList(),
-                true);
+                scenarioAuthority.output(),
+                scenarioStage.robustUtilities().stream().map(RobustUtility::proposalId).toList(),
+                scenarioAuthority.actualSelectedIds(),
+                true,
+                scenarioAuthority.authoritativeApplied(),
+                List.of("route-critique"));
         DispatchSelectorStage selectorStage = dispatchSelectorService.evaluate(
                 request,
                 etaStage.etaContext(),
@@ -215,13 +267,16 @@ public final class DispatchV2Core {
         DecisionStageOutputV1 finalSelectionOutput = runDecisionSidecar(
                 resolvedDecisionBrain,
                 contextAssembler.finalSelectionInput(request, etaStage.etaContext(), selectorStage));
+        StageAuthorityResult<DispatchSelectorStage> finalSelectionAuthority = applyFinalSelectionAuthority(selectorStage, finalSelectionOutput, resolvedDecisionBrain);
+        selectorStage = finalSelectionAuthority.value();
         writeDecisionJoin(
                 request.traceId(),
-                finalSelectionOutput,
-                selectorStage.globalSelectionResult().selectedProposals().stream()
-                        .map(selectedProposal -> selectedProposal.proposalId())
-                        .toList(),
-                true);
+                finalSelectionAuthority.output(),
+                selectorStage.selectorCandidates().stream().map(candidate -> candidate.proposalId()).toList(),
+                finalSelectionAuthority.actualSelectedIds(),
+                true,
+                finalSelectionAuthority.authoritativeApplied(),
+                List.of("scenario"));
         DispatchExecutorStage executorStage = dispatchExecutorService.evaluate(
                 request,
                 pairClusterStage,
@@ -236,7 +291,10 @@ public final class DispatchV2Core {
                 request.traceId(),
                 executionOutput,
                 executorStage.assignments().stream().map(assignment -> assignment.assignmentId()).toList(),
-                true);
+                executorStage.assignments().stream().map(assignment -> assignment.assignmentId()).toList(),
+                true,
+                false,
+                List.of("final-selection"));
         long totalDispatchLatencyMs = elapsedMs(dispatchStartedAt);
         List<DispatchStageLatency> stageLatencies = finalizeStageLatencies(
                 mergeStageLatencies(
@@ -370,7 +428,8 @@ public final class DispatchV2Core {
 
     private DecisionStageOutputV1 runDecisionSidecar(ResolvedDecisionBrain resolvedDecisionBrain, DecisionStageInputV1 input) {
         decisionStageLogger.writeFamily("decision_stage_input", input.traceId(), input.stageName().wireName(), input);
-        DecisionStageOutputV1 output = resolvedDecisionBrain.brain().evaluateStage(input);
+        DecisionBrain loggingBrain = resolvedDecisionBrain.loggingBrainForStage(input.stageName());
+        DecisionStageOutputV1 output = loggingBrain.evaluateStage(input);
         decisionStageLogger.writeFamily("decision_stage_output", input.traceId(), input.stageName().wireName(), output);
         decisionStageLogger.writeFamily("decision_usage", input.traceId(), input.stageName().wireName(), new DecisionUsageRecord(
                 "decision-usage/v1",
@@ -389,18 +448,350 @@ public final class DispatchV2Core {
 
     private void writeDecisionJoin(String traceId,
                                    DecisionStageOutputV1 output,
+                                   List<String> candidateIds,
                                    List<String> actualSelectedIds,
-                                   boolean agreementAvailable) {
-        decisionStageLogger.writeFamily("decision_stage_join", traceId, output.stageName().wireName(), java.util.Map.of(
-                "schemaVersion", "decision-stage-join/v1",
-                "traceId", output.traceId(),
-                "runId", output.runId(),
-                "tickId", output.tickId(),
-                "stageName", output.stageName(),
-                "brainType", output.brainType(),
-                "selectedIds", output.selectedIds(),
-                "actualSelectedIds", actualSelectedIds == null ? List.of() : actualSelectedIds,
-                "agreementAvailable", agreementAvailable));
+                                   boolean agreementAvailable,
+                                   boolean authoritativeApplied,
+                                   List<String> upstreamRefs) {
+        List<String> safeCandidateIds = candidateIds == null ? List.of() : List.copyOf(candidateIds);
+        Set<String> rejectedIds = new LinkedHashSet<>(safeCandidateIds);
+        rejectedIds.removeAll(output.selectedIds());
+        Map<String, Object> joinPayload = new LinkedHashMap<>();
+        joinPayload.put("schemaVersion", "decision-stage-join/v1");
+        joinPayload.put("traceId", output.traceId());
+        joinPayload.put("runId", output.runId());
+        joinPayload.put("tickId", output.tickId());
+        joinPayload.put("stageName", output.stageName());
+        joinPayload.put("brainType", output.brainType());
+        joinPayload.put("selectedIds", output.selectedIds());
+        joinPayload.put("candidateIds", safeCandidateIds);
+        joinPayload.put("rejectedIds", List.copyOf(rejectedIds));
+        joinPayload.put("actualSelectedIds", actualSelectedIds == null ? List.of() : actualSelectedIds);
+        joinPayload.put("agreementAvailable", agreementAvailable);
+        joinPayload.put("authoritativeApplied", authoritativeApplied);
+        joinPayload.put("authorityMode", properties.getDecision().getMode());
+        joinPayload.put("upstreamRefs", upstreamRefs == null ? List.of() : upstreamRefs);
+        decisionStageLogger.writeFamily("decision_stage_join", traceId, output.stageName().wireName(), joinPayload);
+    }
+
+    private StageAuthorityResult<DispatchBundleStage> applyPairBundleAuthority(DispatchBundleStage bundleStage,
+                                                                               DecisionStageOutputV1 output,
+                                                                               ResolvedDecisionBrain resolvedDecisionBrain) {
+        List<String> candidateIds = bundleStage.bundleCandidates().stream().map(BundleCandidate::bundleId).toList();
+        if (!shouldApplyAuthoritatively(resolvedDecisionBrain, output)) {
+            return new StageAuthorityResult<>(bundleStage, output, false, candidateIds);
+        }
+        List<String> selectedIds = validSelectedIds(output.selectedIds(), candidateIds);
+        if (selectedIds.isEmpty()) {
+            return new StageAuthorityResult<>(bundleStage, withAuthorityFallback(output, "llm-selected-ids-invalid"), false, candidateIds);
+        }
+        List<BundleCandidate> filtered = bundleStage.bundleCandidates().stream()
+                .filter(bundle -> selectedIds.contains(bundle.bundleId()))
+                .toList();
+        return new StageAuthorityResult<>(
+                new DispatchBundleStage(
+                        bundleStage.schemaVersion(),
+                        bundleStage.boundaryExpansions(),
+                        bundleStage.boundaryExpansionSummary(),
+                        filtered,
+                        summarizeBundles(filtered, bundleStage.bundlePoolSummary()),
+                        bundleStage.hotStartReuseSummary(),
+                        bundleStage.stageLatencies(),
+                        bundleStage.mlStageMetadata(),
+                        appendDistinct(bundleStage.degradeReasons(), "decision-authority-pair-bundle")),
+                output,
+                true,
+                filtered.stream().map(BundleCandidate::bundleId).toList());
+    }
+
+    private StageAuthorityResult<DispatchRouteCandidateStage> applyDriverAuthority(DispatchRouteCandidateStage routeCandidateStage,
+                                                                                   DecisionStageOutputV1 output,
+                                                                                   ResolvedDecisionBrain resolvedDecisionBrain) {
+        List<String> candidateIds = routeCandidateStage.driverCandidates().stream().map(DriverCandidate::driverId).toList();
+        if (!shouldApplyAuthoritatively(resolvedDecisionBrain, output)) {
+            return new StageAuthorityResult<>(routeCandidateStage, output, false, candidateIds);
+        }
+        List<String> selectedIds = validSelectedIds(output.selectedIds(), candidateIds);
+        if (selectedIds.isEmpty()) {
+            return new StageAuthorityResult<>(routeCandidateStage, withAuthorityFallback(output, "llm-selected-ids-invalid"), false, candidateIds);
+        }
+        List<DriverCandidate> filtered = routeCandidateStage.driverCandidates().stream()
+                .filter(candidate -> selectedIds.contains(candidate.driverId()))
+                .toList();
+        return new StageAuthorityResult<>(
+                new DispatchRouteCandidateStage(
+                        routeCandidateStage.schemaVersion(),
+                        routeCandidateStage.pickupAnchors(),
+                        routeCandidateStage.pickupAnchorSummary(),
+                        filtered,
+                        summarizeDrivers(filtered, routeCandidateStage.driverShortlistSummary()),
+                        routeCandidateStage.stageLatencies(),
+                        routeCandidateStage.mlStageMetadata(),
+                        appendDistinct(routeCandidateStage.degradeReasons(), "decision-authority-driver")),
+                output,
+                true,
+                filtered.stream().map(DriverCandidate::driverId).toList());
+    }
+
+    private StageAuthorityResult<DispatchRouteProposalStage> applyRouteProposalAuthority(DispatchRouteProposalStage routeProposalStage,
+                                                                                         DecisionStageOutputV1 output,
+                                                                                         ResolvedDecisionBrain resolvedDecisionBrain,
+                                                                                         String authorityReason) {
+        List<String> candidateIds = routeProposalStage.routeProposals().stream().map(RouteProposal::proposalId).toList();
+        if (!shouldApplyAuthoritatively(resolvedDecisionBrain, output)) {
+            return new StageAuthorityResult<>(routeProposalStage, output, false, candidateIds);
+        }
+        List<String> selectedIds = validSelectedIds(output.selectedIds(), candidateIds);
+        if (selectedIds.isEmpty()) {
+            return new StageAuthorityResult<>(routeProposalStage, withAuthorityFallback(output, "llm-selected-ids-invalid"), false, candidateIds);
+        }
+        List<RouteProposal> filtered = routeProposalStage.routeProposals().stream()
+                .filter(proposal -> selectedIds.contains(proposal.proposalId()))
+                .toList();
+        return new StageAuthorityResult<>(
+                new DispatchRouteProposalStage(
+                        routeProposalStage.schemaVersion(),
+                        filtered,
+                        summarizeRouteProposals(filtered, routeProposalStage.routeProposalSummary(), authorityReason),
+                        routeProposalStage.hotStartReuseSummary(),
+                        routeProposalStage.stageLatencies(),
+                        routeProposalStage.mlStageMetadata(),
+                        appendDistinct(routeProposalStage.degradeReasons(), "decision-authority-" + authorityReason)),
+                output,
+                true,
+                filtered.stream().map(RouteProposal::proposalId).toList());
+    }
+
+    private StageAuthorityResult<DispatchScenarioStage> applyScenarioAuthority(DispatchScenarioStage scenarioStage,
+                                                                               DecisionStageOutputV1 output,
+                                                                               ResolvedDecisionBrain resolvedDecisionBrain) {
+        List<String> candidateIds = scenarioStage.robustUtilities().stream().map(RobustUtility::proposalId).toList();
+        if (!shouldApplyAuthoritatively(resolvedDecisionBrain, output)) {
+            return new StageAuthorityResult<>(scenarioStage, output, false, candidateIds);
+        }
+        List<String> selectedIds = validSelectedIds(output.selectedIds(), candidateIds);
+        if (selectedIds.isEmpty()) {
+            return new StageAuthorityResult<>(scenarioStage, withAuthorityFallback(output, "llm-selected-ids-invalid"), false, candidateIds);
+        }
+        List<RobustUtility> filteredUtilities = scenarioStage.robustUtilities().stream()
+                .filter(utility -> selectedIds.contains(utility.proposalId()))
+                .toList();
+        List<ScenarioEvaluation> filteredEvaluations = scenarioStage.scenarioEvaluations().stream()
+                .filter(evaluation -> selectedIds.contains(evaluation.proposalId()))
+                .toList();
+        return new StageAuthorityResult<>(
+                new DispatchScenarioStage(
+                        scenarioStage.schemaVersion(),
+                        filteredEvaluations,
+                        filteredUtilities,
+                        summarizeScenarios(filteredEvaluations, filteredUtilities, scenarioStage.scenarioEvaluationSummary()),
+                        scenarioStage.freshnessMetadata(),
+                        scenarioStage.stageLatencies(),
+                        scenarioStage.mlStageMetadata(),
+                        appendDistinct(scenarioStage.degradeReasons(), "decision-authority-scenario")),
+                output,
+                true,
+                filteredUtilities.stream().map(RobustUtility::proposalId).toList());
+    }
+
+    private StageAuthorityResult<DispatchSelectorStage> applyFinalSelectionAuthority(DispatchSelectorStage selectorStage,
+                                                                                     DecisionStageOutputV1 output,
+                                                                                     ResolvedDecisionBrain resolvedDecisionBrain) {
+        List<String> selectedIds = selectorStage.globalSelectionResult().selectedProposals().stream()
+                .map(SelectedProposal::proposalId)
+                .toList();
+        List<String> candidateIds = selectorStage.selectorCandidates().stream()
+                .map(candidate -> candidate.proposalId())
+                .toList();
+        if (!shouldApplyAuthoritatively(resolvedDecisionBrain, output)) {
+            return new StageAuthorityResult<>(selectorStage, output, false, selectedIds);
+        }
+        List<String> validSelectedIds = validSelectedIds(output.selectedIds(), candidateIds);
+        if (validSelectedIds.isEmpty()) {
+            return new StageAuthorityResult<>(selectorStage, withAuthorityFallback(output, "llm-selected-ids-invalid"), false, selectedIds);
+        }
+        Map<String, Double> selectionScoreByProposalId = selectorStage.selectorCandidates().stream()
+                .collect(Collectors.toMap(candidate -> candidate.proposalId(), candidate -> candidate.selectionScore(), (left, right) -> left));
+        List<SelectedProposal> selectedProposals = new ArrayList<>();
+        int rank = 1;
+        for (String proposalId : validSelectedIds) {
+            Double selectionScore = selectionScoreByProposalId.get(proposalId);
+            if (selectionScore == null) {
+                continue;
+            }
+            selectedProposals.add(new SelectedProposal(
+                    "selected-proposal/v1",
+                    proposalId,
+                    rank++,
+                    selectionScore,
+                    List.of("decision-authority-final-selection")));
+        }
+        if (selectedProposals.isEmpty()) {
+            return new StageAuthorityResult<>(selectorStage, withAuthorityFallback(output, "llm-selected-ids-invalid"), false, selectedIds);
+        }
+        SelectionSolverMode solverMode = selectorStage.globalSelectionResult().solverMode();
+        GlobalSelectionResult selectionResult = new GlobalSelectionResult(
+                selectorStage.globalSelectionResult().schemaVersion(),
+                List.copyOf(selectedProposals),
+                selectorStage.globalSelectionResult().retainedCandidateCount(),
+                selectedProposals.size(),
+                solverMode,
+                selectedProposals.stream().mapToDouble(SelectedProposal::selectionScore).sum(),
+                appendDistinct(selectorStage.globalSelectionResult().degradeReasons(), "decision-authority-final-selection"));
+        GlobalSelectorSummary selectorSummary = new GlobalSelectorSummary(
+                selectorStage.globalSelectorSummary().schemaVersion(),
+                selectorStage.globalSelectorSummary().candidateCount(),
+                selectorStage.globalSelectorSummary().feasibleCandidateCount(),
+                selectorStage.globalSelectorSummary().conflictEdgeCount(),
+                selectedProposals.size(),
+                solverMode,
+                appendDistinct(selectorStage.globalSelectorSummary().degradeReasons(), "decision-authority-final-selection"));
+        return new StageAuthorityResult<>(
+                new DispatchSelectorStage(
+                        selectorStage.schemaVersion(),
+                        selectorStage.selectorCandidates(),
+                        selectorStage.conflictGraph(),
+                        selectionResult,
+                        selectorSummary,
+                        selectorStage.stageLatencies(),
+                        appendDistinct(selectorStage.degradeReasons(), "decision-authority-final-selection")),
+                output,
+                true,
+                selectedProposals.stream().map(SelectedProposal::proposalId).toList());
+    }
+
+    private DecisionStageOutputV1 withAuthorityFallback(DecisionStageOutputV1 output, String fallbackReason) {
+        DecisionStageMetaV1 meta = output.meta();
+        return new DecisionStageOutputV1(
+                output.schemaVersion(),
+                output.traceId(),
+                output.runId(),
+                output.tickId(),
+                output.stageName(),
+                output.brainType(),
+                output.providerModel(),
+                output.assessments(),
+                output.selectedIds(),
+                new DecisionStageMetaV1(
+                        meta.schemaVersion(),
+                        meta.latencyMs(),
+                        meta.confidence(),
+                        true,
+                        fallbackReason,
+                        meta.validationPassed(),
+                        meta.appliedSource(),
+                        meta.requestedEffort(),
+                        meta.appliedEffort(),
+                        meta.tokenUsage(),
+                        meta.retryCount(),
+                        meta.rawResponseHash()));
+    }
+
+    private boolean shouldApplyAuthoritatively(ResolvedDecisionBrain resolvedDecisionBrain,
+                                               DecisionStageOutputV1 output) {
+        if (output == null || output.stageName() == null || output.meta() == null) {
+            return false;
+        }
+        if (!resolvedDecisionBrain.shouldApplyAuthoritatively(output.stageName())) {
+            return false;
+        }
+        return output.brainType() == com.routechain.v2.decision.DecisionBrainType.LLM
+                && !output.meta().fallbackUsed();
+    }
+
+    private List<String> validSelectedIds(List<String> selectedIds, List<String> candidateIds) {
+        if (selectedIds == null || selectedIds.isEmpty() || candidateIds == null || candidateIds.isEmpty()) {
+            return List.of();
+        }
+        Set<String> candidateSet = new LinkedHashSet<>(candidateIds);
+        return selectedIds.stream()
+                .filter(candidateSet::contains)
+                .distinct()
+                .toList();
+    }
+
+    private BundlePoolSummary summarizeBundles(List<BundleCandidate> filtered, BundlePoolSummary original) {
+        Map<BundleFamily, Integer> familyCounts = new EnumMap<>(BundleFamily.class);
+        Map<BundleProposalSource, Integer> sourceCounts = new EnumMap<>(BundleProposalSource.class);
+        int maxBundleSize = 0;
+        for (BundleCandidate bundle : filtered) {
+            familyCounts.merge(bundle.family(), 1, Integer::sum);
+            sourceCounts.merge(bundle.proposalSource(), 1, Integer::sum);
+            maxBundleSize = Math.max(maxBundleSize, bundle.orderIds().size());
+        }
+        return new BundlePoolSummary(
+                original.schemaVersion(),
+                original.candidateCount(),
+                filtered.size(),
+                familyCounts,
+                sourceCounts,
+                maxBundleSize,
+                appendDistinct(original.degradeReasons(), "decision-authority-pair-bundle"));
+    }
+
+    private DriverShortlistSummary summarizeDrivers(List<DriverCandidate> filtered, DriverShortlistSummary original) {
+        long anchorCount = filtered.stream().map(candidate -> candidate.bundleId() + "|" + candidate.anchorOrderId()).distinct().count();
+        long bundleCount = filtered.stream().map(DriverCandidate::bundleId).distinct().count();
+        return new DriverShortlistSummary(
+                original.schemaVersion(),
+                Math.toIntExact(bundleCount),
+                Math.toIntExact(anchorCount),
+                filtered.size(),
+                filtered.size(),
+                appendDistinct(original.degradeReasons(), "decision-authority-driver"));
+    }
+
+    private RouteProposalSummary summarizeRouteProposals(List<RouteProposal> filtered,
+                                                        RouteProposalSummary original,
+                                                        String authorityReason) {
+        Map<RouteProposalSource, Integer> sourceCounts = new EnumMap<>(RouteProposalSource.class);
+        filtered.forEach(proposal -> sourceCounts.merge(proposal.source(), 1, Integer::sum));
+        int proposalTupleCount = Math.toIntExact(filtered.stream()
+                .map(proposal -> proposal.bundleId() + "|" + proposal.anchorOrderId() + "|" + proposal.driverId())
+                .distinct()
+                .count());
+        return new RouteProposalSummary(
+                original.schemaVersion(),
+                original.driverCandidateCount(),
+                proposalTupleCount,
+                filtered.size(),
+                filtered.size(),
+                sourceCounts,
+                appendDistinct(original.degradeReasons(), "decision-authority-" + authorityReason));
+    }
+
+    private ScenarioEvaluationSummary summarizeScenarios(List<ScenarioEvaluation> evaluations,
+                                                        List<RobustUtility> utilities,
+                                                        ScenarioEvaluationSummary original) {
+        Map<com.routechain.v2.scenario.ScenarioType, Integer> scenarioCounts = new EnumMap<>(com.routechain.v2.scenario.ScenarioType.class);
+        Map<com.routechain.v2.scenario.ScenarioType, Integer> appliedCounts = new EnumMap<>(com.routechain.v2.scenario.ScenarioType.class);
+        int appliedScenarioCount = 0;
+        for (ScenarioEvaluation evaluation : evaluations) {
+            scenarioCounts.merge(evaluation.scenario(), 1, Integer::sum);
+            if (evaluation.applied()) {
+                appliedCounts.merge(evaluation.scenario(), 1, Integer::sum);
+                appliedScenarioCount++;
+            }
+        }
+        return new ScenarioEvaluationSummary(
+                original.schemaVersion(),
+                utilities.size(),
+                evaluations.size(),
+                appliedScenarioCount,
+                scenarioCounts,
+                appliedCounts,
+                appendDistinct(original.degradeReasons(), "decision-authority-scenario"));
+    }
+
+    private List<String> appendDistinct(List<String> reasons, String additionalReason) {
+        List<String> merged = new ArrayList<>(reasons == null ? List.of() : reasons);
+        if (additionalReason != null && !additionalReason.isBlank()) {
+            merged.add(additionalReason);
+        }
+        return merged.stream()
+                .filter(reason -> reason != null && !reason.isBlank())
+                .distinct()
+                .toList();
     }
 
     private List<DispatchStageLatency> mergeStageLatencies(List<DispatchStageLatency>... stageLatencyLists) {
@@ -502,5 +893,12 @@ public final class DispatchV2Core {
 
     private long elapsedMs(long startedAt) {
         return (System.nanoTime() - startedAt) / 1_000_000L;
+    }
+
+    private record StageAuthorityResult<T>(
+            T value,
+            DecisionStageOutputV1 output,
+            boolean authoritativeApplied,
+            List<String> actualSelectedIds) {
     }
 }

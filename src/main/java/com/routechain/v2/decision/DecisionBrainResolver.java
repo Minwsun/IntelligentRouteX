@@ -2,6 +2,8 @@ package com.routechain.v2.decision;
 
 import com.routechain.config.RouteChainDispatchV2Properties;
 
+import java.util.EnumSet;
+
 public final class DecisionBrainResolver {
     private final RouteChainDispatchV2Properties properties;
     private final LegacyMlBrain legacyMlBrain;
@@ -19,22 +21,59 @@ public final class DecisionBrainResolver {
     }
 
     public ResolvedDecisionBrain resolve() {
+        DecisionRuntimeMode runtimeMode = DecisionRuntimeMode.fromMode(properties.getDecision().getMode());
         DecisionBrainType requestedType = DecisionBrainType.fromMode(properties.getDecision().getMode());
         return switch (requestedType) {
-            case LEGACY -> new ResolvedDecisionBrain(requestedType, DecisionBrainType.LEGACY, legacyMlBrain, false, null);
-            case STUDENT -> new ResolvedDecisionBrain(requestedType, DecisionBrainType.STUDENT, studentBrain, false, null);
-            case LLM -> resolveLlm(requestedType);
+            case LEGACY -> new ResolvedDecisionBrain(
+                    requestedType,
+                    DecisionBrainType.LEGACY,
+                    legacyMlBrain,
+                    legacyMlBrain,
+                    false,
+                    null,
+                    runtimeMode,
+                    EnumSet.noneOf(DecisionStageName.class));
+            case STUDENT -> new ResolvedDecisionBrain(
+                    requestedType,
+                    DecisionBrainType.STUDENT,
+                    studentBrain,
+                    legacyMlBrain,
+                    false,
+                    null,
+                    runtimeMode,
+                    EnumSet.noneOf(DecisionStageName.class));
+            case LLM -> resolveLlm(requestedType, runtimeMode);
         };
     }
 
-    private ResolvedDecisionBrain resolveLlm(DecisionBrainType requestedType) {
+    private ResolvedDecisionBrain resolveLlm(DecisionBrainType requestedType, DecisionRuntimeMode runtimeMode) {
         String apiKey = System.getenv(properties.getDecision().getLlm().getApiKeyEnv());
         if (apiKey == null || apiKey.isBlank()) {
             if (!properties.getDecision().isFallbackToLegacy()) {
                 throw new IllegalStateException("LLM mode requires env " + properties.getDecision().getLlm().getApiKeyEnv());
             }
-            return new ResolvedDecisionBrain(requestedType, DecisionBrainType.LEGACY, legacyMlBrain, true, "llm-api-key-missing");
+            return new ResolvedDecisionBrain(
+                    requestedType,
+                    DecisionBrainType.LEGACY,
+                    legacyMlBrain,
+                    legacyMlBrain,
+                    true,
+                    "llm-api-key-missing",
+                    runtimeMode,
+                    EnumSet.noneOf(DecisionStageName.class));
         }
-        return new ResolvedDecisionBrain(requestedType, DecisionBrainType.LLM, llmBrain, false, null);
+        EnumSet<DecisionStageName> authoritativeStages = EnumSet.noneOf(DecisionStageName.class);
+        for (String stageWireName : properties.getDecision().getAuthoritativeStages()) {
+            authoritativeStages.add(DecisionStageName.fromWire(stageWireName));
+        }
+        return new ResolvedDecisionBrain(
+                requestedType,
+                DecisionBrainType.LLM,
+                llmBrain,
+                legacyMlBrain,
+                false,
+                null,
+                runtimeMode,
+                authoritativeStages);
     }
 }

@@ -30,7 +30,19 @@ public enum DecisionStageName {
         };
     }
 
-    public boolean llmPhaseOneEnabled() {
-        return this == PAIR_BUNDLE || this == FINAL_SELECTION;
+    public boolean supportsLlmDecision() {
+        return this != OBSERVATION_PACK && this != SAFETY_EXECUTE;
+    }
+
+    public static DecisionStageName fromWire(String wireName) {
+        if (wireName == null || wireName.isBlank()) {
+            throw new IllegalArgumentException("Decision stage wire name cannot be blank");
+        }
+        for (DecisionStageName value : values()) {
+            if (value.wireName.equalsIgnoreCase(wireName.trim())) {
+                return value;
+            }
+        }
+        throw new IllegalArgumentException("Unknown decision stage: " + wireName);
     }
 }
