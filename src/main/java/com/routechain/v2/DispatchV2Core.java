@@ -442,7 +442,11 @@ public final class DispatchV2Core {
                 resolvedDecisionBrain.fallbackUsed() || output.meta().fallbackUsed(),
                 resolvedDecisionBrain.fallbackUsed() ? resolvedDecisionBrain.fallbackReason() : output.meta().fallbackReason(),
                 properties.getDecision().getLlm().getProvider(),
-                properties.getDecision().getLlm().getModel()));
+                properties.getDecision().getLlm().getModel(),
+                output.providerModel(),
+                properties.getDecision().getLlm().getBaseUrl(),
+                properties.getDecision().getLlm().getWireApi(),
+                output.brainType() == com.routechain.v2.decision.DecisionBrainType.LLM ? "/v1/models" : null));
         return output;
     }
 

@@ -15,6 +15,14 @@ FAMILIES = (
 )
 
 
+def discover_feedback_roots(feedback_root: Path) -> list[Path]:
+    direct_root = feedback_root / "decision-stage"
+    if direct_root.exists():
+        return [feedback_root]
+    discovered = sorted({path.parent for path in feedback_root.rglob("decision-stage") if path.is_dir()})
+    return discovered
+
+
 def load_family_files(feedback_root: Path) -> dict[str, list[Path]]:
     base = feedback_root / "decision-stage"
     family_files: dict[str, list[Path]] = {}
@@ -94,16 +102,16 @@ def matches_filter_value(payload: dict, keys: tuple[str, ...], expected: str | N
 
 
 def build_rows(
+    grouped: dict[str, dict[str, list[dict]]],
     feedback_root: Path,
     authority_mode: str | None,
+    trace_roots: dict[str, Path],
     stage_filters: set[str] | None = None,
     scenario_pack: str | None = None,
     decision_mode: str | None = None,
     authority_phase: str | None = None,
     route_vector_availability: str = "any",
 ) -> dict[str, list[dict]]:
-    family_files = load_family_files(feedback_root)
-    grouped = {family: group_by_trace(paths, family) for family, paths in family_files.items()}
     trace_ids = sorted({trace_id for families in grouped.values() for trace_id in families.keys()})
     outputs = {
         "stage_inputs": [],
@@ -115,6 +123,7 @@ def build_rows(
     }
 
     for trace_id in trace_ids:
+        trace_root = trace_roots.get(trace_id, feedback_root)
         has_route_vectors = bool(grouped["route_vector_summary_trace"].get(trace_id, []))
         if route_vector_availability == "required" and not has_route_vectors:
             continue
@@ -130,11 +139,11 @@ def build_rows(
             stage_name = row.get("stageName")
             if stage_filters and stage_name not in stage_filters:
                 continue
-            if not matches_filter_value(row, ("scenarioPack", "scenario_pack"), scenario_pack, feedback_root):
+            if not matches_filter_value(row, ("scenarioPack", "scenario_pack"), scenario_pack, trace_root):
                 continue
-            if not matches_filter_value(row, ("decisionMode", "decision_mode"), decision_mode, feedback_root):
+            if not matches_filter_value(row, ("decisionMode", "decision_mode"), decision_mode, trace_root):
                 continue
-            if not matches_filter_value(row, ("authorityPhase", "authority_phase", "authorityMode", "authority_mode"), authority_phase, feedback_root):
+            if not matches_filter_value(row, ("authorityPhase", "authority_phase", "authorityMode", "authority_mode"), authority_phase, trace_root):
                 continue
             outputs["stage_inputs"].append({
                 "traceId": trace_id,
@@ -151,11 +160,11 @@ def build_rows(
             stage_name = row.get("stageName")
             if stage_filters and stage_name not in stage_filters:
                 continue
-            if not matches_filter_value(row, ("scenarioPack", "scenario_pack"), scenario_pack, feedback_root):
+            if not matches_filter_value(row, ("scenarioPack", "scenario_pack"), scenario_pack, trace_root):
                 continue
-            if not matches_filter_value(row, ("decisionMode", "decision_mode"), decision_mode, feedback_root):
+            if not matches_filter_value(row, ("decisionMode", "decision_mode"), decision_mode, trace_root):
                 continue
-            if not matches_filter_value(row, ("authorityPhase", "authority_phase", "authorityMode", "authority_mode"), authority_phase, feedback_root):
+            if not matches_filter_value(row, ("authorityPhase", "authority_phase", "authorityMode", "authority_mode"), authority_phase, trace_root):
                 continue
             outputs["stage_outputs"].append({
                 "traceId": trace_id,
@@ -172,11 +181,11 @@ def build_rows(
             stage_name = row.get("stageName")
             if stage_filters and stage_name not in stage_filters:
                 continue
-            if not matches_filter_value(row, ("scenarioPack", "scenario_pack"), scenario_pack, feedback_root):
+            if not matches_filter_value(row, ("scenarioPack", "scenario_pack"), scenario_pack, trace_root):
                 continue
-            if not matches_filter_value(row, ("decisionMode", "decision_mode"), decision_mode, feedback_root):
+            if not matches_filter_value(row, ("decisionMode", "decision_mode"), decision_mode, trace_root):
                 continue
-            if not matches_filter_value(row, ("authorityPhase", "authority_phase", "authorityMode", "authority_mode"), authority_phase, feedback_root):
+            if not matches_filter_value(row, ("authorityPhase", "authority_phase", "authorityMode", "authority_mode"), authority_phase, trace_root):
                 continue
             outputs["stage_joins"].append({
                 "traceId": trace_id,
@@ -190,11 +199,11 @@ def build_rows(
                 "payload": row,
             })
         for row in grouped["dispatch_execution"].get(trace_id, []):
-            if not matches_filter_value(row, ("scenarioPack", "scenario_pack"), scenario_pack, feedback_root):
+            if not matches_filter_value(row, ("scenarioPack", "scenario_pack"), scenario_pack, trace_root):
                 continue
-            if not matches_filter_value(row, ("decisionMode", "decision_mode"), decision_mode, feedback_root):
+            if not matches_filter_value(row, ("decisionMode", "decision_mode"), decision_mode, trace_root):
                 continue
-            if not matches_filter_value(row, ("authorityPhase", "authority_phase", "authorityMode", "authority_mode"), authority_phase, feedback_root):
+            if not matches_filter_value(row, ("authorityPhase", "authority_phase", "authorityMode", "authority_mode"), authority_phase, trace_root):
                 continue
             outputs["dispatch_execution"].append({
                 "traceId": trace_id,
@@ -208,11 +217,11 @@ def build_rows(
                 "payload": row,
             })
         for row in grouped["dispatch_outcome"].get(trace_id, []):
-            if not matches_filter_value(row, ("scenarioPack", "scenario_pack"), scenario_pack, feedback_root):
+            if not matches_filter_value(row, ("scenarioPack", "scenario_pack"), scenario_pack, trace_root):
                 continue
-            if not matches_filter_value(row, ("decisionMode", "decision_mode"), decision_mode, feedback_root):
+            if not matches_filter_value(row, ("decisionMode", "decision_mode"), decision_mode, trace_root):
                 continue
-            if not matches_filter_value(row, ("authorityPhase", "authority_phase", "authorityMode", "authority_mode"), authority_phase, feedback_root):
+            if not matches_filter_value(row, ("authorityPhase", "authority_phase", "authorityMode", "authority_mode"), authority_phase, trace_root):
                 continue
             outputs["dispatch_outcomes"].append({
                 "traceId": trace_id,
@@ -226,11 +235,11 @@ def build_rows(
                 "payload": row,
             })
         for row in grouped["route_vector_summary_trace"].get(trace_id, []):
-            if not matches_filter_value(row, ("scenarioPack", "scenario_pack"), scenario_pack, feedback_root):
+            if not matches_filter_value(row, ("scenarioPack", "scenario_pack"), scenario_pack, trace_root):
                 continue
-            if not matches_filter_value(row, ("decisionMode", "decision_mode"), decision_mode, feedback_root):
+            if not matches_filter_value(row, ("decisionMode", "decision_mode"), decision_mode, trace_root):
                 continue
-            if not matches_filter_value(row, ("authorityPhase", "authority_phase", "authorityMode", "authority_mode"), authority_phase, feedback_root):
+            if not matches_filter_value(row, ("authorityPhase", "authority_phase", "authorityMode", "authority_mode"), authority_phase, trace_root):
                 continue
             outputs["route_vectors"].append({
                 "traceId": trace_id,
@@ -252,15 +261,65 @@ def build_rows(
     return outputs
 
 
-def validate_rows(grouped: dict[str, dict[str, list[dict]]], require_route_vectors: bool) -> None:
+def trace_matches_filters(
+    trace_id: str,
+    grouped: dict[str, dict[str, list[dict]]],
+    trace_roots: dict[str, Path],
+    stage_filters: set[str] | None,
+    scenario_pack: str | None,
+    decision_mode: str | None,
+    authority_phase: str | None,
+) -> bool:
+    trace_root = trace_roots.get(trace_id)
+    if trace_root is None:
+        return False
+    rows = []
+    for family_rows in grouped.values():
+        rows.extend(family_rows.get(trace_id, []))
+    if not rows:
+        return False
+    if stage_filters:
+        relevant_rows = [row for row in rows if row.get("stageName") in stage_filters]
+        if not relevant_rows:
+            return False
+    if not any(matches_filter_value(row, ("scenarioPack", "scenario_pack"), scenario_pack, trace_root) for row in rows):
+        return False
+    if not any(matches_filter_value(row, ("decisionMode", "decision_mode"), decision_mode, trace_root) for row in rows):
+        return False
+    if not any(matches_filter_value(row, ("authorityPhase", "authority_phase", "authorityMode", "authority_mode"), authority_phase, trace_root) for row in rows):
+        return False
+    return True
+
+
+def validate_rows(
+    grouped: dict[str, dict[str, list[dict]]],
+    trace_roots: dict[str, Path],
+    require_route_vectors: bool,
+    stage_filters: set[str] | None,
+    scenario_pack: str | None,
+    decision_mode: str | None,
+    authority_phase: str | None,
+) -> None:
     trace_ids = sorted({trace_id for families in grouped.values() for trace_id in families.keys()})
     for trace_id in trace_ids:
+        if not trace_matches_filters(
+            trace_id,
+            grouped,
+            trace_roots,
+            stage_filters,
+            scenario_pack,
+            decision_mode,
+            authority_phase,
+        ):
+            continue
         inputs = grouped["decision_stage_input"].get(trace_id, [])
         outputs = grouped["decision_stage_output"].get(trace_id, [])
         joins = grouped["decision_stage_join"].get(trace_id, [])
         executions = grouped["dispatch_execution"].get(trace_id, [])
         outcomes = grouped["dispatch_outcome"].get(trace_id, [])
         route_vectors = grouped["route_vector_summary_trace"].get(trace_id, [])
+        if require_route_vectors and not route_vectors:
+            continue
         input_stages = {(row.get("traceId"), row.get("stageName")) for row in inputs}
         output_stages = {(row.get("traceId"), row.get("stageName")) for row in outputs}
         join_stages = {(row.get("traceId"), row.get("stageName")) for row in joins}
@@ -272,8 +331,6 @@ def validate_rows(grouped: dict[str, dict[str, list[dict]]], require_route_vecto
             raise ValueError(f"Missing stage joins for trace '{trace_id}': {missing_joins}")
         if outcomes and not executions:
             raise ValueError(f"Missing dispatch_execution for trace '{trace_id}'")
-        if require_route_vectors and not route_vectors:
-            raise ValueError(f"Missing route vectors for trace '{trace_id}'")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -292,14 +349,33 @@ def main(argv: list[str] | None = None) -> int:
     feedback_root = Path(args.feedback_root)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    family_files = load_family_files(feedback_root)
-    validate_family_schema_versions(family_files)
-    grouped = {family: group_by_trace(paths, family) for family, paths in family_files.items()}
+    trace_roots = discover_feedback_roots(feedback_root)
+    if not trace_roots:
+        raise ValueError(f"No decision-stage directories found under '{feedback_root}'")
+    trace_root_by_id: dict[str, Path] = {}
+    grouped = {family: defaultdict(list) for family in FAMILIES}
+    for trace_root in trace_roots:
+        family_files = load_family_files(trace_root)
+        validate_family_schema_versions(family_files)
+        for family, paths in family_files.items():
+            for trace_id, rows in group_by_trace(paths, family).items():
+                grouped[family][trace_id].extend(rows)
+                trace_root_by_id.setdefault(trace_id, trace_root)
     if not args.allow_partial:
-        validate_rows(grouped, args.route_vector_availability == "required")
+        validate_rows(
+            grouped,
+            trace_root_by_id,
+            args.route_vector_availability == "required",
+            {stage.strip() for stage in args.stage if stage.strip()},
+            args.scenario_pack,
+            args.decision_mode,
+            args.authority_phase,
+        )
     rows = build_rows(
+        grouped,
         feedback_root,
         args.authority_mode,
+        trace_root_by_id,
         {stage.strip() for stage in args.stage if stage.strip()},
         args.scenario_pack,
         args.decision_mode,
@@ -317,6 +393,7 @@ def main(argv: list[str] | None = None) -> int:
     manifest = {
         "schemaVersion": "dispatch-v2-student-dataset-manifest/v1",
         "feedbackRoot": str(feedback_root),
+        "discoveredFeedbackRoots": [str(path) for path in trace_roots],
         "authorityMode": args.authority_mode,
         "filters": {
             "stages": [stage for stage in args.stage if stage.strip()],

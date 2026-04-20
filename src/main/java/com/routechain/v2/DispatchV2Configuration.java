@@ -606,9 +606,10 @@ public class DispatchV2Configuration {
 
     @Bean
     LlmBrain llmBrain(LlmStageScheduler llmStageScheduler,
+                      RouteChainDispatchV2Properties properties,
                       LegacyMlBrain legacyMlBrain,
                       DecisionStageLogger decisionStageLogger) {
-        return new LlmBrain(llmStageScheduler, legacyMlBrain, decisionStageLogger);
+        return new LlmBrain(llmStageScheduler, properties.getDecision().getLlm(), legacyMlBrain, decisionStageLogger);
     }
 
     @Bean

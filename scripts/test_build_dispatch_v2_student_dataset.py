@@ -90,6 +90,75 @@ class BuildDispatchV2StudentDatasetTest(unittest.TestCase):
             route_vectors = (output_dir / "route_vectors.jsonl").read_text(encoding="utf-8")
             self.assertIn("\"legPayloads\": [[{\"fromStopId\": \"a\", \"toStopId\": \"b\"}]]", route_vectors)
 
+    def test_builder_discovers_nested_feedback_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            aggregate_root = Path(temp_dir) / "feedback"
+            feedback_root = aggregate_root / "normal-clear" / "s" / "controlled" / "llm-authoritative" / "c"
+            output_dir = Path(temp_dir) / "dataset"
+            base = feedback_root / "decision-stage"
+            for family in (
+                "decision_stage_input",
+                "decision_stage_output",
+                "decision_stage_join",
+                "dispatch_execution",
+                "dispatch_outcome",
+                "route_leg_vector_trace",
+                "route_vector_summary_trace",
+            ):
+                (base / family).mkdir(parents=True, exist_ok=True)
+
+            (base / "decision_stage_input" / "trace-2-pair-bundle.json").write_text(
+                json.dumps({"traceId": "trace-2", "tickId": "tick-2", "stageName": "pair-bundle", "decisionMode": "llm-authoritative", "authorityPhase": "c"}),
+                encoding="utf-8",
+            )
+            (base / "decision_stage_output" / "trace-2-pair-bundle.json").write_text(
+                json.dumps({"traceId": "trace-2", "tickId": "tick-2", "stageName": "pair-bundle", "brainType": "LLM", "selectedIds": ["bundle-2"], "decisionMode": "llm-authoritative", "authorityPhase": "c"}),
+                encoding="utf-8",
+            )
+            (base / "decision_stage_join" / "trace-2-pair-bundle.json").write_text(
+                json.dumps({"traceId": "trace-2", "tickId": "tick-2", "stageName": "pair-bundle", "brainType": "LLM", "selectedIds": ["bundle-2"], "actualSelectedIds": ["bundle-2"], "decisionMode": "llm-authoritative", "authorityPhase": "c"}),
+                encoding="utf-8",
+            )
+            (base / "dispatch_execution" / "trace-2-dispatch-executor.json").write_text(
+                json.dumps({"assignmentIds": ["assignment-2"], "decisionMode": "llm-authoritative", "authorityPhase": "c"}),
+                encoding="utf-8",
+            )
+            (base / "dispatch_outcome" / "trace-2-dispatch-result.json").write_text(
+                json.dumps({"selectedProposalIds": ["proposal-2"], "decisionMode": "llm-authoritative", "authorityPhase": "c"}),
+                encoding="utf-8",
+            )
+            (base / "route_leg_vector_trace" / "trace-2-proposal-2.json").write_text(
+                json.dumps({
+                    "schemaVersion": "route-leg-vector-trace/v1",
+                    "traceId": "trace-2",
+                    "proposalId": "proposal-2",
+                    "legs": [{"fromStopId": "x", "toStopId": "y"}],
+                    "decisionMode": "llm-authoritative",
+                    "authorityPhase": "c",
+                }),
+                encoding="utf-8",
+            )
+            (base / "route_vector_summary_trace" / "trace-2-proposal-2.json").write_text(
+                json.dumps({"traceId": "trace-2", "proposalId": "proposal-2", "legCount": 1, "decisionMode": "llm-authoritative", "authorityPhase": "c"}),
+                encoding="utf-8",
+            )
+
+            exit_code = dataset_builder.main([
+                "--feedback-root", str(aggregate_root),
+                "--output-dir", str(output_dir),
+                "--authority-mode", "llm-authoritative",
+                "--decision-mode", "llm-authoritative",
+                "--scenario-pack", "normal-clear",
+                "--authority-phase", "c",
+                "--route-vector-availability", "required",
+            ])
+
+            self.assertEqual(0, exit_code)
+            manifest = json.loads((output_dir / "dataset_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(1, manifest["counts"]["stage_inputs"])
+            self.assertEqual(1, manifest["counts"]["route_vectors"])
+            self.assertEqual(str(feedback_root), manifest["discoveredFeedbackRoots"][0])
+
 
 if __name__ == "__main__":
     unittest.main()

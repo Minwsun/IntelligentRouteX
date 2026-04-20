@@ -1,52 +1,161 @@
 # Dispatch V2 Phase 2 Status
 
-Status: `FAIL`
+Status: `PASS_WITH_LIMITS`
 
 Last verified: `2026-04-20`
 
-## Completed In Repo
+## Final Verdict
 
-- Decision brain resolver and runtime mode wiring now distinguish:
+Phase 2 now passes the minimum completion gate for authoritative LLM rollout:
+
+- `llm` runtime is usable through `9router /v1/responses`
+- model-family resolution now discovers and sends a namespaced model id for `gpt-5.4`
+- stage-level fallback stays local to the failing stage and no longer overwrites legacy selections
+- real authoritative execution is verified for:
+  - `pair-bundle`
+  - `final-selection`
+- benchmark artifacts exist for:
   - `legacy`
-  - `llm`
   - `llm-shadow`
   - `llm-authoritative`
-  - `hybrid`
-  - `student`
-- Stage-level authority only applies when the stage output is a real LLM result.
-- Fallback stage outputs no longer override legacy runtime selections.
-- Benchmark decision-mode overrides now preserve shadow vs authoritative semantics.
-- Route-vector traces and route-vector summaries remain additive-only and benchmark-safe.
-- Dataset builder can now recover trace linkage from file names when feedback payloads omit `traceId`.
+- normalized logs and route-vector traces can now be turned into a student-training dataset from an aggregate benchmark root
 
-## Validated
+This is not marked `PASS` yet because authority coverage is intentionally limited to the first safe rollout set, and route-vector traces are not present in every benchmark cell.
 
-- Java compile and targeted runtime tests passed.
-- Decision, routing, and benchmark test suites passed.
-- Python benchmark and dataset-builder tests passed.
-- Benchmark artifacts were generated locally under `artifacts/benchmark/phase2/`.
-- Dataset build succeeded locally from benchmark feedback:
-  - `artifacts/benchmark/phase2/dataset/normal-clear-m-llm-authoritative/`
+## What Changed
 
-## Blocking Issue
+- `NineRouterResponsesClient` now:
+  - discovers models from `/v1/models`
+  - resolves `gpt-5.4` to a namespaced runtime id such as `cx/gpt-5.4`
+  - uses strict structured output schemas accepted by `9router /v1/responses`
+  - records configured model family, resolved model id, provider base URL, wire API, token usage, retries, and effort application
+- `DispatchV2Core` authority wiring now:
+  - prevents fallback LLM envelopes from being applied authoritatively
+  - preserves the original final-selection solver mode instead of forcing `GREEDY_REPAIR`
+- benchmark runtime/test mapping now preserves:
+  - `llm-shadow`
+  - `llm-authoritative`
+- dataset builder now:
+  - discovers nested feedback roots under an aggregate benchmark directory
+  - recovers trace linkage from filenames for execution, outcome, and route-vector families
+  - validates only the filtered trace set instead of failing on unrelated benchmark cells
 
-This rail still fails the completion gate because the required provider contract is unavailable:
+## Validation Completed
 
-- `GET http://127.0.0.1:20128/v1` returned `200`
-- `GET http://127.0.0.1:20128/v1/models` returned `200`
-- `POST http://127.0.0.1:20128/v1/responses` returned `404`
-- `GET https://r8cp2m4.9router.com/v1` returned `200`
-- `GET https://r8cp2m4.9router.com/v1/models` returned `200`
-- `POST https://r8cp2m4.9router.com/v1/responses` returned `404`
+Code validation:
 
-Because this rail is explicitly locked to `9router` and `/v1/responses`, authoritative LLM execution cannot be completed from inside the repo until the provider exposes that endpoint.
+- `./gradlew.bat --no-daemon clean compileJava compileTestJava`
+- `./gradlew.bat --no-daemon test --tests com.routechain.v2.decision.NineRouterResponsesClientTest --tests com.routechain.v2.decision.DecisionBrainResolverTest`
+- `./gradlew.bat --no-daemon test --tests com.routechain.v2.DispatchV2CoreOrToolsSliceTest`
+- `python scripts/test_build_dispatch_v2_student_dataset.py`
 
-## Practical Outcome
+Live provider validation:
 
-- `llm-authoritative` is safe to exercise because stage fallback works.
-- Benchmarks for `pair-bundle` and `final-selection` authority can run and emit artifacts.
-- Those runs currently prove fallback behavior, not real LLM authority, because all `/v1/responses` attempts fail before producing token usage.
+- `GET http://127.0.0.1:20128/v1/models`
+- `POST http://127.0.0.1:20128/v1/responses`
+- `GET https://r8cp2m4.9router.com/v1/models`
+- `POST https://r8cp2m4.9router.com/v1/responses`
 
-## Next External Action
+Both local and tunnel endpoints accepted strict Responses API calls when the resolved model id was namespaced.
 
-Provide a working 9router gateway that exposes `POST /v1/responses` for model `gpt-5.4`, then rerun the existing benchmark matrix from `artifacts/benchmark/phase2/`.
+## Benchmark Evidence
+
+Primary artifact root:
+
+- `artifacts/benchmark/phase2-live3/`
+
+Completed matrix:
+
+- scenarios:
+  - `normal-clear / S`
+  - `heavy-rain / S`
+  - `traffic-shock / S`
+- extra coverage:
+  - `normal-clear / M`
+- modes:
+  - `legacy`
+  - `llm-shadow`
+  - `llm-authoritative`
+
+Observed result highlights:
+
+- `llm-authoritative` runs are real authority runs, not fallback-only runs:
+  - `runAuthorityClass = AUTHORITY_REAL`
+  - `authoritativeStages = [pair-bundle, final-selection]`
+  - token usage is non-zero in all authoritative cells
+- `llm-authoritative` fallback summary is clean in the verified cells:
+  - `normal-clear / S`: `0`
+  - `heavy-rain / S`: `0`
+  - `traffic-shock / S`: `0`
+  - `normal-clear / M`: `0`
+- `llm-shadow` still shows route-generation fallback in some cells:
+  - `heavy-rain / S`: `ROUTE_GENERATION -> provider-http-error`
+  - `traffic-shock / S`: `ROUTE_GENERATION -> provider-http-error`
+
+Representative artifact references:
+
+- [dispatch-quality-summary.md](/E:/Code%20_Project/IntelligentRouteX/artifacts/benchmark/phase2-live3/dispatch-quality-summary.md)
+- [normal-clear authoritative JSON](/E:/Code%20_Project/IntelligentRouteX/artifacts/benchmark/phase2-live3/dispatch-quality-normal-clear-s-llm-authoritative-controlled-c-20260420-125341.json)
+- [heavy-rain authoritative JSON](/E:/Code%20_Project/IntelligentRouteX/artifacts/benchmark/phase2-live3/dispatch-quality-heavy-rain-s-llm-authoritative-controlled-c-20260420-125953.json)
+- [traffic-shock authoritative JSON](/E:/Code%20_Project/IntelligentRouteX/artifacts/benchmark/phase2-live3/dispatch-quality-traffic-shock-s-llm-authoritative-controlled-c-20260420-130555.json)
+
+## Dataset Build Evidence
+
+Aggregate benchmark feedback can now be converted into normalized training datasets without pointing the builder at a single leaf directory.
+
+Built datasets:
+
+- `artifacts/benchmark/phase2-live3/dataset/llm-authoritative-all/`
+  - filtered by `decisionMode = llm-authoritative`
+  - required route-vector presence
+  - counts:
+    - `stage_inputs = 18`
+    - `stage_outputs = 18`
+    - `stage_joins = 18`
+    - `dispatch_execution = 2`
+    - `dispatch_outcomes = 2`
+    - `route_vectors = 320`
+- `artifacts/benchmark/phase2-live3/dataset/llm-shadow-all/`
+  - filtered by `decisionMode = llm-shadow`
+  - required route-vector presence
+  - counts:
+    - `stage_inputs = 9`
+    - `stage_outputs = 9`
+    - `stage_joins = 9`
+    - `dispatch_execution = 1`
+    - `dispatch_outcomes = 1`
+    - `route_vectors = 80`
+- `artifacts/benchmark/phase2-live3/dataset/llm-authoritative-normal-clear-pair-bundle/`
+  - filtered by:
+    - `stage = PAIR_BUNDLE`
+    - `scenarioPack = normal-clear`
+    - `decisionMode = llm-authoritative`
+    - `authorityPhase = c`
+
+This confirms the builder works across:
+
+- stage filters
+- scenario-pack filters
+- decision-mode filters
+- authority-phase filters
+- route-vector availability filters
+
+## Remaining Limits
+
+- authoritative rollout is only proven clean for:
+  - `pair-bundle`
+  - `final-selection`
+- `driver`, `route-critique`, `scenario`, and `route-generation` are not yet promoted to clean authoritative coverage in this report
+- route-vector traces are not emitted in every scenario/mode cell, so `route-vector-availability=required` intentionally filters out trace roots without those families
+- `llm-shadow` still exhibits route-generation fallback in some live cells; this does not block the minimum gate but it does block broader authority expansion
+
+## Recommended Next Gate
+
+Continue rollout in this order:
+
+1. `driver`
+2. `route-critique`
+3. `scenario`
+4. `route-generation`
+
+Do not promote `route-generation` until the live shadow/provider-http-error cases are understood and the route-vector trace coverage is stable across the benchmark matrix.

@@ -16,14 +16,18 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 public final class NineRouterResponsesClient {
     private final RouteChainDispatchV2Properties.Llm properties;
     private final ResponsesTransport transport;
     private final ObjectMapper objectMapper;
+    private volatile ModelResolution cachedModelResolution;
 
     public NineRouterResponsesClient(RouteChainDispatchV2Properties.Llm properties) {
         this(properties, new DefaultResponsesTransport(), JsonMapper.builder().findAndAddModules().build());
@@ -37,28 +41,37 @@ public final class NineRouterResponsesClient {
         this.objectMapper = objectMapper;
     }
 
+    public RuntimeConfiguration runtimeConfiguration() {
+        return new RuntimeConfiguration(
+                configuredValue(
+                        "routechain.dispatch-v2.decision.llm.base-url",
+                        "ROUTECHAIN_DECISION_LLM_BASE_URL",
+                        properties.getBaseUrl()),
+                configuredValue(
+                        "routechain.dispatch-v2.decision.llm.model",
+                        "ROUTECHAIN_DECISION_LLM_MODEL",
+                        properties.getModel()),
+                properties.getWireApi(),
+                properties.getProvider());
+    }
+
     public LlmInvocationResult invoke(DecisionStageInputV1 input, DecisionEffort requestedEffort) {
         String apiKey = System.getenv(properties.getApiKeyEnv());
         if (apiKey == null || apiKey.isBlank()) {
-            throw new IllegalStateException("llm-api-key-missing");
+            throw failure("llm-api-key-missing", Map.of(
+                    "apiKeyEnv", properties.getApiKeyEnv()));
         }
-        String baseUrl = configuredValue(
-                "routechain.dispatch-v2.decision.llm.base-url",
-                "ROUTECHAIN_DECISION_LLM_BASE_URL",
-                properties.getBaseUrl());
-        String model = configuredValue(
-                "routechain.dispatch-v2.decision.llm.model",
-                "ROUTECHAIN_DECISION_LLM_MODEL",
-                properties.getModel());
+        RuntimeConfiguration runtimeConfiguration = runtimeConfiguration();
+        ModelResolution modelResolution = resolveModel(runtimeConfiguration.baseUrl(), apiKey, runtimeConfiguration.configuredModelFamily());
         DecisionEffort appliedEffort = requestedEffort == null ? DecisionEffort.MEDIUM : requestedEffort;
         int retryCount = 0;
         int maxAttempts = Math.max(1, properties.getMaxRetries() + 1);
         String lastFailureReason = "provider-empty-response";
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            JsonNode requestBody = buildRequestBody(input, appliedEffort, model);
+            JsonNode requestBody = buildRequestBody(input, appliedEffort, modelResolution.resolvedModelId());
             try {
                 TransportResponse response = transport.post(
-                        baseUrl,
+                        runtimeConfiguration.baseUrl(),
                         apiKey,
                         properties.getTimeoutMs(),
                         requestBody,
@@ -74,23 +87,45 @@ public final class NineRouterResponsesClient {
                         continue;
                     }
                     if (attempt >= maxAttempts) {
-                        throw new IllegalStateException(failureReason);
+                        throw failure(failureReason, Map.of(
+                                "configuredModelFamily", modelResolution.configuredModelFamily(),
+                                "resolvedModelId", modelResolution.resolvedModelId(),
+                                "providerBaseUrl", runtimeConfiguration.baseUrl(),
+                                "providerWireApi", runtimeConfiguration.wireApi(),
+                                "modelDiscoverySource", modelResolution.discoverySource()));
                     }
                     retryCount++;
                     lastFailureReason = failureReason;
                     continue;
                 }
-                return parseResponse(response.body(), requestedEffort, appliedEffort, retryCount, model);
+                return parseResponse(response.body(), requestedEffort, appliedEffort, retryCount, modelResolution, runtimeConfiguration);
+            } catch (NineRouterClientException exception) {
+                String failureReason = exception.failureReason();
+                if (attempt >= maxAttempts || !retryable(failureReason)) {
+                    throw exception;
+                }
+                retryCount++;
+                lastFailureReason = failureReason;
             } catch (IllegalStateException exception) {
                 String failureReason = exception.getMessage() == null ? "provider-http-error" : exception.getMessage();
                 if (attempt >= maxAttempts || !retryable(failureReason)) {
-                    throw new IllegalStateException(failureReason, exception);
+                    throw failure(failureReason, Map.of(
+                            "configuredModelFamily", modelResolution.configuredModelFamily(),
+                            "resolvedModelId", modelResolution.resolvedModelId(),
+                            "providerBaseUrl", runtimeConfiguration.baseUrl(),
+                            "providerWireApi", runtimeConfiguration.wireApi(),
+                            "modelDiscoverySource", modelResolution.discoverySource()), exception);
                 }
                 retryCount++;
                 lastFailureReason = failureReason;
             }
         }
-        throw new IllegalStateException(lastFailureReason);
+        throw failure(lastFailureReason, Map.of(
+                "configuredModelFamily", modelResolution.configuredModelFamily(),
+                "resolvedModelId", modelResolution.resolvedModelId(),
+                "providerBaseUrl", runtimeConfiguration.baseUrl(),
+                "providerWireApi", runtimeConfiguration.wireApi(),
+                "modelDiscoverySource", modelResolution.discoverySource()));
     }
 
     private JsonNode buildRequestBody(DecisionStageInputV1 input, DecisionEffort appliedEffort, String model) {
@@ -125,7 +160,24 @@ public final class NineRouterResponsesClient {
                 "additionalProperties", false,
                 "properties", Map.of(
                         "selectedIds", Map.of("type", "array", "items", Map.of("type", "string")),
-                        "assessments", Map.of("type", "object", "additionalProperties", true)),
+                        "assessments", Map.of(
+                                "type", "object",
+                                "additionalProperties", false,
+                                "properties", Map.of(
+                                        "summary", Map.of("type", "string"),
+                                        "reasonCodes", Map.of("type", "array", "items", Map.of("type", "string")),
+                                        "items", Map.of(
+                                                "type", "array",
+                                                "items", Map.of(
+                                                        "type", "object",
+                                                        "additionalProperties", false,
+                                                        "properties", Map.of(
+                                                                "id", Map.of("type", "string"),
+                                                                "score", Map.of("type", "number"),
+                                                                "selected", Map.of("type", "boolean"),
+                                                                "rationale", Map.of("type", "string")),
+                                                        "required", java.util.List.of("id", "score", "selected", "rationale")))),
+                                "required", java.util.List.of("summary", "reasonCodes", "items"))),
                 "required", java.util.List.of("selectedIds", "assessments"));
     }
 
@@ -133,10 +185,16 @@ public final class NineRouterResponsesClient {
                                               DecisionEffort requestedEffort,
                                               DecisionEffort appliedEffort,
                                               int retryCount,
-                                              String model) {
+                                              ModelResolution modelResolution,
+                                              RuntimeConfiguration runtimeConfiguration) {
         try {
             if (body == null || body.isBlank()) {
-                throw new IllegalStateException("provider-empty-response");
+                throw failure("provider-empty-response", Map.of(
+                        "configuredModelFamily", modelResolution.configuredModelFamily(),
+                        "resolvedModelId", modelResolution.resolvedModelId(),
+                        "providerBaseUrl", runtimeConfiguration.baseUrl(),
+                        "providerWireApi", runtimeConfiguration.wireApi(),
+                        "modelDiscoverySource", modelResolution.discoverySource()));
             }
             JsonNode node = objectMapper.readTree(body);
             JsonNode usage = node.path("usage");
@@ -151,12 +209,21 @@ public final class NineRouterResponsesClient {
                     parsedOutput,
                     requestedEffort.wireValue(),
                     appliedEffort.wireValue(),
-                    tokenUsage,
-                    retryCount,
-                    sha256(body),
-                    model);
+                tokenUsage,
+                retryCount,
+                sha256(body),
+                modelResolution.resolvedModelId(),
+                modelResolution.configuredModelFamily(),
+                runtimeConfiguration.baseUrl(),
+                runtimeConfiguration.wireApi(),
+                modelResolution.discoverySource());
         } catch (IOException exception) {
-            throw new IllegalStateException("provider-invalid-json", exception);
+            throw failure("provider-invalid-json", Map.of(
+                    "configuredModelFamily", modelResolution.configuredModelFamily(),
+                    "resolvedModelId", modelResolution.resolvedModelId(),
+                    "providerBaseUrl", runtimeConfiguration.baseUrl(),
+                    "providerWireApi", runtimeConfiguration.wireApi(),
+                    "modelDiscoverySource", modelResolution.discoverySource()), exception);
         }
     }
 
@@ -254,7 +321,7 @@ public final class NineRouterResponsesClient {
                 "Honor hard constraints and keep output compact.",
                 "Do not invent ids that do not exist in the candidate window.",
                 "Static prefix: " + String.valueOf(input.constraints().getOrDefault("staticPrefix", "")),
-                "Schema: stage_output_v1 with selectedIds[] and assessments{}.");
+                "Schema: stage_output_v1 with selectedIds[] and assessments.items[].");
     }
 
     private String dynamicPrompt(DecisionStageInputV1 input) {
@@ -273,6 +340,10 @@ public final class NineRouterResponsesClient {
                 && normalizedBody.contains("effort")) {
             return "provider-rejected-effort";
         }
+        if ((statusCode == 400 || statusCode == 404 || statusCode == 422)
+                && normalizedBody.contains("model")) {
+            return "provider-model-unresolved";
+        }
         if (statusCode == 408 || statusCode == 429) {
             return "provider-timeout";
         }
@@ -290,6 +361,121 @@ public final class NineRouterResponsesClient {
                 || "provider-rejected-effort".equals(failureReason);
     }
 
+    private ModelResolution resolveModel(String baseUrl, String apiKey, String configuredModelFamily) {
+        ModelResolution cached = cachedModelResolution;
+        if (cached != null
+                && cached.baseUrl().equals(baseUrl)
+                && cached.configuredModelFamily().equals(configuredModelFamily)) {
+            return cached;
+        }
+        synchronized (this) {
+            cached = cachedModelResolution;
+            if (cached != null
+                    && cached.baseUrl().equals(baseUrl)
+                    && cached.configuredModelFamily().equals(configuredModelFamily)) {
+                return cached;
+            }
+            TransportResponse response = transport.get(baseUrl, apiKey, properties.getTimeoutMs(), objectMapper, "/models");
+            if (response.statusCode() >= 400) {
+                throw failure("provider-model-discovery-failed", Map.of(
+                        "configuredModelFamily", configuredModelFamily,
+                        "providerBaseUrl", baseUrl,
+                        "providerWireApi", properties.getWireApi(),
+                        "modelDiscoverySource", "/v1/models",
+                        "statusCode", response.statusCode()));
+            }
+            List<ModelCandidate> candidates = parseModelCandidates(response.body(), configuredModelFamily, baseUrl);
+            String resolvedModelId = selectResolvedModelId(configuredModelFamily, candidates)
+                    .orElseThrow(() -> failure("provider-model-unresolved", Map.of(
+                            "configuredModelFamily", configuredModelFamily,
+                            "providerBaseUrl", baseUrl,
+                            "providerWireApi", properties.getWireApi(),
+                            "modelDiscoverySource", "/v1/models",
+                            "availableModelIds", candidates.stream().map(ModelCandidate::id).toList())));
+            ModelResolution resolved = new ModelResolution(
+                    configuredModelFamily,
+                    resolvedModelId,
+                    baseUrl,
+                    "/v1/models",
+                    candidates.stream().map(ModelCandidate::id).toList());
+            cachedModelResolution = resolved;
+            return resolved;
+        }
+    }
+
+    private List<ModelCandidate> parseModelCandidates(String body,
+                                                      String configuredModelFamily,
+                                                      String baseUrl) {
+        try {
+            JsonNode root = objectMapper.readTree(body);
+            JsonNode data = root.path("data");
+            if (!data.isArray()) {
+                throw failure("provider-model-discovery-invalid", Map.of(
+                        "configuredModelFamily", configuredModelFamily,
+                        "providerBaseUrl", baseUrl,
+                        "providerWireApi", properties.getWireApi(),
+                        "modelDiscoverySource", "/v1/models"));
+            }
+            List<ModelCandidate> candidates = new ArrayList<>();
+            for (JsonNode modelNode : data) {
+                String id = modelNode.path("id").asText("");
+                if (id == null || id.isBlank()) {
+                    continue;
+                }
+                String rootValue = modelNode.path("root").asText("");
+                candidates.add(new ModelCandidate(id.trim(), rootValue == null ? "" : rootValue.trim()));
+            }
+            return List.copyOf(candidates);
+        } catch (IOException exception) {
+            throw failure("provider-model-discovery-invalid", Map.of(
+                    "configuredModelFamily", configuredModelFamily,
+                    "providerBaseUrl", baseUrl,
+                    "providerWireApi", properties.getWireApi(),
+                    "modelDiscoverySource", "/v1/models"), exception);
+        }
+    }
+
+    private Optional<String> selectResolvedModelId(String configuredModelFamily, List<ModelCandidate> candidates) {
+        if (configuredModelFamily == null || configuredModelFamily.isBlank() || candidates == null || candidates.isEmpty()) {
+            return Optional.empty();
+        }
+        String normalized = configuredModelFamily.trim();
+        if (normalized.contains("/")) {
+            return candidates.stream()
+                    .map(ModelCandidate::id)
+                    .filter(normalized::equals)
+                    .findFirst();
+        }
+        return candidates.stream()
+                .filter(candidate -> matchesFamily(candidate, normalized))
+                .sorted(Comparator
+                        .comparingInt((ModelCandidate candidate) -> prefixPriority(candidate.id()))
+                        .thenComparingInt(candidate -> candidate.id().length())
+                        .thenComparing(ModelCandidate::id))
+                .map(ModelCandidate::id)
+                .findFirst();
+    }
+
+    private boolean matchesFamily(ModelCandidate candidate, String configuredModelFamily) {
+        return configuredModelFamily.equals(candidate.root())
+                || configuredModelFamily.equals(candidate.id())
+                || candidate.id().endsWith("/" + configuredModelFamily)
+                || candidate.root().endsWith("/" + configuredModelFamily);
+    }
+
+    private int prefixPriority(String modelId) {
+        if (modelId.startsWith("cx/")) {
+            return 0;
+        }
+        if (modelId.startsWith("gh/")) {
+            return 1;
+        }
+        if (modelId.startsWith("cc/")) {
+            return 2;
+        }
+        return 3;
+    }
+
     private String configuredValue(String propertyName, String envName, String defaultValue) {
         String propertyValue = System.getProperty(propertyName);
         if (propertyValue != null && !propertyValue.isBlank()) {
@@ -302,6 +488,14 @@ public final class NineRouterResponsesClient {
         return defaultValue;
     }
 
+    private NineRouterClientException failure(String failureReason, Map<String, Object> details) {
+        return new NineRouterClientException(failureReason, details, null);
+    }
+
+    private NineRouterClientException failure(String failureReason, Map<String, Object> details, Throwable cause) {
+        return new NineRouterClientException(failureReason, details, cause);
+    }
+
     public record LlmInvocationResult(
             Map<String, Object> parsedOutput,
             String requestedEffort,
@@ -309,10 +503,57 @@ public final class NineRouterResponsesClient {
             Map<String, Object> tokenUsage,
             int retryCount,
             String rawResponseHash,
-            String providerModel) {
+            String providerModel,
+            String configuredModelFamily,
+            String providerBaseUrl,
+            String providerWireApi,
+            String modelDiscoverySource) {
+    }
+
+    public record RuntimeConfiguration(
+            String baseUrl,
+            String configuredModelFamily,
+            String wireApi,
+            String provider) {
+    }
+
+    record ModelResolution(
+            String configuredModelFamily,
+            String resolvedModelId,
+            String baseUrl,
+            String discoverySource,
+            List<String> availableModelIds) {
+    }
+
+    record ModelCandidate(String id, String root) {
+    }
+
+    static final class NineRouterClientException extends IllegalStateException {
+        private final String failureReason;
+        private final Map<String, Object> details;
+
+        NineRouterClientException(String failureReason, Map<String, Object> details, Throwable cause) {
+            super(failureReason, cause);
+            this.failureReason = failureReason == null || failureReason.isBlank() ? "provider-http-error" : failureReason;
+            this.details = details == null ? Map.of() : Map.copyOf(details);
+        }
+
+        String failureReason() {
+            return failureReason;
+        }
+
+        Map<String, Object> details() {
+            return details;
+        }
     }
 
     interface ResponsesTransport {
+        TransportResponse get(String baseUrl,
+                              String apiKey,
+                              Duration timeout,
+                              ObjectMapper objectMapper,
+                              String relativePath);
+
         TransportResponse post(String baseUrl,
                                String apiKey,
                                Duration timeout,
@@ -321,7 +562,44 @@ public final class NineRouterResponsesClient {
     }
 
     static final class DefaultResponsesTransport implements ResponsesTransport {
-        private final HttpClient httpClient = HttpClient.newBuilder().build();
+        private final HttpClient httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .build();
+
+        @Override
+        public TransportResponse get(String baseUrl,
+                                     String apiKey,
+                                     Duration timeout,
+                                     ObjectMapper objectMapper,
+                                     String relativePath) {
+            Objects.requireNonNull(baseUrl, "baseUrl");
+            try {
+                HttpRequest request = HttpRequest.newBuilder(URI.create(trimTrailingSlash(baseUrl) + relativePath))
+                        .version(HttpClient.Version.HTTP_1_1)
+                        .timeout(timeout)
+                        .header("Content-Type", "application/json")
+                        .header("Authorization", "Bearer " + apiKey)
+                        .header("User-Agent", "IntelligentRouteX/dispatch-v2")
+                        .GET()
+                        .build();
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                return new TransportResponse(response.statusCode(), response.body());
+            } catch (IOException | InterruptedException exception) {
+                if (exception instanceof InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new NineRouterClientException("provider-model-discovery-interrupted", Map.of(
+                            "providerBaseUrl", baseUrl,
+                            "providerWireApi", "models",
+                            "exceptionClass", interrupted.getClass().getName(),
+                            "exceptionMessage", String.valueOf(interrupted.getMessage())), interrupted);
+                }
+                throw new NineRouterClientException("provider-model-discovery-failed", Map.of(
+                        "providerBaseUrl", baseUrl,
+                        "providerWireApi", "models",
+                        "exceptionClass", exception.getClass().getName(),
+                        "exceptionMessage", String.valueOf(exception.getMessage())), exception);
+            }
+        }
 
         @Override
         public TransportResponse post(String baseUrl,
@@ -332,9 +610,11 @@ public final class NineRouterResponsesClient {
             Objects.requireNonNull(baseUrl, "baseUrl");
             try {
                 HttpRequest request = HttpRequest.newBuilder(URI.create(trimTrailingSlash(baseUrl) + "/responses"))
+                        .version(HttpClient.Version.HTTP_1_1)
                         .timeout(timeout)
                         .header("Content-Type", "application/json")
                         .header("Authorization", "Bearer " + apiKey)
+                        .header("User-Agent", "IntelligentRouteX/dispatch-v2")
                         .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(requestBody)))
                         .build();
                 HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -342,9 +622,17 @@ public final class NineRouterResponsesClient {
             } catch (IOException | InterruptedException exception) {
                 if (exception instanceof InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
-                    throw new IllegalStateException("9router responses request interrupted", interrupted);
+                    throw new NineRouterClientException("provider-timeout", Map.of(
+                            "providerBaseUrl", baseUrl,
+                            "providerWireApi", "responses",
+                            "exceptionClass", interrupted.getClass().getName(),
+                            "exceptionMessage", String.valueOf(interrupted.getMessage())), interrupted);
                 }
-                throw new IllegalStateException("9router responses request failed", exception);
+                throw new NineRouterClientException("provider-http-error", Map.of(
+                        "providerBaseUrl", baseUrl,
+                        "providerWireApi", "responses",
+                        "exceptionClass", exception.getClass().getName(),
+                        "exceptionMessage", String.valueOf(exception.getMessage())), exception);
             }
         }
 

@@ -17,6 +17,10 @@ public final class LlmStageScheduler {
         this.client = client;
     }
 
+    public NineRouterResponsesClient.RuntimeConfiguration runtimeConfiguration() {
+        return client.runtimeConfiguration();
+    }
+
     public DecisionStageOutputV1 evaluate(DecisionStageInputV1 input) {
         long startedAt = System.nanoTime();
         List<DecisionStageInputV1> shards = shardInputs(input);
@@ -31,7 +35,11 @@ public final class LlmStageScheduler {
                 Map.of(),
                 0,
                 "",
-                "gpt-5.4")
+                "gpt-5.4",
+                "gpt-5.4",
+                client.runtimeConfiguration().baseUrl(),
+                client.runtimeConfiguration().wireApi(),
+                "/v1/models")
                 : results.getFirst();
         return new DecisionStageOutputV1(
                 "stage-output-v1",

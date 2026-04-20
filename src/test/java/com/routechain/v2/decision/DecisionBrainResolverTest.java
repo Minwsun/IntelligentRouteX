@@ -18,6 +18,7 @@ class DecisionBrainResolverTest {
                 new LegacyMlBrain(),
                 new LlmBrain(
                         new LlmStageScheduler(new NineRouterResponsesClient(properties.getDecision().getLlm())),
+                        properties.getDecision().getLlm(),
                         new LegacyMlBrain(),
                         new DecisionStageLogger(properties)),
                 new StudentBrain(new LegacyMlBrain()));
@@ -40,6 +41,7 @@ class DecisionBrainResolverTest {
                 new LegacyMlBrain(),
                 new LlmBrain(
                         new LlmStageScheduler(new NineRouterResponsesClient(properties.getDecision().getLlm())),
+                        properties.getDecision().getLlm(),
                         new LegacyMlBrain(),
                         new DecisionStageLogger(properties)),
                 new StudentBrain(new LegacyMlBrain()));
@@ -62,6 +64,7 @@ class DecisionBrainResolverTest {
                 new LegacyMlBrain(),
                 new LlmBrain(
                         new LlmStageScheduler(new NineRouterResponsesClient(properties.getDecision().getLlm())),
+                        properties.getDecision().getLlm(),
                         new LegacyMlBrain(),
                         new DecisionStageLogger(properties)),
                 new StudentBrain(new LegacyMlBrain()));

@@ -13,5 +13,9 @@ public record DecisionUsageRecord(
         boolean fallbackUsed,
         String fallbackReason,
         String provider,
-        String model) implements SchemaVersioned {
+        String configuredModelFamily,
+        String resolvedModelId,
+        String providerBaseUrl,
+        String providerWireApi,
+        String modelDiscoverySource) implements SchemaVersioned {
 }
