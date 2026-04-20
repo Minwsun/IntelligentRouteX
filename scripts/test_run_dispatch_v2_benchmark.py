@@ -24,6 +24,7 @@ class RunDispatchBenchmarkTest(unittest.TestCase):
         self.assertEqual(0, exit_code)
         self.assertIn("[MATRIX]", output)
         self.assertIn("scenario-pack=normal-clear", output)
+        self.assertIn("decision-mode=legacy", output)
         self.assertIn("authority=false", output)
 
     def test_runner_collects_json_and_writes_summary(self) -> None:
@@ -37,10 +38,15 @@ class RunDispatchBenchmarkTest(unittest.TestCase):
                         "baselineId": "A",
                         "scenarioPack": "normal-clear",
                         "workloadSize": "S",
+                        "decisionMode": "legacy",
+                        "authoritativeStages": [],
                         "executionMode": "controlled",
                         "runAuthorityClass": "LOCAL_NON_AUTHORITY",
                         "authorityEligible": False,
                         "metrics": {"selectedProposalCount": 1, "executedAssignmentCount": 1, "robustUtilityAverage": 0.5},
+                        "llmShadowAgreement": {"overallExactMatchRate": 0.0},
+                        "tokenUsageSummary": {"totalTokens": 0},
+                        "routeVectorMetrics": {"geometryCoverage": 0.0},
                     }),
                     encoding="utf-8",
                 )
@@ -72,10 +78,15 @@ class RunDispatchBenchmarkTest(unittest.TestCase):
                         "baselineId": "A",
                         "scenarioPack": cell.scenario_pack,
                         "workloadSize": cell.size,
+                        "decisionMode": cell.decision_mode,
+                        "authoritativeStages": [],
                         "executionMode": cell.execution_mode,
                         "runAuthorityClass": "LOCAL_NON_AUTHORITY",
                         "authorityEligible": False,
                         "metrics": {"selectedProposalCount": 1, "executedAssignmentCount": 1, "robustUtilityAverage": 0.5},
+                        "llmShadowAgreement": {"overallExactMatchRate": 0.0},
+                        "tokenUsageSummary": {"totalTokens": 0},
+                        "routeVectorMetrics": {"geometryCoverage": 0.0},
                     }),
                     encoding="utf-8",
                 )

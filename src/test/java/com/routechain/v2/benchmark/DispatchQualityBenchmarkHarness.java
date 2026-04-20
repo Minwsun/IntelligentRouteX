@@ -1,5 +1,7 @@
 package com.routechain.v2.benchmark;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.routechain.config.RouteChainDispatchV2Properties;
 import com.routechain.domain.WeatherProfile;
 import com.routechain.v2.DispatchV2Request;
@@ -41,6 +43,7 @@ import com.routechain.v2.integration.WorkerReadyState;
 import com.routechain.v2.perf.DispatchPerfBenchmarkHarness;
 import com.routechain.v2.perf.DispatchPerfMachineProfile;
 import com.routechain.v2.perf.DispatchPerfWorkloadFactory;
+import com.routechain.v2.route.RouteProposal;
 import com.routechain.v2.route.RouteProposalSource;
 
 import java.io.BufferedReader;
@@ -61,6 +64,7 @@ import java.util.Map;
 import java.util.Set;
 
 public final class DispatchQualityBenchmarkHarness {
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
     private static final String TABULAR_WORKER = "ml-tabular-worker";
     private static final String ROUTEFINDER_WORKER = "ml-routefinder-worker";
     private static final String GREEDRL_WORKER = "ml-greedrl-worker";
@@ -119,9 +123,13 @@ public final class DispatchQualityBenchmarkHarness {
     private DispatchQualityBenchmarkResult runScenario(BenchmarkRequest request, DispatchPerfBenchmarkHarness.BaselineId baselineId) {
         ScenarioExecution execution = executeDispatch(request, baselineId);
         DispatchV2Result result = execution.result();
+        DispatchQualityFeedbackSummary feedbackSummary = feedbackSummary(feedbackDirectory(request, baselineId));
         List<String> notes = new ArrayList<>();
         if (!request.authorityRun() && request.executionMode() == ExecutionMode.LOCAL_REAL) {
             notes.add("non-authoritative-local-real-run");
+        }
+        if (request.decisionMode() == DispatchBenchmarkDecisionMode.LLM_AUTHORITATIVE) {
+            notes.add("authoritative-stage-intent-from-benchmark-mode");
         }
         if (execution.attachDiagnostics().mlAttachStatus() == DispatchQualityMlAttachStatus.ML_ATTACH_FAIL) {
             notes.add("ML_ATTACH_FAIL");
@@ -133,6 +141,8 @@ public final class DispatchQualityBenchmarkHarness {
                 Instant.now(),
                 gitCommit(),
                 DispatchPerfMachineProfile.capture(request.machineLabel()),
+                request.decisionMode().wireName(),
+                request.decisionMode().authoritativeStages(),
                 request.executionMode().wireName(),
                 runAuthorityClass,
                 request.authorityRun(),
@@ -153,6 +163,10 @@ public final class DispatchQualityBenchmarkHarness {
                 result.decisionStages(),
                 false,
                 metricsFrom(result),
+                feedbackSummary.llmShadowAgreement(),
+                routeVectorMetrics(result),
+                feedbackSummary.tokenUsageSummary(),
+                feedbackSummary.stageFallbackSummary(),
                 distinctDegrades(result),
                 distinctSources(result.mlStageMetadata().stream()
                         .filter(MlStageMetadata::applied)
@@ -173,6 +187,8 @@ public final class DispatchQualityBenchmarkHarness {
                 Instant.now(),
                 gitCommit(),
                 DispatchPerfMachineProfile.capture(request.machineLabel()),
+                request.decisionMode().wireName(),
+                request.decisionMode().authoritativeStages(),
                 request.executionMode().wireName(),
                 request.authorityRun() ? "AUTHORITY_REAL" : "LOCAL_NON_AUTHORITY",
                 request.authorityRun(),
@@ -193,6 +209,10 @@ public final class DispatchQualityBenchmarkHarness {
                 List.of(),
                 true,
                 emptyMetrics(),
+                DispatchLlmShadowAgreementSummary.empty(),
+                DispatchRouteVectorMetrics.empty(),
+                DispatchTokenUsageSummary.empty(),
+                DispatchStageFallbackSummary.empty(),
                 List.of(),
                 List.of(),
                 List.of(),
@@ -201,7 +221,11 @@ public final class DispatchQualityBenchmarkHarness {
 
     private ScenarioExecution executeDispatch(BenchmarkRequest request, DispatchPerfBenchmarkHarness.BaselineId baselineId) {
         ScenarioDefinition scenario = scenarioDefinition(request.scenarioPack());
-        RouteChainDispatchV2Properties properties = baseProperties(baselineId, request.executionMode(), feedbackDirectory(request, baselineId));
+        RouteChainDispatchV2Properties properties = baseProperties(
+                baselineId,
+                request.decisionMode(),
+                request.executionMode(),
+                feedbackDirectory(request, baselineId));
         scenario.configureProperties(properties, baselineId);
         ScenarioDependencies dependencies = request.executionMode() == ExecutionMode.CONTROLLED
                 ? scenario.controlledDependencies(baselineId)
@@ -227,6 +251,7 @@ public final class DispatchQualityBenchmarkHarness {
         ScenarioDefinition scenario = scenarioDefinition(request.scenarioPack());
         RouteChainDispatchV2Properties properties = baseProperties(
                 DispatchPerfBenchmarkHarness.BaselineId.C,
+                DispatchBenchmarkDecisionMode.LEGACY,
                 request.executionMode(),
                 feedbackDirectory(request, control));
         scenario.configureProperties(properties, DispatchPerfBenchmarkHarness.BaselineId.C);
@@ -379,6 +404,8 @@ public final class DispatchQualityBenchmarkHarness {
                 request.scenarioPack().wireName(),
                 request.scenarioPack().wireName(),
                 request.workloadSize().name(),
+                request.decisionMode().wireName(),
+                request.decisionMode().authoritativeStages(),
                 request.executionMode().wireName(),
                 request.authorityRun() ? "AUTHORITY_REAL" : "LOCAL_NON_AUTHORITY",
                 request.authorityRun(),
@@ -585,9 +612,19 @@ public final class DispatchQualityBenchmarkHarness {
     }
 
     private RouteChainDispatchV2Properties baseProperties(DispatchPerfBenchmarkHarness.BaselineId baselineId,
+                                                          DispatchBenchmarkDecisionMode decisionMode,
                                                           ExecutionMode executionMode,
                                                           Path feedbackDirectory) {
         RouteChainDispatchV2Properties properties = RouteChainDispatchV2Properties.defaults();
+        properties.getDecision().setMode(decisionMode.runtimeMode());
+        properties.getDecision().getLlm().setBaseUrl(configuredValue(
+                "routechain.dispatch-v2.decision.llm.base-url",
+                "ROUTECHAIN_DECISION_LLM_BASE_URL",
+                properties.getDecision().getLlm().getBaseUrl()));
+        properties.getDecision().getLlm().setModel(configuredValue(
+                "routechain.dispatch-v2.decision.llm.model",
+                "ROUTECHAIN_DECISION_LLM_MODEL",
+                properties.getDecision().getLlm().getModel()));
         properties.getMl().setModelManifestPath(configuredValue(
                 "dispatchV2.ml.modelManifestPath",
                 "IRX_MODEL_MANIFEST_PATH",
@@ -632,7 +669,7 @@ public final class DispatchQualityBenchmarkHarness {
         properties.getMl().getRoutefinder().setEnabled(false);
         properties.getMl().getGreedrl().setEnabled(false);
         properties.getMl().getForecast().setEnabled(false);
-        if (feedbackDirectory != null && executionMode == ExecutionMode.LOCAL_REAL) {
+        if (feedbackDirectory != null) {
             properties.getFeedback().setStorageMode(FeedbackStorageMode.FILE);
             properties.getFeedback().setBaseDir(feedbackDirectory.toString());
             properties.getWarmHotStart().setLoadLatestSnapshotOnBoot(true);
@@ -659,6 +696,7 @@ public final class DispatchQualityBenchmarkHarness {
                 .resolve(request.scenarioPack().wireName())
                 .resolve(request.workloadSize().name().toLowerCase(Locale.ROOT))
                 .resolve(request.executionMode().wireName())
+                .resolve(request.decisionMode().wireName())
                 .resolve(baselineId.name().toLowerCase(Locale.ROOT));
     }
 
@@ -672,10 +710,194 @@ public final class DispatchQualityBenchmarkHarness {
     }
 
     private String traceFamilyId(BenchmarkRequest request, DispatchPerfBenchmarkHarness.BaselineId baselineId) {
-        return "quality-%s-%s-%s".formatted(
+        return "quality-%s-%s-%s-%s".formatted(
                 request.scenarioPack().wireName(),
                 request.workloadSize().name().toLowerCase(Locale.ROOT),
+                request.decisionMode().wireName(),
                 baselineId.name().toLowerCase(Locale.ROOT));
+    }
+
+    private DispatchQualityFeedbackSummary feedbackSummary(Path feedbackDirectory) {
+        if (feedbackDirectory == null || !Files.exists(feedbackDirectory)) {
+            return DispatchQualityFeedbackSummary.empty();
+        }
+        Path decisionStageRoot = feedbackDirectory.resolve("decision-stage");
+        if (!Files.exists(decisionStageRoot)) {
+            return DispatchQualityFeedbackSummary.empty();
+        }
+        List<JsonNode> joins = readFamily(decisionStageRoot, "decision_stage_join");
+        List<JsonNode> outputs = readFamily(decisionStageRoot, "decision_stage_output");
+        return new DispatchQualityFeedbackSummary(
+                agreementSummary(joins),
+                tokenUsageSummary(outputs),
+                fallbackSummary(outputs));
+    }
+
+    private List<JsonNode> readFamily(Path decisionStageRoot, String family) {
+        Path familyRoot = decisionStageRoot.resolve(family);
+        if (!Files.exists(familyRoot)) {
+            return List.of();
+        }
+        try (var stream = Files.list(familyRoot)) {
+            return stream
+                    .filter(path -> path.getFileName().toString().endsWith(".json"))
+                    .sorted(Comparator.comparing(path -> path.getFileName().toString()))
+                    .map(this::readJson)
+                    .filter(node -> node != null)
+                    .toList();
+        } catch (IOException exception) {
+            return List.of();
+        }
+    }
+
+    private JsonNode readJson(Path path) {
+        try {
+            return OBJECT_MAPPER.readTree(path.toFile());
+        } catch (IOException exception) {
+            return null;
+        }
+    }
+
+    private DispatchLlmShadowAgreementSummary agreementSummary(List<JsonNode> joins) {
+        if (joins.isEmpty()) {
+            return DispatchLlmShadowAgreementSummary.empty();
+        }
+        Map<String, DispatchStageAgreementAccumulator> byStage = new LinkedHashMap<>();
+        for (JsonNode join : joins) {
+            String stageName = join.path("stageName").isTextual()
+                    ? join.path("stageName").asText()
+                    : join.path("stageName").path("wireName").asText("");
+            if (stageName.isBlank()) {
+                continue;
+            }
+            DispatchStageAgreementAccumulator accumulator = byStage.computeIfAbsent(stageName, ignored -> new DispatchStageAgreementAccumulator());
+            boolean available = join.path("agreementAvailable").asBoolean(false);
+            if (!available) {
+                continue;
+            }
+            List<String> selectedIds = jsonTextList(join.path("selectedIds"));
+            List<String> actualSelectedIds = jsonTextList(join.path("actualSelectedIds"));
+            accumulator.comparisonCount++;
+            if (selectedIds.equals(actualSelectedIds)) {
+                accumulator.exactMatchCount++;
+            }
+        }
+        List<DispatchDecisionStageAgreement> stageAgreements = byStage.entrySet().stream()
+                .map(entry -> entry.getValue().toSummary(entry.getKey()))
+                .toList();
+        int comparedStages = stageAgreements.stream().mapToInt(DispatchDecisionStageAgreement::comparisonCount).sum();
+        int exactMatches = stageAgreements.stream().mapToInt(DispatchDecisionStageAgreement::exactMatchCount).sum();
+        double overallRate = comparedStages == 0 ? 0.0 : exactMatches / (double) comparedStages;
+        return new DispatchLlmShadowAgreementSummary(
+                "dispatch-llm-shadow-agreement-summary/v1",
+                comparedStages,
+                exactMatches,
+                overallRate,
+                stageAgreements);
+    }
+
+    private DispatchTokenUsageSummary tokenUsageSummary(List<JsonNode> outputs) {
+        if (outputs.isEmpty()) {
+            return DispatchTokenUsageSummary.empty();
+        }
+        long inputTokens = 0L;
+        long outputTokens = 0L;
+        long totalTokens = 0L;
+        int requestCount = 0;
+        for (JsonNode output : outputs) {
+            JsonNode tokenUsage = output.path("meta").path("tokenUsage");
+            if (tokenUsage.isMissingNode() || tokenUsage.isNull() || tokenUsage.isEmpty()) {
+                continue;
+            }
+            requestCount++;
+            long prompt = firstLong(tokenUsage, "inputTokens", "input_tokens", "promptTokens", "prompt_tokens");
+            long completion = firstLong(tokenUsage, "outputTokens", "output_tokens", "completionTokens", "completion_tokens");
+            long total = firstLong(tokenUsage, "totalTokens", "total_tokens");
+            inputTokens += prompt;
+            outputTokens += completion;
+            totalTokens += total > 0 ? total : prompt + completion;
+        }
+        if (requestCount == 0) {
+            return DispatchTokenUsageSummary.empty();
+        }
+        return new DispatchTokenUsageSummary(
+                "dispatch-token-usage-summary/v1",
+                requestCount,
+                inputTokens,
+                outputTokens,
+                totalTokens);
+    }
+
+    private DispatchStageFallbackSummary fallbackSummary(List<JsonNode> outputs) {
+        if (outputs.isEmpty()) {
+            return DispatchStageFallbackSummary.empty();
+        }
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        Map<String, String> reasons = new LinkedHashMap<>();
+        int totalFallbacks = 0;
+        for (JsonNode output : outputs) {
+            JsonNode meta = output.path("meta");
+            if (!meta.path("fallbackUsed").asBoolean(false)) {
+                continue;
+            }
+            String stageName = output.path("stageName").isTextual()
+                    ? output.path("stageName").asText()
+                    : output.path("stageName").path("wireName").asText("");
+            if (stageName.isBlank()) {
+                continue;
+            }
+            totalFallbacks++;
+            counts.merge(stageName, 1, Integer::sum);
+            String reason = meta.path("fallbackReason").asText("");
+            if (!reason.isBlank()) {
+                reasons.put(stageName, reason);
+            }
+        }
+        return new DispatchStageFallbackSummary(
+                "dispatch-stage-fallback-summary/v1",
+                outputs.size(),
+                totalFallbacks,
+                counts,
+                reasons);
+    }
+
+    private List<String> jsonTextList(JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        for (JsonNode child : node) {
+            if (child.isTextual()) {
+                values.add(child.asText());
+            }
+        }
+        return List.copyOf(values);
+    }
+
+    private long firstLong(JsonNode node, String... fieldNames) {
+        for (String fieldName : fieldNames) {
+            JsonNode field = node.get(fieldName);
+            if (field != null && field.isNumber()) {
+                return field.asLong();
+            }
+        }
+        return 0L;
+    }
+
+    private DispatchRouteVectorMetrics routeVectorMetrics(DispatchV2Result result) {
+        List<RouteProposal> proposals = result.routeProposals();
+        if (proposals == null || proposals.isEmpty()) {
+            return DispatchRouteVectorMetrics.empty();
+        }
+        long geometryAvailable = proposals.stream().filter(RouteProposal::geometryAvailable).count();
+        return new DispatchRouteVectorMetrics(
+                "dispatch-route-vector-metrics/v1",
+                proposals.size(),
+                geometryAvailable / (double) proposals.size(),
+                proposals.stream().mapToDouble(RouteProposal::totalDistanceMeters).average().orElse(0.0),
+                proposals.stream().mapToDouble(RouteProposal::totalTravelTimeSeconds).average().orElse(0.0),
+                proposals.stream().mapToDouble(RouteProposal::routeCost).average().orElse(0.0),
+                proposals.stream().mapToDouble(RouteProposal::congestionScore).average().orElse(0.0));
     }
 
     private ScenarioDefinition scenarioDefinition(ScenarioPack scenarioPack) {
@@ -1150,6 +1372,7 @@ public final class DispatchQualityBenchmarkHarness {
             List<DispatchPerfBenchmarkHarness.BaselineId> baselines,
             DispatchPerfBenchmarkHarness.WorkloadSize workloadSize,
             ScenarioPack scenarioPack,
+            DispatchBenchmarkDecisionMode decisionMode,
             ExecutionMode executionMode,
             String machineLabel,
             boolean authorityRun,
@@ -1313,4 +1536,5 @@ public final class DispatchQualityBenchmarkHarness {
             return path != null && exists;
         }
     }
+
 }

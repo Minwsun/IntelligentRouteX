@@ -12,6 +12,8 @@ public record DispatchQualityBenchmarkResult(
         Instant benchmarkTimestamp,
         String gitCommit,
         DispatchPerfMachineProfile machineProfile,
+        String decisionMode,
+        List<String> authoritativeStages,
         String executionMode,
         String runAuthorityClass,
         boolean authoritative,
@@ -32,8 +34,16 @@ public record DispatchQualityBenchmarkResult(
         List<String> decisionStages,
         boolean deferred,
         DispatchQualityMetrics metrics,
+        DispatchLlmShadowAgreementSummary llmShadowAgreement,
+        DispatchRouteVectorMetrics routeVectorMetrics,
+        DispatchTokenUsageSummary tokenUsageSummary,
+        DispatchStageFallbackSummary stageFallbackSummary,
         List<String> degradeReasons,
         List<String> workerAppliedSources,
         List<String> liveAppliedSources,
         List<String> notes) implements SchemaVersioned {
+
+    public DispatchQualityBenchmarkResult {
+        authoritativeStages = authoritativeStages == null ? List.of() : List.copyOf(authoritativeStages);
+    }
 }

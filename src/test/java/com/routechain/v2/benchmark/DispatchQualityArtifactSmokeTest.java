@@ -18,14 +18,16 @@ class DispatchQualityArtifactSmokeTest {
         String baselinesWire = value("dispatchQuality.baselines", "DISPATCH_QUALITY_BASELINES", "A,B,C");
         String sizeWire = value("dispatchQuality.size", "DISPATCH_QUALITY_SIZE", "S");
         String scenarioPackWire = value("dispatchQuality.scenarioPack", "DISPATCH_QUALITY_SCENARIO_PACK", "normal-clear");
+        String decisionModeWire = value("dispatchQuality.decisionMode", "DISPATCH_QUALITY_DECISION_MODE", "legacy");
         String executionModeWire = value("dispatchQuality.executionMode", "DISPATCH_QUALITY_EXECUTION_MODE", "CONTROLLED");
         boolean authority = Boolean.parseBoolean(value("dispatchQuality.authority", "DISPATCH_QUALITY_AUTHORITY", "false"));
         String outputDirWire = value("dispatchQuality.outputDir", "DISPATCH_QUALITY_OUTPUT_DIR", "build/dispatch-quality-smoke");
         System.out.printf(
-                "[CELL STARTED] baselines=%s size=%s scenario-pack=%s execution-mode=%s authority=%s%n",
+                "[CELL STARTED] baselines=%s size=%s scenario-pack=%s decision-mode=%s execution-mode=%s authority=%s%n",
                 baselinesWire,
                 sizeWire,
                 scenarioPackWire,
+                decisionModeWire,
                 executionModeWire,
                 authority);
         List<DispatchPerfBenchmarkHarness.BaselineId> baselines = parseBaselines(value("dispatchQuality.baselines", "DISPATCH_QUALITY_BASELINES", "A,B,C"));
@@ -33,6 +35,7 @@ class DispatchQualityArtifactSmokeTest {
                 baselines,
                 DispatchPerfBenchmarkHarness.WorkloadSize.valueOf(sizeWire),
                 DispatchQualityBenchmarkHarness.ScenarioPack.fromWire(scenarioPackWire),
+                DispatchBenchmarkDecisionMode.fromWire(decisionModeWire),
                 DispatchQualityBenchmarkHarness.ExecutionMode.valueOf(executionModeWire.toUpperCase().replace('-', '_')),
                 value("dispatchQuality.machineLabel", "DISPATCH_QUALITY_MACHINE_LABEL", DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL),
                 authority,

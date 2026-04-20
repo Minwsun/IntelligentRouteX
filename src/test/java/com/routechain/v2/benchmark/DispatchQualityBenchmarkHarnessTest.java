@@ -27,6 +27,7 @@ class DispatchQualityBenchmarkHarnessTest {
                         DispatchPerfBenchmarkHarness.BaselineId.C),
                 DispatchPerfBenchmarkHarness.WorkloadSize.S,
                 DispatchQualityBenchmarkHarness.ScenarioPack.NORMAL_CLEAR,
+                DispatchBenchmarkDecisionMode.LEGACY,
                 DispatchQualityBenchmarkHarness.ExecutionMode.CONTROLLED,
                 DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL,
                 false,
@@ -37,6 +38,7 @@ class DispatchQualityBenchmarkHarnessTest {
         assertNotNull(run.comparisonReport());
         assertTrue(run.rawResults().stream().allMatch(result -> result.decisionStages().size() == 12));
         assertTrue(run.rawResults().stream().allMatch(result -> !result.deferred()));
+        assertTrue(run.rawResults().stream().allMatch(result -> result.decisionMode().equals("legacy")));
     }
 
     @Test
@@ -48,6 +50,7 @@ class DispatchQualityBenchmarkHarnessTest {
                         DispatchPerfBenchmarkHarness.BaselineId.C),
                 DispatchPerfBenchmarkHarness.WorkloadSize.S,
                 DispatchQualityBenchmarkHarness.ScenarioPack.NORMAL_CLEAR,
+                DispatchBenchmarkDecisionMode.LEGACY,
                 DispatchQualityBenchmarkHarness.ExecutionMode.CONTROLLED,
                 DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL,
                 false,
@@ -63,6 +66,7 @@ class DispatchQualityBenchmarkHarnessTest {
         assertTrue(fullV2.metrics().selectorObjectiveValue() >= 0.0);
         assertTrue(fullV2.metrics().workerFallbackRate() >= 0.0);
         assertTrue(fullV2.metrics().liveSourceFallbackRate() >= 0.0);
+        assertTrue(fullV2.routeVectorMetrics().geometryCoverage() >= 0.0);
     }
 
     @Test
@@ -87,6 +91,7 @@ class DispatchQualityBenchmarkHarnessTest {
                 List.of(DispatchPerfBenchmarkHarness.BaselineId.C),
                 DispatchPerfBenchmarkHarness.WorkloadSize.S,
                 DispatchQualityBenchmarkHarness.ScenarioPack.NORMAL_CLEAR,
+                DispatchBenchmarkDecisionMode.LEGACY,
                 DispatchQualityBenchmarkHarness.ExecutionMode.LOCAL_REAL,
                 DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL,
                 true,
@@ -106,10 +111,11 @@ class DispatchQualityBenchmarkHarnessTest {
         String previous = System.getProperty("dispatchV2.ml.modelManifestPath");
         System.setProperty("dispatchV2.ml.modelManifestPath", missingManifest.toString());
         try {
-            DispatchQualityBenchmarkRun run = harness.benchmark(new DispatchQualityBenchmarkHarness.BenchmarkRequest(
+        DispatchQualityBenchmarkRun run = harness.benchmark(new DispatchQualityBenchmarkHarness.BenchmarkRequest(
                     List.of(DispatchPerfBenchmarkHarness.BaselineId.C),
                     DispatchPerfBenchmarkHarness.WorkloadSize.S,
                     DispatchQualityBenchmarkHarness.ScenarioPack.NORMAL_CLEAR,
+                    DispatchBenchmarkDecisionMode.LEGACY,
                     DispatchQualityBenchmarkHarness.ExecutionMode.LOCAL_REAL,
                     DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL,
                     true,
@@ -135,6 +141,7 @@ class DispatchQualityBenchmarkHarnessTest {
                 List.of(DispatchPerfBenchmarkHarness.BaselineId.C),
                 DispatchPerfBenchmarkHarness.WorkloadSize.S,
                 DispatchQualityBenchmarkHarness.ScenarioPack.NORMAL_CLEAR,
+                DispatchBenchmarkDecisionMode.LEGACY,
                 DispatchQualityBenchmarkHarness.ExecutionMode.LOCAL_REAL,
                 DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL,
                 false,
@@ -154,10 +161,11 @@ class DispatchQualityBenchmarkHarnessTest {
         Path manifest = Path.of("services", "models", "model-manifest.yaml").toAbsolutePath().normalize();
         System.setProperty("dispatchV2.ml.modelManifestPath", manifest.toString());
         try {
-            DispatchQualityBenchmarkRun run = harness.benchmark(new DispatchQualityBenchmarkHarness.BenchmarkRequest(
+        DispatchQualityBenchmarkRun run = harness.benchmark(new DispatchQualityBenchmarkHarness.BenchmarkRequest(
                     List.of(DispatchPerfBenchmarkHarness.BaselineId.C),
                     DispatchPerfBenchmarkHarness.WorkloadSize.S,
                     DispatchQualityBenchmarkHarness.ScenarioPack.NORMAL_CLEAR,
+                    DispatchBenchmarkDecisionMode.LEGACY,
                     DispatchQualityBenchmarkHarness.ExecutionMode.LOCAL_REAL,
                     DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL,
                     false,
@@ -170,6 +178,28 @@ class DispatchQualityBenchmarkHarnessTest {
         } finally {
             restoreProperty("dispatchV2.ml.modelManifestPath", previous);
         }
+    }
+
+    @Test
+    void llmShadowBenchmarkModePopulatesDecisionFeedbackSummaries() {
+        String previousApiKey = System.getenv("OPENAI_API_KEY");
+        DispatchQualityBenchmarkRun run = harness.benchmark(new DispatchQualityBenchmarkHarness.BenchmarkRequest(
+                List.of(DispatchPerfBenchmarkHarness.BaselineId.C),
+                DispatchPerfBenchmarkHarness.WorkloadSize.S,
+                DispatchQualityBenchmarkHarness.ScenarioPack.NORMAL_CLEAR,
+                DispatchBenchmarkDecisionMode.LLM_SHADOW,
+                DispatchQualityBenchmarkHarness.ExecutionMode.CONTROLLED,
+                DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL,
+                false,
+                false,
+                tempDir));
+
+        DispatchQualityBenchmarkResult result = run.rawResults().getFirst();
+        assertEquals("llm-shadow", result.decisionMode());
+        assertNotNull(result.llmShadowAgreement());
+        assertNotNull(result.stageFallbackSummary());
+        assertNotNull(result.tokenUsageSummary());
+        assertTrue(result.stageFallbackSummary().totalStageOutputs() >= 1);
     }
 
     private void restoreProperty(String name, String previous) {

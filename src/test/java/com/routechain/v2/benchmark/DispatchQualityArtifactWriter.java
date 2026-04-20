@@ -88,12 +88,19 @@ public final class DispatchQualityArtifactWriter {
         builder.append("- baseline: `").append(result.baselineId()).append("`\n");
         builder.append("- scenario: `").append(result.scenarioPack()).append(" / ").append(result.scenarioName()).append("`\n");
         builder.append("- workload: `").append(result.workloadSize()).append("`\n");
+        builder.append("- decision mode: `").append(result.decisionMode()).append("`\n");
+        builder.append("- authoritative stages: `").append(result.authoritativeStages()).append("`\n");
         builder.append("- execution mode: `").append(result.executionMode()).append("`\n");
         builder.append("- authority class: `").append(result.runAuthorityClass()).append("`\n");
         builder.append("- authority eligible: `").append(result.authorityEligible()).append("`\n");
         builder.append("- model manifest: `").append(result.resolvedModelManifestPath()).append("`\n");
         builder.append("- manifest exists: `").append(result.manifestExists()).append("`\n");
         builder.append("- ml attach status: `").append(result.mlAttachStatus()).append("`\n");
+        builder.append("- llm exact-match rate: `").append(result.llmShadowAgreement().overallExactMatchRate()).append("`\n");
+        builder.append("- token requests: `").append(result.tokenUsageSummary().requestCount()).append("`\n");
+        builder.append("- token total: `").append(result.tokenUsageSummary().totalTokens()).append("`\n");
+        builder.append("- stage fallbacks: `").append(result.stageFallbackSummary().totalFallbacks()).append("`\n");
+        builder.append("- route vector geometry coverage: `").append(result.routeVectorMetrics().geometryCoverage()).append("`\n");
         builder.append("- selected proposals: `").append(metrics.selectedProposalCount()).append("`\n");
         builder.append("- executed assignments: `").append(metrics.executedAssignmentCount()).append("`\n");
         builder.append("- conflict free: `").append(metrics.conflictFreeAssignments()).append("`\n");
@@ -123,6 +130,23 @@ public final class DispatchQualityArtifactWriter {
                         .append('\n');
             }
         }
+        if (!result.llmShadowAgreement().stageAgreements().isEmpty()) {
+            builder.append("\n## LLM Agreement\n\n");
+            for (DispatchDecisionStageAgreement stageAgreement : result.llmShadowAgreement().stageAgreements()) {
+                builder.append("- `").append(stageAgreement.stageName()).append("` ")
+                        .append("rate=`").append(stageAgreement.exactMatchRate()).append("` ")
+                        .append("matches=`").append(stageAgreement.exactMatchCount()).append('/')
+                        .append(stageAgreement.comparisonCount()).append("`\n");
+            }
+        }
+        if (result.stageFallbackSummary().totalFallbacks() > 0) {
+            builder.append("\n## Stage Fallbacks\n\n");
+            result.stageFallbackSummary().fallbackCountsByStage().forEach((stage, count) ->
+                    builder.append("- `").append(stage).append("` count=`").append(count)
+                            .append("` reason=`")
+                            .append(result.stageFallbackSummary().latestFallbackReasonByStage().getOrDefault(stage, ""))
+                            .append("`\n"));
+        }
         if (!result.notes().isEmpty()) {
             builder.append("- notes: `").append(result.notes()).append("`\n");
         }
@@ -133,6 +157,8 @@ public final class DispatchQualityArtifactWriter {
         StringBuilder builder = new StringBuilder("# Dispatch Quality Comparison\n\n");
         builder.append("- scenario: `").append(report.scenarioPack()).append(" / ").append(report.scenarioName()).append("`\n");
         builder.append("- workload: `").append(report.workloadSize()).append("`\n");
+        builder.append("- decision mode: `").append(report.decisionMode()).append("`\n");
+        builder.append("- authoritative stages: `").append(report.authoritativeStages()).append("`\n");
         builder.append("- execution mode: `").append(report.executionMode()).append("`\n");
         builder.append("- authority class: `").append(report.runAuthorityClass()).append("`\n");
         builder.append("- authority eligible: `").append(report.authorityEligible()).append("`\n");
@@ -171,13 +197,14 @@ public final class DispatchQualityArtifactWriter {
 
     private static String csvForComparison(DispatchQualityComparisonReport report) {
         StringBuilder builder = new StringBuilder();
-        builder.append("baseline,scenarioPack,scenarioName,workloadSize,executionMode,selectedProposalCount,executedAssignmentCount,conflictFreeAssignments,bundleRate,averageBundleSize,routeFallbackRate,averageProjectedPickupEtaMinutes,averageProjectedCompletionEtaMinutes,landingValueAverage,robustUtilityAverage,selectorObjectiveValue,degradeRate,workerFallbackRate,liveSourceFallbackRate\n");
+        builder.append("baseline,scenarioPack,scenarioName,workloadSize,decisionMode,executionMode,selectedProposalCount,executedAssignmentCount,conflictFreeAssignments,bundleRate,averageBundleSize,routeFallbackRate,averageProjectedPickupEtaMinutes,averageProjectedCompletionEtaMinutes,landingValueAverage,robustUtilityAverage,selectorObjectiveValue,degradeRate,workerFallbackRate,liveSourceFallbackRate,llmExactMatchRate,tokenTotal,stageFallbacks,geometryCoverage,averageRouteDistanceMeters,averageRouteTravelTimeSeconds,averageRouteCost,averageCongestionScore\n");
         for (DispatchQualityBenchmarkResult result : report.baselineResults()) {
             DispatchQualityMetrics metrics = result.metrics();
             builder.append(csv(result.baselineId())).append(',')
                     .append(csv(result.scenarioPack())).append(',')
                     .append(csv(result.scenarioName())).append(',')
                     .append(csv(result.workloadSize())).append(',')
+                    .append(csv(result.decisionMode())).append(',')
                     .append(csv(result.executionMode())).append(',')
                     .append(metrics.selectedProposalCount()).append(',')
                     .append(metrics.executedAssignmentCount()).append(',')
@@ -192,7 +219,15 @@ public final class DispatchQualityArtifactWriter {
                     .append(metrics.selectorObjectiveValue()).append(',')
                     .append(metrics.degradeRate()).append(',')
                     .append(metrics.workerFallbackRate()).append(',')
-                    .append(metrics.liveSourceFallbackRate()).append('\n');
+                    .append(metrics.liveSourceFallbackRate()).append(',')
+                    .append(result.llmShadowAgreement().overallExactMatchRate()).append(',')
+                    .append(result.tokenUsageSummary().totalTokens()).append(',')
+                    .append(result.stageFallbackSummary().totalFallbacks()).append(',')
+                    .append(result.routeVectorMetrics().geometryCoverage()).append(',')
+                    .append(result.routeVectorMetrics().averageTotalDistanceMeters()).append(',')
+                    .append(result.routeVectorMetrics().averageTotalTravelTimeSeconds()).append(',')
+                    .append(result.routeVectorMetrics().averageRouteCost()).append(',')
+                    .append(result.routeVectorMetrics().averageCongestionScore()).append('\n');
         }
         return builder.toString();
     }
@@ -232,18 +267,20 @@ public final class DispatchQualityArtifactWriter {
     }
 
     private static String benchmarkStem(DispatchQualityBenchmarkResult result) {
-        return "dispatch-quality-%s-%s-%s-%s-%s".formatted(
+        return "dispatch-quality-%s-%s-%s-%s-%s-%s".formatted(
                 result.scenarioPack().toLowerCase(),
                 result.workloadSize().toLowerCase(),
+                result.decisionMode().toLowerCase(),
                 result.executionMode().toLowerCase(),
                 result.baselineId().toLowerCase(),
                 FILE_TS.format(result.benchmarkTimestamp()));
     }
 
     private static String comparisonStem(DispatchQualityComparisonReport report) {
-        return "dispatch-quality-compare-%s-%s-%s-%s".formatted(
+        return "dispatch-quality-compare-%s-%s-%s-%s-%s".formatted(
                 report.scenarioPack().toLowerCase(),
                 report.workloadSize().toLowerCase(),
+                report.decisionMode().toLowerCase(),
                 report.executionMode().toLowerCase(),
                 FILE_TS.format(java.time.Instant.now()));
     }

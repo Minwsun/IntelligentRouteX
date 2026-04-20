@@ -20,6 +20,7 @@ SCENARIO_PACKS = (
     "live-source-degradation",
 )
 EXECUTION_MODES = ("controlled", "local-real")
+DECISION_MODES = ("legacy", "llm-shadow", "llm-authoritative")
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class BenchmarkCell:
     baselines: str
     size: str
     scenario_pack: str
+    decision_mode: str
     execution_mode: str
     authority: bool
 
@@ -51,18 +53,23 @@ def gradle_command() -> list[str]:
 
 
 def cell_label(cell: BenchmarkCell) -> str:
-    return f"{cell.baselines}/{cell.size}/{cell.scenario_pack}/{cell.execution_mode}/authority={str(cell.authority).lower()}"
+    return (
+        f"{cell.baselines}/{cell.size}/{cell.scenario_pack}/{cell.decision_mode}/"
+        f"{cell.execution_mode}/authority={str(cell.authority).lower()}"
+    )
 
 
 def planned_cells(args: argparse.Namespace) -> list[BenchmarkCell]:
     baseline_selector = "A,B,C" if args.baseline == "all" else args.baseline
     sizes = expand_selector(args.size, SIZES)
     scenario_packs = expand_selector(args.scenario_pack, SCENARIO_PACKS)
+    decision_modes = expand_selector(args.decision_mode, DECISION_MODES)
     execution_modes = expand_selector(args.execution_mode, EXECUTION_MODES)
     return [
-        BenchmarkCell(baseline_selector, size, scenario_pack, execution_mode, args.authority)
+        BenchmarkCell(baseline_selector, size, scenario_pack, decision_mode, execution_mode, args.authority)
         for size in sizes
         for scenario_pack in scenario_packs
+        for decision_mode in decision_modes
         for execution_mode in execution_modes
     ]
 
@@ -80,6 +87,7 @@ def run_cell(cell: BenchmarkCell, output_dir: Path, runner=subprocess.run, run_d
         "DISPATCH_QUALITY_BASELINES": cell.baselines,
         "DISPATCH_QUALITY_SIZE": cell.size,
         "DISPATCH_QUALITY_SCENARIO_PACK": cell.scenario_pack,
+        "DISPATCH_QUALITY_DECISION_MODE": cell.decision_mode,
         "DISPATCH_QUALITY_EXECUTION_MODE": cell.execution_mode,
         "DISPATCH_QUALITY_AUTHORITY": "true" if cell.authority else "false",
         "DISPATCH_QUALITY_OUTPUT_DIR": str(output_dir),
@@ -132,18 +140,25 @@ def write_summary(results: Sequence[dict], output_dir: Path) -> Path:
             lines.extend([
                 f"## `{result.get('scenarioPack')} / {result.get('baselineId')} / {result.get('workloadSize')}`",
                 "",
+                f"- decision mode: `{result.get('decisionMode', 'legacy')}`",
+                f"- authoritative stages: `{result.get('authoritativeStages', [])}`",
                 f"- execution mode: `{result.get('executionMode')}`",
                 f"- authority class: `{result.get('runAuthorityClass', 'LOCAL_NON_AUTHORITY')}`",
                 f"- authority eligible: `{result.get('authorityEligible', False)}`",
                 f"- selected proposals: `{metrics.get('selectedProposalCount', 0)}`",
                 f"- executed assignments: `{metrics.get('executedAssignmentCount', 0)}`",
                 f"- robust utility average: `{metrics.get('robustUtilityAverage', 0.0)}`",
+                f"- llm exact-match rate: `{result.get('llmShadowAgreement', {}).get('overallExactMatchRate', 0.0)}`",
+                f"- token total: `{result.get('tokenUsageSummary', {}).get('totalTokens', 0)}`",
+                f"- route geometry coverage: `{result.get('routeVectorMetrics', {}).get('geometryCoverage', 0.0)}`",
                 "",
             ])
         elif "baselineResults" in result:
             lines.extend([
                 f"## `comparison / {result.get('scenarioPack')} / {result.get('workloadSize')}`",
                 "",
+                f"- decision mode: `{result.get('decisionMode', 'legacy')}`",
+                f"- authoritative stages: `{result.get('authoritativeStages', [])}`",
                 f"- execution mode: `{result.get('executionMode')}`",
                 f"- authority class: `{result.get('runAuthorityClass', 'LOCAL_NON_AUTHORITY')}`",
                 f"- authority eligible: `{result.get('authorityEligible', False)}`",
@@ -159,6 +174,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--baseline", default="all", help="A|B|C|all")
     parser.add_argument("--size", default="all", help="S|M|L|XL|all")
     parser.add_argument("--scenario-pack", default="all", help="scenario pack or all")
+    parser.add_argument("--decision-mode", default="legacy", help="legacy|llm-shadow|llm-authoritative|all")
     parser.add_argument("--execution-mode", default="controlled", help="controlled|local-real")
     parser.add_argument("--authority", action="store_true", help="Mark the run as authority-eligible when semantics allow it.")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
@@ -177,7 +193,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for cell in cells:
         print(
             f"- baselines={cell.baselines} size={cell.size} scenario-pack={cell.scenario_pack} "
-            f"execution-mode={cell.execution_mode} authority={str(cell.authority).lower()}"
+            f"decision-mode={cell.decision_mode} execution-mode={cell.execution_mode} authority={str(cell.authority).lower()}"
         )
     if args.dry_run:
         return 0
