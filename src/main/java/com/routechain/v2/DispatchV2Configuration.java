@@ -8,6 +8,15 @@ import com.routechain.v2.context.EtaService;
 import com.routechain.v2.context.EtaUncertaintyEstimator;
 import com.routechain.v2.context.TrafficProfileService;
 import com.routechain.v2.context.WeatherContextService;
+import com.routechain.v2.decision.ContextAssembler;
+import com.routechain.v2.decision.ContextToolRegistry;
+import com.routechain.v2.decision.DecisionBrainResolver;
+import com.routechain.v2.decision.DecisionStageLogger;
+import com.routechain.v2.decision.LegacyMlBrain;
+import com.routechain.v2.decision.LlmBrain;
+import com.routechain.v2.decision.LlmStageScheduler;
+import com.routechain.v2.decision.NineRouterResponsesClient;
+import com.routechain.v2.decision.StudentBrain;
 import com.routechain.v2.feedback.DecisionLogAssembler;
 import com.routechain.v2.feedback.DecisionLogService;
 import com.routechain.v2.feedback.DecisionLogWriter;
@@ -60,6 +69,11 @@ import com.routechain.v2.route.RouteProposalEngine;
 import com.routechain.v2.route.RouteProposalPruner;
 import com.routechain.v2.route.RouteProposalValidator;
 import com.routechain.v2.route.RouteValueScorer;
+import com.routechain.v2.routing.BestPathRouter;
+import com.routechain.v2.routing.RoadGraphProvider;
+import com.routechain.v2.routing.RouteCostFunction;
+import com.routechain.v2.routing.RouteVectorEnricher;
+import com.routechain.v2.routing.SyntheticRoadGraphProvider;
 import com.routechain.v2.scenario.DispatchScenarioService;
 import com.routechain.v2.scenario.DemandShiftFeatureBuilder;
 import com.routechain.v2.scenario.PostDropShiftFeatureBuilder;
@@ -424,7 +438,9 @@ public class DispatchV2Configuration {
                                                               RouteValueScorer routeValueScorer,
                                                               RouteProposalPruner routeProposalPruner,
                                                               EtaLegCacheFactory etaLegCacheFactory,
-                                                              RouteFinderClient routeFinderClient) {
+                                                              RouteFinderClient routeFinderClient,
+                                                              RouteVectorEnricher routeVectorEnricher,
+                                                              DecisionStageLogger decisionStageLogger) {
         return new DispatchRouteProposalService(
                 properties,
                 routeProposalEngine,
@@ -432,7 +448,9 @@ public class DispatchV2Configuration {
                 routeValueScorer,
                 routeProposalPruner,
                 etaLegCacheFactory,
-                routeFinderClient);
+                routeFinderClient,
+                routeVectorEnricher,
+                decisionStageLogger);
     }
 
     @Bean
@@ -552,6 +570,76 @@ public class DispatchV2Configuration {
     }
 
     @Bean
+    DecisionStageLogger decisionStageLogger(RouteChainDispatchV2Properties properties) {
+        return new DecisionStageLogger(properties);
+    }
+
+    @Bean
+    ContextToolRegistry contextToolRegistry() {
+        return new ContextToolRegistry();
+    }
+
+    @Bean
+    ContextAssembler contextAssembler(RouteChainDispatchV2Properties properties, ContextToolRegistry contextToolRegistry) {
+        return new ContextAssembler(properties, contextToolRegistry);
+    }
+
+    @Bean
+    LegacyMlBrain legacyMlBrain() {
+        return new LegacyMlBrain();
+    }
+
+    @Bean
+    StudentBrain studentBrain(LegacyMlBrain legacyMlBrain) {
+        return new StudentBrain(legacyMlBrain);
+    }
+
+    @Bean
+    NineRouterResponsesClient nineRouterResponsesClient(RouteChainDispatchV2Properties properties) {
+        return new NineRouterResponsesClient(properties.getDecision().getLlm());
+    }
+
+    @Bean
+    LlmStageScheduler llmStageScheduler(NineRouterResponsesClient nineRouterResponsesClient) {
+        return new LlmStageScheduler(nineRouterResponsesClient);
+    }
+
+    @Bean
+    LlmBrain llmBrain(LlmStageScheduler llmStageScheduler,
+                      LegacyMlBrain legacyMlBrain,
+                      DecisionStageLogger decisionStageLogger) {
+        return new LlmBrain(llmStageScheduler, legacyMlBrain, decisionStageLogger);
+    }
+
+    @Bean
+    DecisionBrainResolver decisionBrainResolver(RouteChainDispatchV2Properties properties,
+                                                LegacyMlBrain legacyMlBrain,
+                                                LlmBrain llmBrain,
+                                                StudentBrain studentBrain) {
+        return new DecisionBrainResolver(properties, legacyMlBrain, llmBrain, studentBrain);
+    }
+
+    @Bean
+    RoadGraphProvider roadGraphProvider() {
+        return new SyntheticRoadGraphProvider();
+    }
+
+    @Bean
+    RouteCostFunction routeCostFunction() {
+        return new RouteCostFunction();
+    }
+
+    @Bean
+    BestPathRouter bestPathRouter(RoadGraphProvider roadGraphProvider, RouteCostFunction routeCostFunction) {
+        return new BestPathRouter(roadGraphProvider, routeCostFunction);
+    }
+
+    @Bean
+    RouteVectorEnricher routeVectorEnricher(BestPathRouter bestPathRouter, DecisionStageLogger decisionStageLogger) {
+        return new RouteVectorEnricher(bestPathRouter, decisionStageLogger);
+    }
+
+    @Bean
     DecisionLogWriter decisionLogWriter(RouteChainDispatchV2Properties properties) {
         if (properties.getFeedback().getStorageMode() == FeedbackStorageMode.FILE) {
             return new FileDecisionLogWriter(
@@ -662,7 +750,10 @@ public class DispatchV2Configuration {
                                   DispatchSelectorService dispatchSelectorService,
                                   DispatchExecutorService dispatchExecutorService,
                                   WarmStartManager warmStartManager,
-                                  PostDispatchHardeningService postDispatchHardeningService) {
+                                  PostDispatchHardeningService postDispatchHardeningService,
+                                  DecisionBrainResolver decisionBrainResolver,
+                                  ContextAssembler contextAssembler,
+                                  DecisionStageLogger decisionStageLogger) {
         return new DispatchV2Core(
                 properties,
                 dispatchEtaContextService,
@@ -674,7 +765,10 @@ public class DispatchV2Configuration {
                 dispatchSelectorService,
                 dispatchExecutorService,
                 warmStartManager,
-                postDispatchHardeningService);
+                postDispatchHardeningService,
+                decisionBrainResolver,
+                contextAssembler,
+                decisionStageLogger);
     }
 
     @Bean

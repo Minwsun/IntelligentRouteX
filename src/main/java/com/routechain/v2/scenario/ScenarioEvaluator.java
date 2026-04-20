@@ -91,6 +91,9 @@ public final class ScenarioEvaluator {
         double landingDelta = 0.0;
         double stabilityDelta = 0.0;
         List<String> reasons = new ArrayList<>(decision.reasons());
+        if (proposal.geometryAvailable()) {
+            reasons.add("route-vector-robustness-signal-observed");
+        }
         switch (decision.scenario()) {
             case NORMAL -> reasons.add("normal-baseline-applied");
             case WEATHER_BAD -> {
@@ -198,8 +201,8 @@ public final class ScenarioEvaluator {
                         value - proposal.routeValue(),
                         lateRiskBias,
                         cancelRiskBias,
-                        landingValue - baseLandingValue,
-                        stabilityScore - baseStabilityScore,
+                        (landingValue - baseLandingValue),
+                        (stabilityScore - baseStabilityScore),
                         true,
                         List.copyOf(reasons)));
     }

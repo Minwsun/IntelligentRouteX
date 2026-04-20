@@ -108,6 +108,9 @@ public final class SelectorCandidateBuilder {
         if (proposal.source() == RouteProposalSource.FALLBACK_SIMPLE) {
             reasons.add("selector-fallback-penalty-applied");
         }
+        if (proposal.geometryAvailable()) {
+            reasons.add("selector-route-vector-tie-break-available");
+        }
         return List.copyOf(reasons);
     }
 
@@ -159,7 +162,16 @@ public final class SelectorCandidateBuilder {
         if (candidate.projectedPickupEtaMinutes() != existing.projectedPickupEtaMinutes()) {
             return candidate.projectedPickupEtaMinutes() < existing.projectedPickupEtaMinutes();
         }
+        double candidateVectorTieBreak = routeVectorTieBreak(candidate.candidate());
+        double existingVectorTieBreak = routeVectorTieBreak(existing.candidate());
+        if (candidateVectorTieBreak != existingVectorTieBreak) {
+            return candidateVectorTieBreak > existingVectorTieBreak;
+        }
         return candidate.candidate().proposalId().compareTo(existing.candidate().proposalId()) < 0;
+    }
+
+    private double routeVectorTieBreak(SelectorCandidate candidate) {
+        return candidate.reasons().contains("selector-route-vector-tie-break-available") ? 1.0 : 0.0;
     }
 
     private String driverKey(String bundleId, String anchorOrderId, String driverId) {

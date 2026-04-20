@@ -33,6 +33,7 @@ import com.routechain.v2.context.EtaUncertaintyEstimator;
 import com.routechain.v2.context.FreshnessMetadata;
 import com.routechain.v2.context.TrafficProfileService;
 import com.routechain.v2.context.WeatherContextService;
+import com.routechain.v2.decision.DecisionStageLogger;
 import com.routechain.v2.integration.NoOpOpenMeteoClient;
 import com.routechain.v2.integration.NoOpGreedRlClient;
 import com.routechain.v2.integration.NoOpForecastClient;
@@ -43,6 +44,10 @@ import com.routechain.v2.integration.ForecastClient;
 import com.routechain.v2.integration.GreedRlClient;
 import com.routechain.v2.integration.RouteFinderClient;
 import com.routechain.v2.integration.TabularScoringClient;
+import com.routechain.v2.routing.BestPathRouter;
+import com.routechain.v2.routing.RouteCostFunction;
+import com.routechain.v2.routing.RouteVectorEnricher;
+import com.routechain.v2.routing.SyntheticRoadGraphProvider;
 import com.routechain.v2.scenario.DispatchScenarioService;
 import com.routechain.v2.scenario.DispatchScenarioStage;
 import com.routechain.v2.scenario.DemandShiftFeatureBuilder;
@@ -220,7 +225,11 @@ public final class RouteTestFixtures {
                 new RouteValueScorer(properties, tabularScoringClient),
                 new RouteProposalPruner(properties),
                 etaLegCacheFactory,
-                routeFinderClient);
+                routeFinderClient,
+                new RouteVectorEnricher(
+                        new BestPathRouter(new SyntheticRoadGraphProvider(), new RouteCostFunction()),
+                        new DecisionStageLogger(properties)),
+                new DecisionStageLogger(properties));
     }
 
     public static DispatchRouteProposalStage routeProposalStage(RouteChainDispatchV2Properties properties) {

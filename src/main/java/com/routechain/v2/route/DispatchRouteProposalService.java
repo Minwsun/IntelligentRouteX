@@ -18,6 +18,8 @@ import com.routechain.v2.integration.MlStageMetadataAccumulator;
 import com.routechain.v2.integration.RouteFinderClient;
 import com.routechain.v2.integration.RouteFinderFeatureVector;
 import com.routechain.v2.integration.RouteFinderResult;
+import com.routechain.v2.decision.DecisionStageLogger;
+import com.routechain.v2.routing.RouteVectorEnricher;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -34,6 +36,8 @@ public final class DispatchRouteProposalService {
     private final RouteProposalPruner routeProposalPruner;
     private final EtaLegCacheFactory etaLegCacheFactory;
     private final RouteFinderClient routeFinderClient;
+    private final RouteVectorEnricher routeVectorEnricher;
+    private final DecisionStageLogger decisionStageLogger;
 
     public DispatchRouteProposalService(RouteChainDispatchV2Properties properties,
                                         RouteProposalEngine routeProposalEngine,
@@ -41,7 +45,9 @@ public final class DispatchRouteProposalService {
                                         RouteValueScorer routeValueScorer,
                                         RouteProposalPruner routeProposalPruner,
                                         EtaLegCacheFactory etaLegCacheFactory,
-                                        RouteFinderClient routeFinderClient) {
+                                        RouteFinderClient routeFinderClient,
+                                        RouteVectorEnricher routeVectorEnricher,
+                                        DecisionStageLogger decisionStageLogger) {
         this.properties = properties;
         this.routeProposalEngine = routeProposalEngine;
         this.routeProposalValidator = routeProposalValidator;
@@ -49,6 +55,8 @@ public final class DispatchRouteProposalService {
         this.routeProposalPruner = routeProposalPruner;
         this.etaLegCacheFactory = etaLegCacheFactory;
         this.routeFinderClient = routeFinderClient;
+        this.routeVectorEnricher = routeVectorEnricher;
+        this.decisionStageLogger = decisionStageLogger;
     }
 
     public DispatchRouteProposalStage evaluate(DispatchV2Request request,
@@ -85,20 +93,28 @@ public final class DispatchRouteProposalService {
         List<RouteProposalCandidate> generated = new ArrayList<>(reusePreparation.reusedCandidates());
         generated.addAll(deterministicGenerated);
         generated.addAll(routeFinderGeneration.generatedCandidates());
+        List<RouteProposalCandidate> enrichedReused = reusePreparation.reusedCandidates().stream()
+                .map(candidate -> routeProposalValidator.validate(candidate, context))
+                .map(candidate -> enrichCandidate(request.traceId(), candidate, context))
+                .toList();
         List<RouteProposalCandidate> validatedFresh = java.util.stream.Stream.concat(
                         deterministicGenerated.stream(),
                         routeFinderGeneration.generatedCandidates().stream())
                 .map(candidate -> routeProposalValidator.validate(candidate, context))
+                .map(candidate -> enrichCandidate(request.traceId(), candidate, context))
                 .toList();
         List<RouteValueScoringOutcome> scoringOutcomes = validatedFresh.stream()
                 .map(candidate -> routeValueScorer.score(request.traceId(), candidate, context))
                 .toList();
-        List<RouteProposalCandidate> scored = new ArrayList<>(reusePreparation.reusedCandidates());
+        List<RouteProposalCandidate> scored = new ArrayList<>(enrichedReused);
         scored.addAll(scoringOutcomes.stream()
                 .map(RouteValueScoringOutcome::candidate)
                 .toList());
         List<RouteProposalCandidate> retained = routeProposalPruner.prune(scored);
         List<RouteProposal> routeProposals = retained.stream().map(RouteProposalCandidate::proposal).toList();
+        decisionStageLogger.writeFamily("route_selection_trace", request.traceId(), "route-proposal-pool", java.util.Map.of(
+                "generatedProposalIds", generated.stream().map(candidate -> candidate.proposal().proposalId()).toList(),
+                "retainedProposalIds", retained.stream().map(candidate -> candidate.proposal().proposalId()).toList()));
         List<String> degradeReasons = java.util.stream.Stream.of(
                         reusePreparation.degradeReasons().stream(),
                         routeFinderGeneration.degradeReasons().stream(),
@@ -203,6 +219,18 @@ public final class DispatchRouteProposalService {
                         0.0,
                         0.0,
                         List.of("hot-start-route-reused")));
+    }
+
+    private RouteProposalCandidate enrichCandidate(String traceId,
+                                                   RouteProposalCandidate candidate,
+                                                   DispatchCandidateContext context) {
+        RouteProposal enrichedProposal = routeVectorEnricher.enrich(traceId, candidate.proposal(), context);
+        return new RouteProposalCandidate(
+                enrichedProposal,
+                candidate.tupleKey(),
+                candidate.pickupAnchor(),
+                candidate.driverCandidate(),
+                candidate.trace());
     }
 
     private RouteFinderGenerationOutcome generateRouteFinderProposals(String traceId,

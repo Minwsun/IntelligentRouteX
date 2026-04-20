@@ -47,7 +47,19 @@ public final class RouteProposalValidator {
                 proposal.routeValue(),
                 validationReasons.isEmpty(),
                 List.copyOf(reasons),
-                proposal.degradeReasons());
+                proposal.degradeReasons(),
+                proposal.legCount(),
+                proposal.totalDistanceMeters(),
+                proposal.totalTravelTimeSeconds(),
+                proposal.routeCost(),
+                proposal.majorRoadRatio(),
+                proposal.minorRoadRatio(),
+                proposal.turnCount(),
+                proposal.uTurnCount(),
+                proposal.congestionScore(),
+                proposal.straightnessScore(),
+                proposal.geometryAvailable(),
+                proposal.legs());
         return new RouteProposalCandidate(
                 validated,
                 candidate.tupleKey(),

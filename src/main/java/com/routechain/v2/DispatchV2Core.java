@@ -7,6 +7,13 @@ import com.routechain.v2.cluster.DispatchPairClusterService;
 import com.routechain.v2.cluster.DispatchPairClusterStage;
 import com.routechain.v2.context.DispatchEtaContextService;
 import com.routechain.v2.context.DispatchEtaContextStage;
+import com.routechain.v2.decision.ContextAssembler;
+import com.routechain.v2.decision.DecisionBrainResolver;
+import com.routechain.v2.decision.DecisionStageInputV1;
+import com.routechain.v2.decision.DecisionStageLogger;
+import com.routechain.v2.decision.DecisionStageOutputV1;
+import com.routechain.v2.decision.DecisionUsageRecord;
+import com.routechain.v2.decision.ResolvedDecisionBrain;
 import com.routechain.v2.executor.DispatchExecutorService;
 import com.routechain.v2.executor.DispatchExecutorStage;
 import com.routechain.v2.feedback.DispatchRuntimeReuseState;
@@ -55,6 +62,9 @@ public final class DispatchV2Core {
     private final DispatchExecutorService dispatchExecutorService;
     private final WarmStartManager warmStartManager;
     private final PostDispatchHardeningService postDispatchHardeningService;
+    private final DecisionBrainResolver decisionBrainResolver;
+    private final ContextAssembler contextAssembler;
+    private final DecisionStageLogger decisionStageLogger;
 
     public DispatchV2Core(RouteChainDispatchV2Properties properties,
                           DispatchEtaContextService dispatchEtaContextService,
@@ -66,7 +76,10 @@ public final class DispatchV2Core {
                           DispatchSelectorService dispatchSelectorService,
                           DispatchExecutorService dispatchExecutorService,
                           WarmStartManager warmStartManager,
-                          PostDispatchHardeningService postDispatchHardeningService) {
+                          PostDispatchHardeningService postDispatchHardeningService,
+                          DecisionBrainResolver decisionBrainResolver,
+                          ContextAssembler contextAssembler,
+                          DecisionStageLogger decisionStageLogger) {
         this.properties = properties;
         this.dispatchEtaContextService = dispatchEtaContextService;
         this.dispatchPairClusterService = dispatchPairClusterService;
@@ -78,6 +91,9 @@ public final class DispatchV2Core {
         this.dispatchExecutorService = dispatchExecutorService;
         this.warmStartManager = warmStartManager;
         this.postDispatchHardeningService = postDispatchHardeningService;
+        this.decisionBrainResolver = decisionBrainResolver;
+        this.contextAssembler = contextAssembler;
+        this.decisionStageLogger = decisionStageLogger;
     }
 
     public DispatchV2Result dispatch(DispatchV2Request request) {
@@ -116,6 +132,8 @@ public final class DispatchV2Core {
 
     private DispatchPipelineExecution executePipeline(DispatchV2Request request, boolean allowHotStartReuse) {
         long dispatchStartedAt = System.nanoTime();
+        ResolvedDecisionBrain resolvedDecisionBrain = decisionBrainResolver.resolve();
+        runDecisionSidecar(resolvedDecisionBrain, contextAssembler.observationInput(request));
         DispatchEtaContextStage etaStage = dispatchEtaContextService.evaluate(request);
         HotStartReusePlan reusePlan = allowHotStartReuse
                 ? postDispatchHardeningService.planHotStartReuse(etaStage.etaContext())
@@ -128,11 +146,14 @@ public final class DispatchV2Core {
                 etaStage.etaContext(),
                 pairClusterStage,
                 reusePlan.bundleReuseInput());
+        runDecisionSidecar(resolvedDecisionBrain, contextAssembler.pairBundleInput(request, etaStage.etaContext(), pairClusterStage, bundleStage));
         DispatchRouteCandidateStage routeCandidateStage = dispatchRouteCandidateService.evaluate(
                 request,
                 etaStage.etaContext(),
                 pairClusterStage,
                 bundleStage);
+        runDecisionSidecar(resolvedDecisionBrain, contextAssembler.anchorInput(request, etaStage.etaContext(), routeCandidateStage));
+        runDecisionSidecar(resolvedDecisionBrain, contextAssembler.driverInput(request, etaStage.etaContext(), routeCandidateStage));
         DispatchRouteProposalStage routeProposalStage = dispatchRouteProposalService.evaluate(
                 request,
                 etaStage.etaContext(),
@@ -140,6 +161,8 @@ public final class DispatchV2Core {
                 bundleStage,
                 routeCandidateStage,
                 reusePlan.routeProposalReuseInput());
+        runDecisionSidecar(resolvedDecisionBrain, contextAssembler.routeGenerationInput(request, etaStage.etaContext(), routeProposalStage));
+        runDecisionSidecar(resolvedDecisionBrain, contextAssembler.routeCritiqueInput(request, etaStage.etaContext(), routeProposalStage));
         DispatchScenarioStage scenarioStage = dispatchScenarioService.evaluate(
                 request,
                 etaStage.etaContext(),
@@ -149,6 +172,7 @@ public final class DispatchV2Core {
                 routeCandidateStage,
                 bundleStage,
                 pairClusterStage);
+        runDecisionSidecar(resolvedDecisionBrain, contextAssembler.scenarioInput(request, etaStage.etaContext(), scenarioStage));
         DispatchSelectorStage selectorStage = dispatchSelectorService.evaluate(
                 request,
                 etaStage.etaContext(),
@@ -157,6 +181,9 @@ public final class DispatchV2Core {
                 routeCandidateStage,
                 routeProposalStage,
                 scenarioStage);
+        DecisionStageOutputV1 finalSelectionOutput = runDecisionSidecar(
+                resolvedDecisionBrain,
+                contextAssembler.finalSelectionInput(request, etaStage.etaContext(), selectorStage));
         DispatchExecutorStage executorStage = dispatchExecutorService.evaluate(
                 request,
                 pairClusterStage,
@@ -164,6 +191,9 @@ public final class DispatchV2Core {
                 routeCandidateStage,
                 routeProposalStage,
                 selectorStage);
+        DecisionStageOutputV1 executionOutput = runDecisionSidecar(
+                resolvedDecisionBrain,
+                contextAssembler.safetyExecuteInput(request, etaStage.etaContext(), executorStage));
         long totalDispatchLatencyMs = elapsedMs(dispatchStartedAt);
         List<DispatchStageLatency> stageLatencies = finalizeStageLatencies(
                 mergeStageLatencies(
@@ -273,6 +303,24 @@ public final class DispatchV2Core {
                         stageLatencies.stream().filter(DispatchStageLatency::hotStartReused).map(DispatchStageLatency::stageName).toList(),
                         reusePlan.degradeReasons()),
                 degradeReasons);
+        decisionStageLogger.writeFamily("decision_stage_join", request.traceId(), "final-selection", java.util.Map.of(
+                "requestedBrain", resolvedDecisionBrain.requestedType().name(),
+                "appliedBrain", resolvedDecisionBrain.appliedType().name(),
+                "selectedProposalIds", selectorStage.globalSelectionResult().selectedProposals().stream()
+                        .map(selectedProposal -> selectedProposal.proposalId())
+                        .toList(),
+                "brainSelectedIds", finalSelectionOutput == null ? List.of() : finalSelectionOutput.selectedIds()));
+        decisionStageLogger.writeFamily("dispatch_execution", request.traceId(), "dispatch-executor", executorStage.dispatchExecutionSummary());
+        decisionStageLogger.writeFamily("route_outcome_trace", request.traceId(), "dispatch-executor", java.util.Map.of(
+                "assignmentIds", executorStage.assignments().stream().map(assignment -> assignment.assignmentId()).toList(),
+                "selectedProposalIds", selectorStage.globalSelectionResult().selectedProposals().stream()
+                        .map(selectedProposal -> selectedProposal.proposalId())
+                        .toList(),
+                "executionBrainSelectedIds", executionOutput == null ? List.of() : executionOutput.selectedIds()));
+        decisionStageLogger.writeFamily("dispatch_outcome", request.traceId(), "dispatch-result", java.util.Map.of(
+                "traceId", request.traceId(),
+                "assignmentCount", executorStage.assignments().size(),
+                "degradeReasons", degradeReasons));
         return new DispatchPipelineExecution(
                 result,
                 reusePlan,
@@ -282,6 +330,25 @@ public final class DispatchV2Core {
                 routeCandidateStage,
                 routeProposalStage,
                 scenarioStage);
+    }
+
+    private DecisionStageOutputV1 runDecisionSidecar(ResolvedDecisionBrain resolvedDecisionBrain, DecisionStageInputV1 input) {
+        decisionStageLogger.writeFamily("decision_stage_input", input.traceId(), input.stageName().wireName(), input);
+        DecisionStageOutputV1 output = resolvedDecisionBrain.brain().evaluateStage(input);
+        decisionStageLogger.writeFamily("decision_stage_output", input.traceId(), input.stageName().wireName(), output);
+        decisionStageLogger.writeFamily("decision_usage", input.traceId(), input.stageName().wireName(), new DecisionUsageRecord(
+                "decision-usage/v1",
+                input.traceId(),
+                input.runId(),
+                input.tickId(),
+                input.stageName(),
+                resolvedDecisionBrain.requestedType(),
+                output.brainType(),
+                resolvedDecisionBrain.fallbackUsed() || output.meta().fallbackUsed(),
+                resolvedDecisionBrain.fallbackUsed() ? resolvedDecisionBrain.fallbackReason() : output.meta().fallbackReason(),
+                properties.getDecision().getLlm().getProvider(),
+                properties.getDecision().getLlm().getModel()));
+        return output;
     }
 
     private List<DispatchStageLatency> mergeStageLatencies(List<DispatchStageLatency>... stageLatencyLists) {

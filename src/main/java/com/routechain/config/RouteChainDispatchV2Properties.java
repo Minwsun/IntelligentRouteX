@@ -34,6 +34,7 @@ public class RouteChainDispatchV2Properties {
     private final Feedback feedback = new Feedback();
     private final WarmHotStart warmHotStart = new WarmHotStart();
     private final Performance performance = new Performance();
+    private final Decision decision = new Decision();
 
     public static RouteChainDispatchV2Properties defaults() {
         return new RouteChainDispatchV2Properties();
@@ -173,6 +174,10 @@ public class RouteChainDispatchV2Properties {
 
     public Performance getPerformance() {
         return performance;
+    }
+
+    public Decision getDecision() {
+        return decision;
     }
 
     public static final class Buffer {
@@ -1163,6 +1168,116 @@ public class RouteChainDispatchV2Properties {
             budgets.put("global-selector", Duration.ofMillis(180));
             budgets.put("dispatch-executor", Duration.ofMillis(40));
             return budgets;
+        }
+    }
+
+    public static final class Decision {
+        private String mode = "llm";
+        private boolean fallbackToLegacy = true;
+        private final Llm llm = new Llm();
+
+        public String getMode() {
+            return mode;
+        }
+
+        public void setMode(String mode) {
+            this.mode = mode;
+        }
+
+        public boolean isFallbackToLegacy() {
+            return fallbackToLegacy;
+        }
+
+        public void setFallbackToLegacy(boolean fallbackToLegacy) {
+            this.fallbackToLegacy = fallbackToLegacy;
+        }
+
+        public Llm getLlm() {
+            return llm;
+        }
+    }
+
+    public static final class Llm {
+        private String provider = "9router";
+        private String baseUrl = "http://127.0.0.1:20128/v1";
+        private String wireApi = "responses";
+        private String model = "gpt-5.4";
+        private String apiKeyEnv = "OPENAI_API_KEY";
+        private Duration timeoutMs = Duration.ofSeconds(45);
+        private int maxRetries = 2;
+        private boolean parallelToolCalls = false;
+        private boolean strictStructuredOutputs = true;
+
+        public String getProvider() {
+            return provider;
+        }
+
+        public void setProvider(String provider) {
+            this.provider = provider;
+        }
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public String getWireApi() {
+            return wireApi;
+        }
+
+        public void setWireApi(String wireApi) {
+            this.wireApi = wireApi;
+        }
+
+        public String getModel() {
+            return model;
+        }
+
+        public void setModel(String model) {
+            this.model = model;
+        }
+
+        public String getApiKeyEnv() {
+            return apiKeyEnv;
+        }
+
+        public void setApiKeyEnv(String apiKeyEnv) {
+            this.apiKeyEnv = apiKeyEnv;
+        }
+
+        public Duration getTimeoutMs() {
+            return timeoutMs;
+        }
+
+        public void setTimeoutMs(Duration timeoutMs) {
+            this.timeoutMs = timeoutMs;
+        }
+
+        public int getMaxRetries() {
+            return maxRetries;
+        }
+
+        public void setMaxRetries(int maxRetries) {
+            this.maxRetries = maxRetries;
+        }
+
+        public boolean isParallelToolCalls() {
+            return parallelToolCalls;
+        }
+
+        public void setParallelToolCalls(boolean parallelToolCalls) {
+            this.parallelToolCalls = parallelToolCalls;
+        }
+
+        public boolean isStrictStructuredOutputs() {
+            return strictStructuredOutputs;
+        }
+
+        public void setStrictStructuredOutputs(boolean strictStructuredOutputs) {
+            this.strictStructuredOutputs = strictStructuredOutputs;
         }
     }
 }

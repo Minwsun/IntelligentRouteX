@@ -12,6 +12,15 @@ import com.routechain.v2.context.EtaService;
 import com.routechain.v2.context.EtaUncertaintyEstimator;
 import com.routechain.v2.context.TrafficProfileService;
 import com.routechain.v2.context.WeatherContextService;
+import com.routechain.v2.decision.ContextAssembler;
+import com.routechain.v2.decision.ContextToolRegistry;
+import com.routechain.v2.decision.DecisionBrainResolver;
+import com.routechain.v2.decision.DecisionStageLogger;
+import com.routechain.v2.decision.LegacyMlBrain;
+import com.routechain.v2.decision.LlmBrain;
+import com.routechain.v2.decision.LlmStageScheduler;
+import com.routechain.v2.decision.NineRouterResponsesClient;
+import com.routechain.v2.decision.StudentBrain;
 import com.routechain.v2.feedback.DecisionLogAssembler;
 import com.routechain.v2.feedback.DecisionLogService;
 import com.routechain.v2.feedback.DecisionLogWriter;
@@ -47,6 +56,10 @@ import com.routechain.v2.route.RouteProposalEngine;
 import com.routechain.v2.route.RouteProposalPruner;
 import com.routechain.v2.route.RouteProposalValidator;
 import com.routechain.v2.route.RouteValueScorer;
+import com.routechain.v2.routing.BestPathRouter;
+import com.routechain.v2.routing.RoadGraphProvider;
+import com.routechain.v2.routing.RouteCostFunction;
+import com.routechain.v2.routing.RouteVectorEnricher;
 import com.routechain.v2.scenario.DispatchScenarioService;
 import com.routechain.v2.scenario.RobustUtilityAggregator;
 import com.routechain.v2.scenario.ScenarioEvaluator;
@@ -238,6 +251,11 @@ public final class TestDispatchV2Factory {
         RouteProposalValidator routeProposalValidator = configuration.routeProposalValidator();
         RouteValueScorer routeValueScorer = configuration.routeValueScorer(properties, tabularScoringClient);
         RouteProposalPruner routeProposalPruner = configuration.routeProposalPruner(properties);
+        DecisionStageLogger decisionStageLogger = configuration.decisionStageLogger(properties);
+        RoadGraphProvider roadGraphProvider = configuration.roadGraphProvider();
+        RouteCostFunction routeCostFunction = configuration.routeCostFunction();
+        BestPathRouter bestPathRouter = configuration.bestPathRouter(roadGraphProvider, routeCostFunction);
+        RouteVectorEnricher routeVectorEnricher = configuration.routeVectorEnricher(bestPathRouter, decisionStageLogger);
         DispatchRouteProposalService dispatchRouteProposalService = configuration.dispatchRouteProposalService(
                 properties,
                 routeProposalEngine,
@@ -245,7 +263,9 @@ public final class TestDispatchV2Factory {
                 routeValueScorer,
                 routeProposalPruner,
                 etaLegCacheFactory,
-                routeFinderClient);
+                routeFinderClient,
+                routeVectorEnricher,
+                decisionStageLogger);
         ScenarioGateEvaluator scenarioGateEvaluator = configuration.scenarioGateEvaluator(properties);
         ScenarioEvaluator scenarioEvaluator = configuration.scenarioEvaluator(properties);
         var demandShiftFeatureBuilder = configuration.demandShiftFeatureBuilder();
@@ -300,6 +320,14 @@ public final class TestDispatchV2Factory {
                 snapshotService,
                 reuseStateService,
                 hotStartManager);
+        ContextToolRegistry contextToolRegistry = configuration.contextToolRegistry();
+        ContextAssembler contextAssembler = configuration.contextAssembler(properties, contextToolRegistry);
+        LegacyMlBrain legacyMlBrain = configuration.legacyMlBrain();
+        StudentBrain studentBrain = configuration.studentBrain(legacyMlBrain);
+        NineRouterResponsesClient nineRouterResponsesClient = configuration.nineRouterResponsesClient(properties);
+        LlmStageScheduler llmStageScheduler = configuration.llmStageScheduler(nineRouterResponsesClient);
+        LlmBrain llmBrain = configuration.llmBrain(llmStageScheduler, legacyMlBrain, decisionStageLogger);
+        DecisionBrainResolver decisionBrainResolver = configuration.decisionBrainResolver(properties, legacyMlBrain, llmBrain, studentBrain);
         DispatchV2Core core = configuration.dispatchV2Core(
                 properties,
                 dispatchEtaContextService,
@@ -311,7 +339,10 @@ public final class TestDispatchV2Factory {
                 dispatchSelectorService,
                 dispatchExecutorService,
                 warmStartManager,
-                postDispatchHardeningService);
+                postDispatchHardeningService,
+                decisionBrainResolver,
+                contextAssembler,
+                decisionStageLogger);
         DispatchReplayLoader dispatchReplayLoader = configuration.dispatchReplayLoader(
                 dispatchReplayRecorder,
                 decisionLogService,

@@ -103,5 +103,16 @@ class RouteChainDispatchV2PropertiesTest {
         assertEquals(Duration.ofMillis(220), properties.getPerformance().getStageBudgets().get("scenario-evaluation"));
         assertEquals(Duration.ofMillis(180), properties.getPerformance().getStageBudgets().get("global-selector"));
         assertEquals(Duration.ofMillis(40), properties.getPerformance().getStageBudgets().get("dispatch-executor"));
+        assertEquals("llm", properties.getDecision().getMode());
+        assertTrue(properties.getDecision().isFallbackToLegacy());
+        assertEquals("9router", properties.getDecision().getLlm().getProvider());
+        assertEquals("http://127.0.0.1:20128/v1", properties.getDecision().getLlm().getBaseUrl());
+        assertEquals("responses", properties.getDecision().getLlm().getWireApi());
+        assertEquals("gpt-5.4", properties.getDecision().getLlm().getModel());
+        assertEquals("OPENAI_API_KEY", properties.getDecision().getLlm().getApiKeyEnv());
+        assertEquals(Duration.ofSeconds(45), properties.getDecision().getLlm().getTimeoutMs());
+        assertEquals(2, properties.getDecision().getLlm().getMaxRetries());
+        assertFalse(properties.getDecision().getLlm().isParallelToolCalls());
+        assertTrue(properties.getDecision().getLlm().isStrictStructuredOutputs());
     }
 }
