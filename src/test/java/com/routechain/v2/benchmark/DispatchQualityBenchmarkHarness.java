@@ -72,10 +72,10 @@ public final class DispatchQualityBenchmarkHarness {
                         ? deferredResult(request, baseline, "deferred-on-current-machine")
                         : runScenario(request, baseline))
                 .toList();
-        DispatchQualityComparisonReport comparisonReport = request.baselines().containsAll(List.of(
-                DispatchPerfBenchmarkHarness.BaselineId.A,
-                DispatchPerfBenchmarkHarness.BaselineId.B,
-                DispatchPerfBenchmarkHarness.BaselineId.C))
+        boolean hasFullV2Baseline = request.baselines().contains(DispatchPerfBenchmarkHarness.BaselineId.C);
+        boolean hasComparisonBaseline = request.baselines().contains(DispatchPerfBenchmarkHarness.BaselineId.A)
+                || request.baselines().contains(DispatchPerfBenchmarkHarness.BaselineId.B);
+        DispatchQualityComparisonReport comparisonReport = (hasFullV2Baseline && hasComparisonBaseline)
                 ? comparisonReport(request, results)
                 : null;
         return new DispatchQualityBenchmarkRun(results, comparisonReport);

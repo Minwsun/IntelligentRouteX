@@ -29,6 +29,7 @@ FIXED_TIMESTAMP = "2026-01-01T00:00:00Z"
 RUNTIME_CACHE: dict[str, Any] = {
     "fingerprint": None,
     "snapshot_dir": None,
+    "device": None,
     "pipeline": None,
 }
 
@@ -205,34 +206,62 @@ def _set_deterministic_seed() -> None:
         return
 
 
+def _cuda_available() -> bool:
+    try:
+        torch_module = importlib.import_module("torch")
+        return bool(hasattr(torch_module, "cuda") and torch_module.cuda.is_available())
+    except Exception:
+        return False
+
+
+def _configured_device() -> str:
+    return os.getenv("IRX_FORECAST_DEVICE", "auto").strip().lower() or "auto"
+
+
+def _device_metadata() -> tuple[str, bool, str]:
+    configured = _configured_device()
+    cuda_available = _cuda_available()
+    if configured not in {"auto", "cpu", "cuda"}:
+        return configured, cuda_available, "forecast-device-invalid"
+    if configured == "auto":
+        return ("cuda" if cuda_available else "cpu"), cuda_available, ""
+    if configured == "cuda" and not cuda_available:
+        return "cuda", False, "cuda-unavailable"
+    return configured, cuda_available, ""
+
+
 def _import_runtime_dependencies():
     chronos_module = importlib.import_module("chronos")
     pandas_module = importlib.import_module("pandas")
     return chronos_module, pandas_module
 
 
-def _load_pipeline_from_snapshot(snapshot_dir: Path):
+def _load_pipeline_from_snapshot(snapshot_dir: Path, runtime_device: str):
     _set_deterministic_seed()
     chronos_module, _pandas = _import_runtime_dependencies()
-    return chronos_module.Chronos2Pipeline.from_pretrained(str(snapshot_dir), device_map="cpu")
+    print(f"[ml-forecast-worker] loading Chronos pipeline device={runtime_device} cudaAvailable={_cuda_available()} snapshot={snapshot_dir}")
+    return chronos_module.Chronos2Pipeline.from_pretrained(str(snapshot_dir), device_map=runtime_device)
 
 
-def _ensure_loaded_pipeline(runtime_manifest: dict, artifact_path: Path, loaded_model_fingerprint: str):
+def _ensure_loaded_pipeline(runtime_manifest: dict, artifact_path: Path, loaded_model_fingerprint: str, runtime_device: str):
     snapshot_dir = _model_directory(artifact_path) / runtime_manifest.get("sourceSnapshotPath", SNAPSHOT_DIRECTORY_NAME)
     cached_fingerprint = RUNTIME_CACHE.get("fingerprint")
     cached_snapshot_dir = RUNTIME_CACHE.get("snapshot_dir")
+    cached_device = RUNTIME_CACHE.get("device")
     cached_pipeline = RUNTIME_CACHE.get("pipeline")
     if (
             cached_pipeline is not None
             and cached_fingerprint == loaded_model_fingerprint
             and cached_snapshot_dir == snapshot_dir
+            and cached_device == runtime_device
     ):
         return cached_pipeline
     if not snapshot_dir.exists():
         raise FileNotFoundError(f"Chronos snapshot directory not found: {snapshot_dir}")
-    pipeline = _load_pipeline_from_snapshot(snapshot_dir)
+    pipeline = _load_pipeline_from_snapshot(snapshot_dir, runtime_device)
     RUNTIME_CACHE["fingerprint"] = loaded_model_fingerprint
     RUNTIME_CACHE["snapshot_dir"] = snapshot_dir
+    RUNTIME_CACHE["device"] = runtime_device
     RUNTIME_CACHE["pipeline"] = pipeline
     return pipeline
 
@@ -407,7 +436,9 @@ def _version_payload(manifest_entry: dict | None,
                      artifact_path: Path | None = None,
                      loaded_from_local: bool = False,
                      materialization_mode: str = "",
-                     loaded_model_fingerprint: str = "") -> dict:
+                     loaded_model_fingerprint: str = "",
+                     device: str = "",
+                     cuda_available: bool = False) -> dict:
     if manifest_entry is None:
         return {
             "schemaVersion": "worker-version/v1",
@@ -421,6 +452,8 @@ def _version_payload(manifest_entry: dict | None,
             "localArtifactPath": "",
             "materializationMode": "",
             "loadedModelFingerprint": "",
+            "device": device,
+            "cudaAvailable": cuda_available,
         }
     return {
         "schemaVersion": "worker-version/v1",
@@ -434,12 +467,17 @@ def _version_payload(manifest_entry: dict | None,
         "localArtifactPath": str(artifact_path) if artifact_path is not None else "",
         "materializationMode": materialization_mode,
         "loadedModelFingerprint": loaded_model_fingerprint,
+        "device": device,
+        "cudaAvailable": cuda_available,
     }
 
 
 def _readiness() -> tuple[bool, str, dict | None, dict | None, dict]:
+    runtime_device, cuda_available, device_reason = _device_metadata()
     manifest_entry = _load_manifest_entry()
-    version_payload = _version_payload(manifest_entry)
+    version_payload = _version_payload(manifest_entry, device=runtime_device, cuda_available=cuda_available)
+    if device_reason:
+        return False, device_reason, manifest_entry, None, version_payload
     if manifest_entry is None:
         return False, "manifest-worker-missing", None, None, version_payload
     if manifest_entry.get("compatibility_contract_version") != ML_CONTRACT_VERSION:
@@ -466,6 +504,8 @@ def _readiness() -> tuple[bool, str, dict | None, dict | None, dict]:
                 loaded_from_local=False,
                 materialization_mode=materialization_mode,
                 loaded_model_fingerprint="",
+                device=runtime_device,
+                cuda_available=cuda_available,
             )
         metadata = _materialization_metadata(local_model_root)
         if metadata is None:
@@ -475,6 +515,8 @@ def _readiness() -> tuple[bool, str, dict | None, dict | None, dict]:
                 loaded_from_local=False,
                 materialization_mode=materialization_mode,
                 loaded_model_fingerprint="",
+                device=runtime_device,
+                cuda_available=cuda_available,
             )
         metadata_validation = _validate_materialization_metadata(metadata)
         if metadata_validation:
@@ -484,6 +526,8 @@ def _readiness() -> tuple[bool, str, dict | None, dict | None, dict]:
                 loaded_from_local=False,
                 materialization_mode=materialization_mode,
                 loaded_model_fingerprint="",
+                device=runtime_device,
+                cuda_available=cuda_available,
             )
         model_directory = _model_directory(artifact_path)
         if not model_directory.exists():
@@ -493,6 +537,8 @@ def _readiness() -> tuple[bool, str, dict | None, dict | None, dict]:
                 loaded_from_local=False,
                 materialization_mode=materialization_mode,
                 loaded_model_fingerprint="",
+                device=runtime_device,
+                cuda_available=cuda_available,
             )
         loaded_model_fingerprint = _loaded_model_fingerprint(model_directory)
         if not expected_fingerprint:
@@ -502,6 +548,8 @@ def _readiness() -> tuple[bool, str, dict | None, dict | None, dict]:
                 loaded_from_local=False,
                 materialization_mode=materialization_mode,
                 loaded_model_fingerprint=loaded_model_fingerprint,
+                device=runtime_device,
+                cuda_available=cuda_available,
             )
         if loaded_model_fingerprint != expected_fingerprint:
             return False, "loaded-model-fingerprint-mismatch", manifest_entry, None, _version_payload(
@@ -510,6 +558,8 @@ def _readiness() -> tuple[bool, str, dict | None, dict | None, dict]:
                 loaded_from_local=False,
                 materialization_mode=materialization_mode,
                 loaded_model_fingerprint=loaded_model_fingerprint,
+                device=runtime_device,
+                cuda_available=cuda_available,
             )
         if metadata.get("loadedModelFingerprint") != loaded_model_fingerprint:
             return False, "materialization-metadata-mismatch", manifest_entry, None, _version_payload(
@@ -518,6 +568,8 @@ def _readiness() -> tuple[bool, str, dict | None, dict | None, dict]:
                 loaded_from_local=False,
                 materialization_mode=materialization_mode,
                 loaded_model_fingerprint=loaded_model_fingerprint,
+                device=runtime_device,
+                cuda_available=cuda_available,
             )
         loaded_from_local = True
 
@@ -527,6 +579,8 @@ def _readiness() -> tuple[bool, str, dict | None, dict | None, dict]:
         loaded_from_local=loaded_from_local,
         materialization_mode=materialization_mode,
         loaded_model_fingerprint=loaded_model_fingerprint,
+        device=runtime_device,
+        cuda_available=cuda_available,
     )
     try:
         runtime_manifest = _runtime_manifest(artifact_path)
@@ -576,7 +630,7 @@ def _readiness() -> tuple[bool, str, dict | None, dict | None, dict]:
         return False, "model-version-mismatch", manifest_entry, runtime_manifest, version_payload
 
     try:
-        pipeline = _ensure_loaded_pipeline(runtime_manifest, artifact_path, loaded_model_fingerprint)
+        pipeline = _ensure_loaded_pipeline(runtime_manifest, artifact_path, loaded_model_fingerprint, runtime_device)
     except Exception:
         return False, "pipeline-load-failed", manifest_entry, runtime_manifest, version_payload
     try:
@@ -617,6 +671,7 @@ def _response(endpoint: str, payload: dict) -> dict:
             runtime_manifest,
             _artifact_path(manifest_entry),
             _version.get("loadedModelFingerprint", ""),
+            _version.get("device", ""),
         )
         response_payload = _forecast_payload(endpoint, _request_payload(payload), runtime_manifest, pipeline)
     except Exception:

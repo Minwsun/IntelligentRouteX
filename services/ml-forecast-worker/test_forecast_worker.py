@@ -67,12 +67,43 @@ RUNTIME_MANIFEST = {
 class ForecastWorkerReadyTest(unittest.TestCase):
     def setUp(self) -> None:
         self._original_manifest_path = forecast_app.MANIFEST_PATH
+        self._original_device = os.environ.get("IRX_FORECAST_DEVICE")
 
     def tearDown(self) -> None:
         forecast_app.MANIFEST_PATH = self._original_manifest_path
+        if self._original_device is None:
+            os.environ.pop("IRX_FORECAST_DEVICE", None)
+        else:
+            os.environ["IRX_FORECAST_DEVICE"] = self._original_device
         forecast_app.RUNTIME_CACHE["fingerprint"] = None
         forecast_app.RUNTIME_CACHE["snapshot_dir"] = None
+        forecast_app.RUNTIME_CACHE["device"] = None
         forecast_app.RUNTIME_CACHE["pipeline"] = None
+
+    def test_auto_device_uses_cuda_when_available(self) -> None:
+        with patch.dict(os.environ, {"IRX_FORECAST_DEVICE": "auto"}), patch.object(forecast_app, "_cuda_available", return_value=True):
+            device, cuda_available, reason = forecast_app._device_metadata()
+
+        self.assertEqual("cuda", device)
+        self.assertTrue(cuda_available)
+        self.assertEqual("", reason)
+
+    def test_auto_device_falls_back_to_cpu_without_cuda(self) -> None:
+        with patch.dict(os.environ, {"IRX_FORECAST_DEVICE": "auto"}), patch.object(forecast_app, "_cuda_available", return_value=False):
+            device, cuda_available, reason = forecast_app._device_metadata()
+
+        self.assertEqual("cpu", device)
+        self.assertFalse(cuda_available)
+        self.assertEqual("", reason)
+
+    def test_forced_cuda_without_gpu_fails_readiness(self) -> None:
+        with patch.dict(os.environ, {"IRX_FORECAST_DEVICE": "cuda"}), patch.object(forecast_app, "_cuda_available", return_value=False):
+            ready, reason, _manifest, _runtime_manifest, version_payload = forecast_app._readiness()
+
+        self.assertFalse(ready)
+        self.assertEqual("cuda-unavailable", reason)
+        self.assertEqual("cuda", version_payload["device"])
+        self.assertFalse(version_payload["cudaAvailable"])
 
     def test_missing_local_model_path_is_not_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -190,6 +221,27 @@ class ForecastWorkerReadyTest(unittest.TestCase):
             self.assertEqual(str(runtime_manifest_path), version_payload["localArtifactPath"])
             self.assertEqual("HF_SNAPSHOT_PROMOTION", version_payload["materializationMode"])
             self.assertEqual(fingerprint, version_payload["loadedModelFingerprint"])
+            expected_device = "cuda" if forecast_app._cuda_available() else "cpu"
+            self.assertEqual(expected_device, version_payload["device"])
+            self.assertEqual(forecast_app._cuda_available(), version_payload["cudaAvailable"])
+
+    def test_pipeline_cache_is_separated_by_device(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            _model_root, runtime_manifest_path, fingerprint = self._write_materialized_model(temp_root)
+            runtime_manifest = json.loads(runtime_manifest_path.read_text(encoding="utf-8"))
+            load_calls: list[str] = []
+
+            def fake_loader(snapshot_dir: Path, runtime_device: str):
+                load_calls.append(runtime_device)
+                return object()
+
+            with patch.object(forecast_app, "_load_pipeline_from_snapshot", side_effect=fake_loader):
+                forecast_app._ensure_loaded_pipeline(runtime_manifest, runtime_manifest_path, fingerprint, "cpu")
+                forecast_app._ensure_loaded_pipeline(runtime_manifest, runtime_manifest_path, fingerprint, "cpu")
+                forecast_app._ensure_loaded_pipeline(runtime_manifest, runtime_manifest_path, fingerprint, "cuda")
+
+            self.assertEqual(["cpu", "cuda"], load_calls)
 
     def _write_materialized_model(self, temp_root: Path) -> tuple[Path, Path, str]:
         model_root = temp_root / "services" / "models" / "materialized" / "chronos-2"

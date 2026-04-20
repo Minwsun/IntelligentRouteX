@@ -143,7 +143,7 @@ final class HttpForecastTestSupport {
     }
 
     static String versionBody(String modelVersion, String artifactDigest) {
-        return versionBody(modelVersion, artifactDigest, false, "", "", "");
+        return versionBody(modelVersion, artifactDigest, false, "", "", "", "cpu", false);
     }
 
     static String versionBody(String modelVersion,
@@ -152,6 +152,17 @@ final class HttpForecastTestSupport {
                               String localArtifactPath,
                               String materializationMode,
                               String loadedModelFingerprint) {
+        return versionBody(modelVersion, artifactDigest, loadedFromLocal, localArtifactPath, materializationMode, loadedModelFingerprint, "cpu", false);
+    }
+
+    static String versionBody(String modelVersion,
+                              String artifactDigest,
+                              boolean loadedFromLocal,
+                              String localArtifactPath,
+                              String materializationMode,
+                              String loadedModelFingerprint,
+                              String device,
+                              boolean cudaAvailable) {
         return """
                 {
                   "schemaVersion": "worker-version/v1",
@@ -164,7 +175,9 @@ final class HttpForecastTestSupport {
                   "loadedFromLocal": %s,
                   "localArtifactPath": "%s",
                   "materializationMode": "%s",
-                  "loadedModelFingerprint": "%s"
+                  "loadedModelFingerprint": "%s",
+                  "device": "%s",
+                  "cudaAvailable": %s
                 }
                 """.formatted(
                 modelVersion,
@@ -172,7 +185,9 @@ final class HttpForecastTestSupport {
                 Boolean.toString(loadedFromLocal),
                 localArtifactPath,
                 materializationMode,
-                loadedModelFingerprint);
+                loadedModelFingerprint,
+                device,
+                Boolean.toString(cudaAvailable));
     }
 
     static String readyBody(boolean ready, String reason) {

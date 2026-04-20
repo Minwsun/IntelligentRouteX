@@ -21,5 +21,9 @@ public record WorkerVersionResponse(
         @JsonProperty("materializationMode")
         String materializationMode,
         @JsonProperty("loadedModelFingerprint")
-        String loadedModelFingerprint) {
+        String loadedModelFingerprint,
+        @JsonProperty("device")
+        String device,
+        @JsonProperty("cudaAvailable")
+        Boolean cudaAvailable) {
 }

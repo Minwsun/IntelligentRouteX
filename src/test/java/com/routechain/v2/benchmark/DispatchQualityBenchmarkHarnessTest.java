@@ -40,6 +40,27 @@ class DispatchQualityBenchmarkHarnessTest {
     }
 
     @Test
+    void benchmarkRunEmitsComparisonReportForCompactGate0Baselines() {
+        DispatchQualityBenchmarkRun run = harness.benchmark(new DispatchQualityBenchmarkHarness.BenchmarkRequest(
+                List.of(
+                        DispatchPerfBenchmarkHarness.BaselineId.A,
+                        DispatchPerfBenchmarkHarness.BaselineId.C),
+                DispatchPerfBenchmarkHarness.WorkloadSize.S,
+                DispatchQualityBenchmarkHarness.ScenarioPack.NORMAL_CLEAR,
+                DispatchQualityBenchmarkHarness.ExecutionMode.CONTROLLED,
+                DispatchPerfBenchmarkHarness.DEFAULT_MACHINE_LABEL,
+                false,
+                false,
+                tempDir));
+
+        assertEquals(2, run.rawResults().size());
+        assertNotNull(run.comparisonReport());
+        assertEquals(List.of("A", "C"), run.comparisonReport().baselineResults().stream()
+                .map(DispatchQualityBenchmarkResult::baselineId)
+                .toList());
+    }
+
+    @Test
     void stableScenarioKeepsConflictFreeAssignmentsAndPopulatesMetrics() {
         DispatchQualityBenchmarkRun run = harness.benchmark(new DispatchQualityBenchmarkHarness.BenchmarkRequest(
                 List.of(

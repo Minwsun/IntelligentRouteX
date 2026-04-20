@@ -4,39 +4,36 @@
 
 - scope: `DISPATCH_V2_GATE0`
 - branch: `perf/dispatch-v2-gate0`
-- commit SHA: `b8a4087f08a055c7db0ad65e52a1162fd0ee661f`
-- profiles: `['dispatch-v2-lite', 'dispatch-v2-balanced']`
-- started at: `2026-04-19T21:20:19Z`
-- finished at: `2026-04-19T21:20:19Z`
+- commit SHA: `f690049c587dfb066220a95dd6675f7a08b97625`
+- profiles requested this run: `['dispatch-v2-balanced']`
+- profiles evaluated from artifacts: `['dispatch-v2-lite', 'dispatch-v2-balanced']`
+- started at: `2026-04-20T05:29:06Z`
+- finished at: `2026-04-20T05:31:54Z`
 - machine profile: `{"hostname": "DESKTOP-SEIH8FO", "platform": "Windows-11-10.0.26200-SP0", "pythonVersion": "3.13.11", "processor": "Intel64 Family 6 Model 158 Stepping 10, GenuineIntel", "machine": "AMD64"}`
 
 ## 2. Dry-run + targeted test status
 
-- `dry-run-phase3`: `passed`
-- `dry-run-release`: `passed`
-- `targeted-tests`: `passed`
-- `lite-perf`: `passed`
-- `lite-benchmark`: `passed`
 - `balanced-perf`: `passed`
 - `balanced-benchmark`: `passed`
 
 ## 3. Perf / latency summary
 
-- lite: no perf artifacts.
-- balanced: no perf artifacts.
+- lite: A/S/cold=615/615/615ms, C/S/hot=255/255/255ms
+- balanced: A/S/cold=584/584/584ms, C/S/hot=201/201/201ms
 
 ## 4. Quality summary by scenario and baseline
 
-- lite: no comparison artifacts.
-- balanced: no comparison artifacts.
+- lite: heavy-rain/S: +6/-1, normal-clear/S: +4/-4, traffic-shock/S: +9/-2
+- balanced: heavy-rain/S: +6/-1, normal-clear/S: +4/-4, traffic-shock/S: +9/-2
 
 ## 5. Fallback / execution validity summary
 
-- lite: no baseline artifacts.
-- balanced: no baseline artifacts.
+- Gate 0 benchmark verdict is based on compact `controlled` artifacts; local-real worker attachment and forecast GPU proof are validated separately.
+- lite: heavy-rain/A: selectedAssignmentCount=11, executedAssignmentCount=11, conflictFree=True, workerFallbackRate=0.0, liveSourceFallbackRate=1.0, workerAppliedSources=[]; heavy-rain/C: selectedAssignmentCount=11, executedAssignmentCount=11, conflictFree=True, workerFallbackRate=0.14285714285714285, liveSourceFallbackRate=0.5, workerAppliedSources=['chronos-2', 'greedrl-local', 'routefinder-local', 'tabular-test']; normal-clear/A: selectedAssignmentCount=2, executedAssignmentCount=2, conflictFree=True, workerFallbackRate=0.0, liveSourceFallbackRate=1.0, workerAppliedSources=[]; normal-clear/C: selectedAssignmentCount=2, executedAssignmentCount=2, conflictFree=True, workerFallbackRate=0.14285714285714285, liveSourceFallbackRate=1.0, workerAppliedSources=['chronos-2', 'greedrl-local', 'routefinder-local', 'tabular-test']; traffic-shock/A: selectedAssignmentCount=3, executedAssignmentCount=3, conflictFree=True, workerFallbackRate=0.0, liveSourceFallbackRate=1.0, workerAppliedSources=[]; traffic-shock/C: selectedAssignmentCount=4, executedAssignmentCount=4, conflictFree=True, workerFallbackRate=0.14285714285714285, liveSourceFallbackRate=0.5, workerAppliedSources=['chronos-2', 'greedrl-local', 'routefinder-local', 'tabular-test']
+- balanced: heavy-rain/A: selectedAssignmentCount=11, executedAssignmentCount=11, conflictFree=True, workerFallbackRate=0.0, liveSourceFallbackRate=1.0, workerAppliedSources=[]; heavy-rain/C: selectedAssignmentCount=11, executedAssignmentCount=11, conflictFree=True, workerFallbackRate=0.14285714285714285, liveSourceFallbackRate=0.5, workerAppliedSources=['chronos-2', 'greedrl-local', 'routefinder-local', 'tabular-test']; normal-clear/A: selectedAssignmentCount=2, executedAssignmentCount=2, conflictFree=True, workerFallbackRate=0.0, liveSourceFallbackRate=1.0, workerAppliedSources=[]; normal-clear/C: selectedAssignmentCount=2, executedAssignmentCount=2, conflictFree=True, workerFallbackRate=0.14285714285714285, liveSourceFallbackRate=1.0, workerAppliedSources=['chronos-2', 'greedrl-local', 'routefinder-local', 'tabular-test']; traffic-shock/A: selectedAssignmentCount=3, executedAssignmentCount=3, conflictFree=True, workerFallbackRate=0.0, liveSourceFallbackRate=1.0, workerAppliedSources=[]; traffic-shock/C: selectedAssignmentCount=4, executedAssignmentCount=4, conflictFree=True, workerFallbackRate=0.14285714285714285, liveSourceFallbackRate=0.5, workerAppliedSources=['chronos-2', 'greedrl-local', 'routefinder-local', 'tabular-test']
 
 ## 6. Verdict + next decision
 
-- verdict: `PASS_WITH_LIMITS`
-- known limits: `['Dry-run only; Gate 0 verdict is not a real benchmark conclusion.']`
-- next decision: Proceed to the next compact lane only if the verdict is PASS or PASS_WITH_LIMITS.
+- verdict: `FAIL`
+- known limits: `['heavy-rain/A liveSourceFallbackRate too high', 'normal-clear/A liveSourceFallbackRate too high', 'normal-clear/C liveSourceFallbackRate too high', 'traffic-shock/A liveSourceFallbackRate too high']`
+- next decision: Stop expansion and return to runtime/profile optimization before any new lane.

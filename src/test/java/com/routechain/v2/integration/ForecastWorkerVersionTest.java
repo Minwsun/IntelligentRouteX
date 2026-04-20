@@ -27,12 +27,16 @@ class ForecastWorkerVersionTest {
                         true,
                         LOCAL_ARTIFACT_PATH,
                         "HF_SNAPSHOT_PROMOTION",
-                        LOADED_MODEL_FINGERPRINT),
+                        LOADED_MODEL_FINGERPRINT,
+                        "cuda",
+                        true),
                 WorkerVersionResponse.class);
         assertTrue(Boolean.TRUE.equals(parsed.loadedFromLocal()));
         assertEquals(LOCAL_ARTIFACT_PATH, parsed.localArtifactPath());
         assertEquals("HF_SNAPSHOT_PROMOTION", parsed.materializationMode());
         assertEquals(LOADED_MODEL_FINGERPRINT, parsed.loadedModelFingerprint());
+        assertEquals("cuda", parsed.device());
+        assertTrue(Boolean.TRUE.equals(parsed.cudaAvailable()));
 
         HttpServer server = HttpForecastTestSupport.server(Map.of(
                 "/version", HttpForecastTestSupport.json(HttpForecastTestSupport.versionBody(
@@ -41,7 +45,9 @@ class ForecastWorkerVersionTest {
                         true,
                         LOCAL_ARTIFACT_PATH,
                         "HF_SNAPSHOT_PROMOTION",
-                        LOADED_MODEL_FINGERPRINT)),
+                        LOADED_MODEL_FINGERPRINT,
+                        "cuda",
+                        true)),
                 "/ready", HttpForecastTestSupport.json(HttpForecastTestSupport.readyBody(true, ""))));
         try {
             Path manifestPath = HttpForecastTestSupport.manifestV2(
@@ -74,7 +80,9 @@ class ForecastWorkerVersionTest {
                         true,
                         LOCAL_ARTIFACT_PATH,
                         "HF_SNAPSHOT_PROMOTION",
-                        LOADED_MODEL_FINGERPRINT)),
+                        LOADED_MODEL_FINGERPRINT,
+                        "cuda",
+                        true)),
                 "/ready", HttpForecastTestSupport.delayed(Duration.ofSeconds(1), HttpForecastTestSupport.readyBody(true, ""))));
         try {
             Path manifestPath = HttpForecastTestSupport.manifestV2(

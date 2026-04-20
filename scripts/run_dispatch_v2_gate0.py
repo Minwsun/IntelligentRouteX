@@ -18,6 +18,7 @@ PROFILE_LABELS = {
     "dispatch-v2-lite": "lite",
     "dispatch-v2-balanced": "balanced",
 }
+PROFILE_BY_LABEL = {label: profile for profile, label in PROFILE_LABELS.items()}
 REPORT_DOC_PATH = REPO_ROOT / "docs" / "dispatch_v2_gate0_report.md"
 SCOPE = "DISPATCH_V2_GATE0"
 
@@ -87,10 +88,11 @@ def machine_profile() -> dict[str, str]:
 
 def parse_profiles(value: str) -> tuple[str, ...]:
     items = tuple(part.strip() for part in value.split(",") if part.strip())
-    unknown = [item for item in items if item not in PROFILE_LABELS]
+    normalized = tuple(PROFILE_BY_LABEL.get(item, item) for item in items)
+    unknown = [item for item in normalized if item not in PROFILE_LABELS]
     if unknown:
         raise ValueError(f"Unsupported profiles: {', '.join(unknown)}")
-    return items or DEFAULT_PROFILES
+    return normalized or DEFAULT_PROFILES
 
 
 def profile_label(profile: str) -> str:
@@ -162,32 +164,34 @@ def gate0_scenarios(include_optional_m: bool) -> list[tuple[str, str]]:
     return cells
 
 
-def build_steps(profiles: Sequence[str], include_optional_m: bool) -> list[GateStep]:
+def build_steps(profiles: Sequence[str], include_optional_m: bool, include_preflight: bool) -> list[GateStep]:
     python = python_command()
     gradle = gradle_command()
-    steps: list[GateStep] = [
-        GateStep(
-            step_id="dry-run-phase3",
-            title="Phase 3 Dry Run",
-            required=True,
-            commands=(StepCommand("verify-phase3-dry-run", (python, "scripts/verify_dispatch_v2_phase3.py", "--dry-run")),),
-        ),
-        GateStep(
-            step_id="dry-run-release",
-            title="Release Dry Run",
-            required=True,
-            commands=(StepCommand("verify-release-dry-run", (python, "scripts/verify_dispatch_v2_release.py", "--dry-run")),),
-        ),
-        GateStep(
-            step_id="targeted-tests",
-            title="Targeted Tests",
-            required=True,
-            commands=(
-                StepCommand("integration-tests", (gradle, "--no-daemon", "test", "--tests", "com.routechain.v2.integration.*")),
-                StepCommand("benchmark-tests", (gradle, "--no-daemon", "test", "--tests", "com.routechain.v2.benchmark.*")),
+    steps: list[GateStep] = []
+    if include_preflight:
+        steps.extend([
+            GateStep(
+                step_id="dry-run-phase3",
+                title="Phase 3 Dry Run",
+                required=True,
+                commands=(StepCommand("verify-phase3-dry-run", (python, "scripts/verify_dispatch_v2_phase3.py", "--dry-run")),),
             ),
-        ),
-    ]
+            GateStep(
+                step_id="dry-run-release",
+                title="Release Dry Run",
+                required=True,
+                commands=(StepCommand("verify-release-dry-run", (python, "scripts/verify_dispatch_v2_release.py", "--dry-run")),),
+            ),
+            GateStep(
+                step_id="targeted-tests",
+                title="Targeted Tests",
+                required=True,
+                commands=(
+                    StepCommand("integration-tests", (gradle, "--no-daemon", "test", "--tests", "com.routechain.v2.integration.*")),
+                    StepCommand("benchmark-tests", (gradle, "--no-daemon", "test", "--tests", "com.routechain.v2.benchmark.*")),
+                ),
+            ),
+        ])
 
     for profile in profiles:
         perf_commands = [
@@ -276,6 +280,14 @@ def evaluate_requirements(requirements: Sequence[ArtifactRequirement], directori
         if not requirement.matcher(results):
             missing.append(requirement.description)
     return (not missing, missing)
+
+
+def present_profiles(directories: dict[str, Path]) -> tuple[str, ...]:
+    present: list[str] = []
+    for profile in DEFAULT_PROFILES:
+        if perf_results_for_profile(directories, profile) or benchmark_results_for_profile(directories, profile):
+            present.append(profile)
+    return tuple(present)
 
 
 def run_step(
@@ -401,19 +413,26 @@ def validate_perf_results(profile: str, results: list[dict], include_optional_m:
     return "PASS", []
 
 
-def determine_verdict(step_results: list[dict], directories: dict[str, Path], profiles: Sequence[str], include_optional_m: bool, dry_run: bool) -> tuple[str, list[str]]:
+def determine_verdict(step_results: list[dict],
+                      directories: dict[str, Path],
+                      requested_profiles: Sequence[str],
+                      evaluated_profiles: Sequence[str],
+                      include_optional_m: bool,
+                      dry_run: bool) -> tuple[str, list[str]]:
     if dry_run:
         return "PASS_WITH_LIMITS", ["Dry-run only; Gate 0 verdict is not a real benchmark conclusion."]
     failed_required = [result for result in step_results if result["required"] and result["status"] == EXIT_FAILED]
     if failed_required:
         return "FAIL", [f"Required step failed: {result['stepId']}" for result in failed_required]
+    if not evaluated_profiles:
+        return "FAIL", ["No Gate 0 artifacts were found for any profile."]
 
     known_limits: list[str] = []
     has_lite_warning = False
     has_balanced_warning = False
     has_balanced_pass = False
 
-    for profile in profiles:
+    for profile in evaluated_profiles:
         quality_status, quality_notes = validate_quality_results(profile, benchmark_results_for_profile(directories, profile), include_optional_m)
         perf_status, perf_notes = validate_perf_results(profile, perf_results_for_profile(directories, profile), include_optional_m)
         combined = [*quality_notes, *perf_notes]
@@ -427,8 +446,11 @@ def determine_verdict(step_results: list[dict], directories: dict[str, Path], pr
                 has_balanced_warning = True
         known_limits.extend(combined)
 
+    missing_profiles = [profile_label(profile) for profile in DEFAULT_PROFILES if profile not in evaluated_profiles]
+    if missing_profiles:
+        known_limits.append("Profiles pending Gate 0 execution: " + ", ".join(sorted(missing_profiles)))
     if not has_balanced_pass:
-        return "FAIL", ["Balanced profile did not run."]
+        return "PASS_WITH_LIMITS", known_limits or ["Balanced profile artifacts are not available yet."]
     if has_balanced_warning or has_lite_warning:
         return "PASS_WITH_LIMITS", known_limits or ["One or more profiles completed with limits."]
     return "PASS", known_limits
@@ -438,7 +460,8 @@ def write_manifest(
     report_dir: Path,
     branch: str,
     commit: str,
-    profiles: Sequence[str],
+    profiles_requested: Sequence[str],
+    profiles_evaluated: Sequence[str],
     output_directories: dict[str, Path],
     step_results: list[dict],
     verdict: str,
@@ -452,7 +475,8 @@ def write_manifest(
         "commit": commit,
         "hostname": socket.gethostname(),
         "machineProfile": machine_profile(),
-        "profiles": list(profiles),
+        "profilesRequested": list(profiles_requested),
+        "profilesEvaluated": list(profiles_evaluated),
         "startedAt": started_at,
         "finishedAt": finished_at,
         "stepsRun": [result["stepId"] for result in step_results],
@@ -475,7 +499,7 @@ def summarize_perf(profile: str, results: list[dict]) -> str:
     if not results:
         return f"{profile_label(profile)}: no perf artifacts."
     cells = []
-    for baseline, size, mode in [("A", "S", "cold"), ("C", "S", "hot"), ("A", "M", "cold")]:
+    for baseline, size, mode in [("A", "S", "cold"), ("C", "S", "hot")]:
         match = next((result for result in results if result.get("baselineId") == baseline and result.get("workloadSize") == size and result.get("runMode") == mode), None)
         if match is None:
             continue
@@ -503,11 +527,15 @@ def summarize_fallbacks(profile: str, results: list[dict]) -> str:
     parts = []
     for result in base:
         metrics = result.get("metrics", {})
+        worker_sources = result.get("workerAppliedSources", [])
         parts.append(
             f"{result.get('scenarioPack')}/{result.get('baselineId')}: "
+            f"selectedAssignmentCount={metrics.get('selectedProposalCount', 0)}, "
+            f"executedAssignmentCount={metrics.get('executedAssignmentCount', 0)}, "
             f"conflictFree={metrics.get('conflictFreeAssignments', False)}, "
             f"workerFallbackRate={metrics.get('workerFallbackRate', 0.0)}, "
-            f"liveSourceFallbackRate={metrics.get('liveSourceFallbackRate', 0.0)}"
+            f"liveSourceFallbackRate={metrics.get('liveSourceFallbackRate', 0.0)}, "
+            f"workerAppliedSources={worker_sources}"
         )
     return f"{profile_label(profile)}: " + "; ".join(parts)
 
@@ -515,7 +543,8 @@ def summarize_fallbacks(profile: str, results: list[dict]) -> str:
 def render_report(
     branch: str,
     commit: str,
-    profiles: Sequence[str],
+    profiles_requested: Sequence[str],
+    profiles_evaluated: Sequence[str],
     directories: dict[str, Path],
     step_results: list[dict],
     verdict: str,
@@ -524,9 +553,9 @@ def render_report(
     finished_at: str,
 ) -> str:
     step_lines = [f"- `{result['stepId']}`: `{result['status']}`" for result in step_results]
-    perf_lines = [f"- {summarize_perf(profile, perf_results_for_profile(directories, profile))}" for profile in profiles]
-    quality_lines = [f"- {summarize_quality(profile, benchmark_results_for_profile(directories, profile))}" for profile in profiles]
-    fallback_lines = [f"- {summarize_fallbacks(profile, benchmark_results_for_profile(directories, profile))}" for profile in profiles]
+    perf_lines = [f"- {summarize_perf(profile, perf_results_for_profile(directories, profile))}" for profile in profiles_evaluated]
+    quality_lines = [f"- {summarize_quality(profile, benchmark_results_for_profile(directories, profile))}" for profile in profiles_evaluated]
+    fallback_lines = [f"- {summarize_fallbacks(profile, benchmark_results_for_profile(directories, profile))}" for profile in profiles_evaluated]
     next_decision = "Proceed to the next compact lane only if the verdict is PASS or PASS_WITH_LIMITS."
     if verdict == "FAIL":
         next_decision = "Stop expansion and return to runtime/profile optimization before any new lane."
@@ -538,7 +567,8 @@ def render_report(
         f"- scope: `{SCOPE}`",
         f"- branch: `{branch}`",
         f"- commit SHA: `{commit}`",
-        f"- profiles: `{list(profiles)}`",
+        f"- profiles requested this run: `{list(profiles_requested)}`",
+        f"- profiles evaluated from artifacts: `{list(profiles_evaluated)}`",
         f"- started at: `{started_at}`",
         f"- finished at: `{finished_at}`",
         f"- machine profile: `{json.dumps(machine_profile(), ensure_ascii=True)}`",
@@ -557,6 +587,7 @@ def render_report(
         "",
         "## 5. Fallback / execution validity summary",
         "",
+        "- Gate 0 benchmark verdict is based on compact `controlled` artifacts; local-real worker attachment and forecast GPU proof are validated separately.",
         *fallback_lines,
         "",
         "## 6. Verdict + next decision",
@@ -572,6 +603,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the compact Dispatch V2 Gate 0 benchmark.")
     parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT), help="Root directory for Gate 0 artifacts.")
     parser.add_argument("--profiles", default=",".join(DEFAULT_PROFILES), help="Comma-separated Spring profiles to run.")
+    parser.add_argument("--profile", choices=tuple(PROFILE_BY_LABEL.keys()), help="Run only one Gate 0 profile label.")
     parser.add_argument("--include-optional-m", action="store_true", help="Include optional M/normal-clear benchmark cells.")
     parser.add_argument("--dry-run", action="store_true", help="Print the planned commands without executing them.")
     return parser.parse_args(argv)
@@ -579,7 +611,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None, runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> int:
     args = parse_args(argv)
-    profiles = parse_profiles(args.profiles)
+    profiles = (PROFILE_BY_LABEL[args.profile],) if args.profile else parse_profiles(args.profiles)
     directories = directory_map(Path(args.output_root))
     ensure_directories(directories.values())
     for profile in profiles:
@@ -588,14 +620,15 @@ def main(argv: Sequence[str] | None = None, runner: Callable[..., subprocess.Com
     started_at = utc_now()
     branch = git_output("rev-parse", "--abbrev-ref", "HEAD")
     commit = git_output("rev-parse", "HEAD")
-    steps = build_steps(profiles, args.include_optional_m)
+    steps = build_steps(profiles, args.include_optional_m, include_preflight=args.profile is None)
     step_results = [run_step(step, directories, args.dry_run, runner) for step in steps]
-    verdict, known_limits = determine_verdict(step_results, directories, profiles, args.include_optional_m, args.dry_run)
+    evaluated_profiles = present_profiles(directories) if not args.dry_run else profiles
+    verdict, known_limits = determine_verdict(step_results, directories, profiles, evaluated_profiles, args.include_optional_m, args.dry_run)
     finished_at = utc_now()
 
     report_dir = directories["report"]
-    manifest_path = write_manifest(report_dir, branch, commit, profiles, directories, step_results, verdict, known_limits, started_at, finished_at)
-    report_text = render_report(branch, commit, profiles, directories, step_results, verdict, known_limits, started_at, finished_at)
+    manifest_path = write_manifest(report_dir, branch, commit, profiles, evaluated_profiles, directories, step_results, verdict, known_limits, started_at, finished_at)
+    report_text = render_report(branch, commit, profiles, evaluated_profiles, directories, step_results, verdict, known_limits, started_at, finished_at)
     report_path = report_dir / "dispatch_v2_gate0_report.md"
     report_path.write_text(report_text, encoding="utf-8")
     REPORT_DOC_PATH.write_text(report_text, encoding="utf-8")

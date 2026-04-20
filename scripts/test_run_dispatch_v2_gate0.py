@@ -17,6 +17,12 @@ class RunDispatchGate0Test(unittest.TestCase):
         with self.assertRaises(ValueError):
             gate0_runner.parse_profiles("dispatch-v2-lite,unknown-profile")
 
+    def test_parse_profiles_accepts_label_aliases(self) -> None:
+        self.assertEqual(
+            ("dispatch-v2-lite", "dispatch-v2-balanced"),
+            gate0_runner.parse_profiles("lite,balanced"),
+        )
+
     def test_dry_run_creates_report_manifest_and_profile_directories(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_root = Path(temp_dir) / "gate0-root"
@@ -40,6 +46,7 @@ class RunDispatchGate0Test(unittest.TestCase):
             self.assertEqual("PASS_WITH_LIMITS", manifest["verdict"])
             self.assertIn("stepsRun", manifest)
             self.assertIn("artifactRoots", manifest)
+            self.assertEqual(["dispatch-v2-lite", "dispatch-v2-balanced"], manifest["profilesRequested"])
 
     def test_required_step_failure_returns_fail(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -247,6 +254,78 @@ class RunDispatchGate0Test(unittest.TestCase):
             manifest = json.loads((output_root / "report" / "run_manifest.json").read_text(encoding="utf-8"))
             self.assertEqual("PASS_WITH_LIMITS", manifest["verdict"])
             self.assertTrue(any("lite" in item for item in manifest["knownLimits"]))
+
+    def test_single_profile_run_skips_preflight_and_reports_pending_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_root = Path(temp_dir) / "gate0-root"
+            original_doc_path = gate0_runner.REPORT_DOC_PATH
+            gate0_runner.REPORT_DOC_PATH = output_root / "repo-report.md"
+            seen_commands: list[str] = []
+
+            def fake_runner(command, cwd=None, text=None, check=None, env=None):
+                command_text = " ".join(command)
+                seen_commands.append(command_text)
+                if "run_dispatch_v2_perf.py" in command_text:
+                    baseline = command[command.index("--baseline") + 1]
+                    size = command[command.index("--size") + 1]
+                    mode = command[command.index("--mode") + 1]
+                    output_dir = Path(command[command.index("--output-dir") + 1])
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    payload = {
+                        "schemaVersion": "dispatch-perf-benchmark-result/v1",
+                        "baselineId": baseline,
+                        "workloadSize": size,
+                        "runMode": mode,
+                        "totalLatencyStats": {"p50Ms": 10, "p95Ms": 12, "p99Ms": 14},
+                        "budgetBreachRate": 0.0,
+                        "deferred": False,
+                    }
+                    (output_dir / f"dispatch-perf-{baseline.lower()}-{size.lower()}-{mode}.json").write_text(json.dumps(payload), encoding="utf-8")
+                elif "run_dispatch_v2_benchmark.py" in command_text:
+                    size = command[command.index("--size") + 1]
+                    scenario_pack = command[command.index("--scenario-pack") + 1]
+                    output_dir = Path(command[command.index("--output-dir") + 1])
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    comparison = {
+                        "scenarioPack": scenario_pack,
+                        "workloadSize": size,
+                        "executionMode": "controlled",
+                        "baselineResults": [{"baselineId": "A"}, {"baselineId": "C"}],
+                        "fullV2Advantages": ["pickupEta"],
+                        "fullV2Regressions": [],
+                    }
+                    baseline = {
+                        "scenarioPack": scenario_pack,
+                        "workloadSize": size,
+                        "executionMode": "controlled",
+                        "workerAppliedSources": [],
+                        "metrics": {
+                            "selectedProposalCount": 3,
+                            "executedAssignmentCount": 3,
+                            "conflictFreeAssignments": True,
+                            "workerFallbackRate": 0.0,
+                            "liveSourceFallbackRate": 0.0,
+                        },
+                    }
+                    for baseline_id in ("A", "C"):
+                        payload = dict(baseline, baselineId=baseline_id)
+                        (output_dir / f"dispatch-quality-{scenario_pack}-{size.lower()}-{baseline_id.lower()}.json").write_text(json.dumps(payload), encoding="utf-8")
+                    (output_dir / f"dispatch-quality-{scenario_pack}-{size.lower()}-compare.json").write_text(json.dumps(comparison), encoding="utf-8")
+                return type("Completed", (), {"returncode": 0})()
+
+            try:
+                exit_code = gate0_runner.main(["--profile", "lite", "--output-root", str(output_root)], runner=fake_runner)
+            finally:
+                gate0_runner.REPORT_DOC_PATH = original_doc_path
+
+            self.assertEqual(0, exit_code)
+            self.assertFalse(any("verify_dispatch_v2_phase3.py" in command for command in seen_commands))
+            self.assertFalse(any("verify_dispatch_v2_release.py" in command for command in seen_commands))
+            manifest = json.loads((output_root / "report" / "run_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(["dispatch-v2-lite"], manifest["profilesRequested"])
+            self.assertEqual(["dispatch-v2-lite"], manifest["profilesEvaluated"])
+            self.assertEqual("PASS_WITH_LIMITS", manifest["verdict"])
+            self.assertTrue(any("balanced" in item for item in manifest["knownLimits"]))
 
 
 if __name__ == "__main__":
